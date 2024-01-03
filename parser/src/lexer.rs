@@ -46,6 +46,7 @@ pub enum Token<'a> {
     Ne,
     Or,
     QuestionMark,
+    EOF,
 }
 
 #[derive(Debug)]
