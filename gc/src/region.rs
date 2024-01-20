@@ -8,7 +8,7 @@ pub struct RegionValuePointer {
     object_id: u16,
 }
 
-struct GcRegion {
+pub struct GcRegion {
     size: usize,
     region_id: RegionId,
     base_address: *mut GcRegionHeader,

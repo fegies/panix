@@ -1,19 +1,29 @@
 mod heap;
 pub mod loh;
 mod region;
+mod rootset;
 
 use std::{marker::PhantomData, num::NonZeroI16};
 
 use region::*;
 
-#[derive(Clone, Copy)]
+#[derive(Copy)]
 pub struct GcPointer<TData: Trace> {
     ptr: RawGcPointer,
     data: PhantomData<TData>,
 }
 
+impl<T: Trace> Clone for GcPointer<T> {
+    fn clone(&self) -> Self {
+        Self {
+            ptr: self.ptr.clone(),
+            data: PhantomData,
+        }
+    }
+}
+
 impl<TData: Trace> GcPointer<TData> {
-    pub fn to_raw(self) -> RawGcPointer {
+    pub fn as_raw(&self) -> RawGcPointer {
         self.ptr
     }
 }
@@ -57,9 +67,6 @@ impl MemoryManager {
         data_ptr: &mut GcPointer<impl Trace>,
     ) {
     }
-
-    /// mark the given object as alive
-    fn mark(&self, ptr: GcPointer<impl Trace>) {}
 }
 
 pub fn init() {

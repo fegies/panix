@@ -2,7 +2,7 @@ use std::{cell::UnsafeCell, mem::MaybeUninit};
 
 use memmap2::{MmapMut, MmapOptions};
 
-use crate::RawGcPointer;
+use crate::{region::GcRegion, RawGcPointer};
 
 // 2 MB pages
 const PAGE_BITS: u8 = 21;
@@ -16,12 +16,7 @@ pub struct Heap {
 struct PageInfo {
     base: *mut u8,
     generation: u8,
-    status: PageStatus,
-}
-
-enum PageStatus {
-    Free,
-    Allocated,
+    status: Vec<GcRegion>,
 }
 
 static mut HEAP: MaybeUninit<Heap> = MaybeUninit::uninit();
@@ -32,7 +27,10 @@ impl Heap {
 
         let map = alloc_map(heap_size, true);
 
-        Self { map }
+        Self {
+            map,
+            pages: Vec::new(),
+        }
     }
 
     pub fn base_address(&self) -> *mut u8 {
@@ -42,8 +40,6 @@ impl Heap {
     pub fn size(&self) -> usize {
         self.map.len()
     }
-
-    pub fn get_pageinfo(&self, ptr: RawGcPointer) -> &PageStatus {}
 }
 
 fn alloc_map(heap_size: usize, map_huge: bool) -> MmapMut {
