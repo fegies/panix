@@ -8,9 +8,11 @@ members = [
     "panix",
     "identpool",
     "gc",
+    "lexer_impedance_matcher",
 ]
 
 [workspace.dependencies]
 parser = {path = "./parser"}
 identpool = {path = "./identpool"}
 gc = {path = "./gc"}
+lexer_impedance_matcher = {path = "./lexer_impedance_matcher"}

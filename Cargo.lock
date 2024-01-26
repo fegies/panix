@@ -129,6 +129,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lexer_impedance_matcher"
+version = "0.1.0"
+
+[[package]]
 name = "libc"
 version = "0.2.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -179,6 +183,7 @@ name = "parser"
 version = "0.1.0"
 dependencies = [
  "arcstr",
+ "lexer_impedance_matcher",
  "memchr",
  "nom",
 ]

@@ -1,8 +1,9 @@
 use std::str::Utf8Error;
 
+use lexer_impedance_matcher::ImpedanceMatcher;
 use memchr::memmem;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Token<'a> {
     Ident(&'a str),
     At,
@@ -63,9 +64,9 @@ enum BraceStackEntry {
     Interpolation,
 }
 
-struct Lexer<'a> {
-    input: &'a [u8],
-    output: Vec<Token<'a>>,
+struct Lexer<'input, 'matcher> {
+    input: &'input [u8],
+    matcher: &'matcher ImpedanceMatcher<Token<'input>>,
     brace_stack: Vec<BraceStackEntry>,
 }
 
@@ -87,21 +88,20 @@ macro_rules! ident_pat {
     }
 }
 
-impl<'a> Lexer<'a> {
-    fn run(mut self) -> Result<Vec<Token<'a>>, LexError> {
-        self.lex_normal()?;
-        Ok(self.output)
+impl<'a> Lexer<'a, '_> {
+    async fn run(mut self) -> Result<(), LexError> {
+        self.lex_normal().await
     }
 
-    fn push(&mut self, token: Token<'a>) {
+    async fn push(&mut self, token: Token<'a>) {
         println!("{token:?}");
-        self.output.push(token);
+        self.matcher.push(token).await
     }
 
-    fn lex_normal(&mut self) -> Result<(), LexError> {
+    async fn lex_normal(&mut self) -> Result<(), LexError> {
         macro_rules! single {
             ($token: expr) => {{
-                self.push($token);
+                self.push($token).await;
                 self.input = &self.input[1..];
             }};
         }
@@ -138,6 +138,7 @@ impl<'a> Lexer<'a> {
                     match top {
                         BraceStackEntry::Interpolation => {
                             self.input = &self.input[1..];
+                            self.push(Token::EndInterpol);
                             return Ok(());
                         }
                         BraceStackEntry::Normal => {
@@ -169,7 +170,7 @@ impl<'a> Lexer<'a> {
                         self.push(Token::TripleDot);
                         self.input = &self.input[3..];
                     } else if Some(&b'/') == self.input.get(1) {
-                        self.lex_path()?;
+                        self.lex_path().await?;
                     } else {
                         single!(Token::Dot)
                     }
@@ -184,7 +185,7 @@ impl<'a> Lexer<'a> {
                             // we have to skip a multiline comment
                             todo!()
                         }
-                        Some(c) if is_pathchar(c) => self.lex_path()?,
+                        Some(c) if is_pathchar(c) => self.lex_path().await?,
                         _ => single!(Token::Slash),
                     }
                 }
@@ -255,7 +256,7 @@ impl<'a> Lexer<'a> {
         Self::convert_str(self.consume(length))
     }
 
-    fn lex_path(&mut self) -> Result<(), LexError> {
+    async fn lex_path(&mut self) -> Result<(), LexError> {
         self.push(Token::PathBegin);
         'outer: loop {
             let mut end_idx = None;
@@ -266,7 +267,7 @@ impl<'a> Lexer<'a> {
                         let str = self.consume_as_str(idx)?;
                         self.input = &self.input[2..];
                         self.push(Token::StringContent(str));
-                        self.lex_interpolation()?;
+                        self.lex_interpolation().await?;
                         continue 'outer;
                     }
                     _ => {
@@ -291,12 +292,10 @@ impl<'a> Lexer<'a> {
         Ok(())
     }
 
-    fn lex_interpolation(&mut self) -> Result<(), LexError> {
+    async fn lex_interpolation(&mut self) -> Result<(), LexError> {
         self.push(Token::BeginInterpol);
-        self.brace_stack.push(BraceStackEntry::Interpolation);
         // interpolation counts as an opening brace
-        self.lex_normal()?;
-        self.push(Token::EndInterpol);
+        self.brace_stack.push(BraceStackEntry::Interpolation);
         Ok(())
     }
 
@@ -362,10 +361,13 @@ impl<'a> Lexer<'a> {
 }
 
 pub fn lex_input(input: &[u8]) -> Result<Vec<Token>, LexError> {
-    Lexer {
+    let adapter = ImpedanceMatcher::new();
+    let future = Lexer {
         input,
-        output: Vec::new(),
+        matcher: &adapter,
         brace_stack: Vec::new(),
     }
-    .run()
+    .run();
+    let vec: Vec<_> = adapter.run(future, |iter| iter.collect());
+    Ok(vec)
 }
