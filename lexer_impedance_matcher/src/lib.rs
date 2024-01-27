@@ -47,44 +47,51 @@ impl<T> ImpedanceMatcher<T> {
         self.data.read()
     }
 
-    pub fn run<TFut, TRes, FRes>(&self, generator: TFut, consumer: FRes) -> TRes
+    pub fn run<TFut, TFutRes, TRes, FRes>(
+        &self,
+        generator: TFut,
+        consumer: FRes,
+    ) -> (Option<TFutRes>, TRes)
     where
-        FRes: for<'a> FnOnce(IteratorAdapter<'a, T, TFut>) -> TRes,
+        FRes: FnOnce(IteratorAdapter<'_, '_, T, TFut, TFutRes>) -> TRes,
+        TFut: Future<Output = TFutRes>,
     {
         // infra
         let waker = build_dummy_waker();
         let context = Context::from_waker(&waker);
 
         let future = pin!(generator);
+        let mut generator_result = None;
         let iter = IteratorAdapter {
             context,
             matcher: &self,
+            future_output: &mut generator_result,
             future,
-            completed: false,
         };
-        consumer(iter)
+        let result = consumer(iter);
+        (generator_result, result)
     }
 }
 
-pub struct IteratorAdapter<'a, T, F> {
+pub struct IteratorAdapter<'a, 'fut_out, T, F, TFRes> {
     matcher: &'a ImpedanceMatcher<T>,
     future: Pin<&'a mut F>,
+    future_output: &'fut_out mut Option<TFRes>,
     context: Context<'a>,
-    completed: bool,
 }
 
-impl<T, F> Iterator for IteratorAdapter<'_, T, F>
+impl<T, F, TFRes> Iterator for IteratorAdapter<'_, '_, T, F, TFRes>
 where
-    F: Future,
+    F: Future<Output = TFRes>,
 {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.matcher.next().or_else(|| {
-            if !self.completed {
+            if self.future_output.is_none() {
                 let pinned = pin!(&mut self.future);
-                if let Poll::Ready(_) = pinned.poll(&mut self.context) {
-                    self.completed = true;
+                if let Poll::Ready(v) = pinned.poll(&mut self.context) {
+                    *self.future_output = Some(v);
                 }
             }
             self.matcher.next()
@@ -118,7 +125,7 @@ fn run_full_test() {
     }
 
     let matcher = ImpedanceMatcher::new();
-    let res = matcher.run(generate_outputs(&matcher), |iter| {
+    let (gen_out, res) = matcher.run(generate_outputs(&matcher), |iter| {
         let mut res = Vec::new();
         for item in iter {
             println!("received {item}");
@@ -126,6 +133,7 @@ fn run_full_test() {
         }
         res
     });
+    assert!(gen_out.is_some());
 
     assert_eq!([0, 1, 2].as_ref(), &res);
 }
