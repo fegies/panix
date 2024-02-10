@@ -4,6 +4,7 @@ resolver = "2"
 default-run = "panix"
 
 members = [
+    "lexer",
     "parser",
     "panix",
     "identpool",
@@ -14,5 +15,7 @@ members = [
 [workspace.dependencies]
 parser = {path = "./parser"}
 identpool = {path = "./identpool"}
+lexer = {path = "./lexer" }
 gc = {path = "./gc"}
 lexer_impedance_matcher = {path = "./lexer_impedance_matcher"}
+memchr = "2.6.4"

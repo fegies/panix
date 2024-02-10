@@ -1,3 +1,5 @@
+#![cfg_attr(not(test), no_std)]
+
 mod buffer;
 
 use core::{
@@ -47,20 +49,20 @@ impl<T> ImpedanceMatcher<T> {
         self.data.read()
     }
 
-    pub fn run<TFut, TFutRes, TRes, FRes>(
+    pub fn run<TFutRes, TRes, FRes>(
         &self,
-        generator: TFut,
+        generator: impl Future<Output = TFutRes>,
         consumer: FRes,
     ) -> (Option<TFutRes>, TRes)
     where
-        FRes: FnOnce(IteratorAdapter<'_, '_, T, TFut, TFutRes>) -> TRes,
-        TFut: Future<Output = TFutRes>,
+        FRes: FnOnce(IteratorAdapter<'_, '_, T, TFutRes>) -> TRes,
     {
         // infra
         let waker = build_dummy_waker();
         let context = Context::from_waker(&waker);
 
         let future = pin!(generator);
+        let future: Pin<&mut dyn Future<Output = _>> = future;
         let mut generator_result = None;
         let iter = IteratorAdapter {
             context,
@@ -73,17 +75,14 @@ impl<T> ImpedanceMatcher<T> {
     }
 }
 
-pub struct IteratorAdapter<'a, 'fut_out, T, F, TFRes> {
+pub struct IteratorAdapter<'a, 'fut_out, T, TFRes> {
     matcher: &'a ImpedanceMatcher<T>,
-    future: Pin<&'a mut F>,
+    future: Pin<&'a mut dyn Future<Output = TFRes>>,
     future_output: &'fut_out mut Option<TFRes>,
     context: Context<'a>,
 }
 
-impl<T, F, TFRes> Iterator for IteratorAdapter<'_, '_, T, F, TFRes>
-where
-    F: Future<Output = TFRes>,
-{
+impl<T, TFRes> Iterator for IteratorAdapter<'_, '_, T, TFRes> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {

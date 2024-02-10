@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, marker::PhantomData, mem::MaybeUninit};
+use core::{cell::UnsafeCell, marker::PhantomData, mem::MaybeUninit};
 
 struct BufferInner<const N: usize, T> {
     inner: [MaybeUninit<T>; N],

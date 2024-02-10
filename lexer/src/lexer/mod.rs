@@ -1,64 +1,15 @@
-use std::str::Utf8Error;
+mod util;
 
-use lexer_impedance_matcher::ImpedanceMatcher;
+mod stackstack;
+#[cfg(test)]
+mod tests;
+
+use lexer_impedance_matcher::{ImpedanceMatcher, IteratorAdapter};
 use memchr::memmem;
 
-#[derive(Debug, Clone)]
-pub enum Token<'a> {
-    Ident(&'a str),
-    At,
-    CurlyOpen,
-    CurlyClose,
-    SquareOpen,
-    SquareClose,
-    Dot,
-    TripleDot,
-    Slash,
-    DoubleSlash,
-    Eq,
-    DoubleEq,
-    Colon,
-    Semicolon,
-    Plus,
-    DoublePlus,
-    Minus,
-    Star,
-    RoundOpen,
-    RoundClose,
-    KwLet,
-    KwIn,
-    KwWith,
-    KwRec,
-    KwNull,
-    Comma,
-    StringBegin,
-    StringEnd,
-    PathBegin,
-    PathEnd,
-    StringContent(&'a str),
-    BeginInterpol,
-    EndInterpol,
-    Implication,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    Not,
-    Ne,
-    Or,
-    QuestionMark,
-    EOF,
-}
+use crate::{lexer::util::LineSplitter, LexError, Token};
 
-#[derive(Debug)]
-pub enum LexError {
-    UnexpectedChar(Option<u8>),
-    InvalidChar(u8),
-    UnclosedString,
-    InvalidString(Utf8Error),
-    UnmatchedCloseBrace,
-    NotRunToCompletion,
-}
+use self::{stackstack::Stack, util::ends_with_unsecaped_backslash};
 
 enum BraceStackEntry {
     Normal,
@@ -70,7 +21,7 @@ enum BraceStackEntry {
 struct Lexer<'input, 'matcher> {
     input: &'input [u8],
     matcher: &'matcher ImpedanceMatcher<Token<'input>>,
-    brace_stack: Vec<BraceStackEntry>,
+    brace_stack: Stack<128, BraceStackEntry>,
 }
 
 const fn is_pathchar(char: u8) -> bool {
@@ -79,7 +30,10 @@ const fn is_pathchar(char: u8) -> bool {
 
 macro_rules! whitespace_pat {
     () => {
-        b' ' | b'\t' | b'\n' | b'\r'
+        whitespace_pat!(no_newline) | b'\n'
+    };
+    (no_newline) => {
+        b' ' | b'\t' | b'\r'
     };
 }
 macro_rules! ident_pat {
@@ -91,14 +45,26 @@ macro_rules! ident_pat {
     }
 }
 
-impl<'a> Lexer<'a, '_> {
+impl<'a, 'matcher> Lexer<'a, 'matcher> {
+    pub fn new(input: &'a [u8], matcher: &'matcher ImpedanceMatcher<Token<'a>>) -> Self {
+        Self {
+            input,
+            matcher,
+            brace_stack: Stack::new(),
+        }
+    }
+
     async fn run(mut self) -> Result<(), LexError> {
         self.lex_normal().await
     }
 
     async fn push(&mut self, token: Token<'a>) {
-        println!("{token:?}");
         self.matcher.push(token).await
+    }
+    fn push_brace(&mut self, entry: BraceStackEntry) -> Result<(), LexError> {
+        self.brace_stack
+            .push(entry)
+            .map_err(|_| LexError::NestedTooDeep)
     }
 
     async fn lex_normal(&mut self) -> Result<(), LexError> {
@@ -130,7 +96,7 @@ impl<'a> Lexer<'a, '_> {
                 b')' => single!(Token::RoundClose),
                 b'?' => single!(Token::QuestionMark),
                 b'{' => {
-                    self.brace_stack.push(BraceStackEntry::Normal);
+                    self.push_brace(BraceStackEntry::Normal)?;
                     single!(Token::CurlyOpen)
                 }
                 b'}' => {
@@ -145,7 +111,10 @@ impl<'a> Lexer<'a, '_> {
                             self.push(Token::EndInterpol).await;
                             self.resume_lex_simple_string().await?;
                         }
-                        BraceStackEntry::MultilineStringInterpolation => todo!(),
+                        BraceStackEntry::MultilineStringInterpolation => {
+                            self.push(Token::EndInterpol).await;
+                            self.resume_lex_multiline_string().await?;
+                        }
                         BraceStackEntry::PathInterpolation => {
                             self.push(Token::EndInterpol).await;
                             self.resume_lex_path().await?;
@@ -206,14 +175,16 @@ impl<'a> Lexer<'a, '_> {
                     .try_parse_keyword(b"null", Token::KwNull)
                     .await
                     .is_some() => {}
-                b'\'' => todo!(),
+                b'\'' if self.input.get(1) == Some(&b'\'') => {
+                    self.lex_indented_string().await?;
+                }
                 ident_pat!(strip_minus) => self.lex_ident().await?,
                 c => {
-                    println!("{:?}", std::char::from_u32(c as u32));
                     return Err(LexError::InvalidChar(c));
                 }
             }
         }
+        self.push(Token::EOF).await;
         Ok(())
     }
 
@@ -257,8 +228,9 @@ impl<'a> Lexer<'a, '_> {
     }
 
     fn convert_str(content: &[u8]) -> Result<&str, LexError> {
-        std::str::from_utf8(content).map_err(LexError::InvalidString)
+        core::str::from_utf8(content).map_err(LexError::InvalidString)
     }
+    #[inline]
     fn consume(&mut self, length: usize) -> &'a [u8] {
         let res = &self.input[..length];
         self.input = &self.input[length..];
@@ -323,6 +295,78 @@ impl<'a> Lexer<'a, '_> {
         self.resume_lex_simple_string().await
     }
 
+    async fn lex_indented_string(&mut self) -> Result<(), LexError> {
+        // skip starting quot
+        self.consume(2);
+        self.push(Token::IndentedStringBegin).await;
+
+        // we need to skip all leading whitespace of the first line if it is actually
+        // a multiline string
+        let num_leading_spaces = self
+            .input
+            .iter()
+            .take_while(|c| matches!(**c, whitespace_pat!(no_newline)))
+            .count();
+        if self.input.get(num_leading_spaces) == Some(&b'\n') {
+            // it is a multiline string!
+            self.consume(num_leading_spaces + 1);
+        }
+
+        self.resume_lex_multiline_string().await
+    }
+
+    async fn resume_lex_multiline_string(&mut self) -> Result<(), LexError> {
+        'outer: loop {
+            let mut search_idx = 0;
+            while let Some(idx) = memchr::memchr3(b'\n', b'$', b'\'', &self.input[search_idx..]) {
+                let decide_idx = search_idx + idx;
+                match self.input[decide_idx] {
+                    b'\n' => {
+                        let part = self.consume_as_str(decide_idx + 1)?;
+                        self.push(Token::StringContent(part)).await;
+                        continue 'outer;
+                    }
+                    b'$' if self.input.get(decide_idx + 1) == Some(&b'{') => {
+                        let part = self.consume_as_str(decide_idx)?;
+                        if part.len() > 0 {
+                            self.push(Token::StringContent(part)).await;
+                        }
+                        // skip the opening dollar brace
+                        self.consume(2);
+                        self.push(Token::BeginInterpol).await;
+                        self.push_brace(BraceStackEntry::MultilineStringInterpolation)?;
+                        return Ok(());
+                    }
+                    b'\'' if self.input.get(decide_idx + 1) == Some(&b'\'') => {
+                        match self.input.get(decide_idx + 2).cloned() {
+                            Some(b'$' | b'\'') => {
+                                // we found something that is escaped
+                                search_idx = decide_idx + 3;
+                            }
+                            _ => {
+                                // end of string
+                                let part = self.consume_as_str(decide_idx)?;
+                                if part.len() > 0 {
+                                    self.push(Token::StringContent(part)).await;
+                                }
+                                self.push(Token::StringEnd).await;
+
+                                // skip the string close quotes
+                                self.consume(2);
+
+                                return Ok(());
+                            }
+                        }
+                    }
+                    _ => search_idx = decide_idx + 1,
+                }
+            }
+            break;
+        }
+
+        Err(LexError::UnclosedString)
+    }
+
     async fn resume_lex_simple_string(&mut self) -> Result<(), LexError> {
         for quot_pos in memchr::memchr_iter(b'"', self.input) {
             if quot_pos == 0 {
@@ -339,14 +383,23 @@ impl<'a> Lexer<'a, '_> {
             // we found an unescaped quotation mark.
             // let's see if there is an interpolation going on
             let candidate = &self.input[..quot_pos];
-            if memmem::find(candidate, b"${").is_some() {
-                todo!();
-            } else {
-                self.push_string_content(candidate).await?;
-                self.push(Token::StringEnd).await;
-                self.input = &self.input[quot_pos + 1..];
-                return Ok(());
+
+            for idx in memmem::find_iter(candidate, b"${") {
+                let part_to_beginning_of_interpolation = &candidate[..idx];
+
+                if !ends_with_unsecaped_backslash(part_to_beginning_of_interpolation) {
+                    // we actually found an interpolation!
+                    self.push_string_content(part_to_beginning_of_interpolation)
+                        .await?;
+                    self.consume(part_to_beginning_of_interpolation.len() + 2);
+                    self.push_brace(BraceStackEntry::SimpleStringInterpolation)?;
+                }
             }
+
+            self.push_string_content(candidate).await?;
+            self.push(Token::StringEnd).await;
+            self.input = &self.input[quot_pos + 1..];
+            return Ok(());
         }
 
         Err(LexError::UnclosedString)
@@ -371,16 +424,37 @@ impl<'a> Lexer<'a, '_> {
     }
 }
 
-pub fn lex_input(input: &[u8]) -> Result<Vec<Token>, LexError> {
+pub fn run<'a, TRes>(
+    input: &'a [u8],
+    consumer: impl FnOnce(IteratorAdapter<'_, '_, Token<'a>, Result<(), LexError>>) -> TRes,
+) -> Result<TRes, LexError> {
     let adapter = ImpedanceMatcher::new();
+
     let future = Lexer {
         input,
         matcher: &adapter,
-        brace_stack: Vec::new(),
+        brace_stack: Stack::new(),
     }
     .run();
-    let (res, vec) = adapter.run(future, |iter| iter.collect());
-    let res = res.unwrap_or(Err(LexError::NotRunToCompletion));
-    assert!(res.is_ok());
-    Ok(vec)
+
+    let (lex_res, consumer_res) = adapter.run(future, consumer);
+
+    lex_res
+        .unwrap_or(Err(LexError::NotRunToCompletion))
+        .and(Ok(consumer_res))
 }
+
+// pub fn run_lexer<'a, TFConsumer, R>(
+//     input: &'a [u8],
+//     consumer: impl TokenConsumer<'a, R>,
+// ) -> Result<R, LexError> {
+//     let matcher = ImpedanceMatcher::new();
+//     let future = Lexer {
+//         input,
+//         matcher: &matcher,
+//         brace_stack: Stack::new(),
+//     }
+//     .run();
+
+//     let (lexer_res, res) = matcher.run(future, consumer);
+// }
