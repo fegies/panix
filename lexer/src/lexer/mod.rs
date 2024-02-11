@@ -256,7 +256,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     self.input = &self.input[2..];
                     self.push(Token::StringContent(str)).await;
                     self.push(Token::BeginInterpol).await;
-                    self.brace_stack.push(BraceStackEntry::PathInterpolation);
+                    self.push_brace(BraceStackEntry::PathInterpolation)?;
                     return Ok(());
                 }
                 _ => {
