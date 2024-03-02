@@ -68,23 +68,36 @@ pub struct LetInExpr<'a> {
 
 #[derive(Debug)]
 pub struct WithExpr<'a> {
-    binding: Box<NixExpr<'a>>,
-    body: Box<NixExpr<'a>>,
+    pub binding: Box<NixExpr<'a>>,
+    pub body: Box<NixExpr<'a>>,
 }
 
 #[derive(Debug)]
 pub struct Lambda<'a> {
-    args: LambdaArgs<'a>,
-    body: Box<NixExpr<'a>>,
+    pub args: LambdaArgs<'a>,
+    pub body: Box<NixExpr<'a>>,
+}
+
+#[derive(Debug)]
+pub enum Op<'a> {
+    AttrRef {
+        left: Box<NixExpr<'a>>,
+        name: &'a str,
+    },
+    Call {
+        function: Box<NixExpr<'a>>,
+        arg: Box<NixExpr<'a>>,
+    },
 }
 
 #[derive(Debug)]
 pub enum Code<'a> {
     LetInExpr(LetInExpr<'a>),
     RecAttrset,
-    ValueReference,
+    ValueReference { ident: &'a str },
     WithExpr(WithExpr<'a>),
     Lambda(Lambda<'a>),
+    Op(Op<'a>),
 }
 
 #[derive(Debug)]
@@ -95,11 +108,16 @@ pub enum NixExpr<'a> {
 }
 
 #[derive(Debug)]
+pub struct LambdaAttrsetArgs<'a> {
+    pub bindings: HashMap<&'a str, Option<NixExpr<'a>>>,
+    pub includes_rest_pattern: bool,
+}
+
+#[derive(Debug)]
 pub enum LambdaArgs<'a> {
     SimpleBinding(&'a str),
     AttrsetBinding {
-        includes_rest_pattern: bool,
         total_name: Option<&'a str>,
-        args: HashMap<&'a str, Option<Box<NixExpr<'a>>>>,
+        args: LambdaAttrsetArgs<'a>,
     },
 }

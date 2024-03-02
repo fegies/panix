@@ -3,7 +3,11 @@ use super::*;
 fn lex_test(input: &str, expected: Result<&[Token<'_>], LexError>) {
     let res = run(input.as_bytes(), |adapter| adapter.collect::<Vec<_>>());
 
-    let res = res.as_ref().map_err(|e| e.clone()).map(|v| v.as_ref());
+    let res = res
+        .as_ref()
+        .map_err(|e| e.clone())
+        .map(|v| v.as_ref())
+        .map_err(|(lr, _)| lr);
     assert_eq!(expected, res);
 }
 
@@ -26,9 +30,11 @@ fn multiline_string() {
     assert_lex(
         str,
         &[
+            Token::Whitespace,
             Token::IndentedStringBegin,
             Token::StringContent("        "),
             Token::StringEnd,
+            Token::Whitespace,
             Token::EOF,
         ],
     );
@@ -45,8 +51,11 @@ fn multiline_string_complex() {
     assert_lex(
         str,
         &[
+            Token::Whitespace,
             Token::Ident("abc"),
+            Token::Whitespace,
             Token::Eq,
+            Token::Whitespace,
             Token::IndentedStringBegin,
             Token::StringContent("        $foo\n"),
             Token::StringContent("        "),
@@ -58,6 +67,7 @@ fn multiline_string_complex() {
             Token::StringContent("    "),
             Token::StringEnd,
             Token::Semicolon,
+            Token::Whitespace,
             Token::EOF,
         ],
     )

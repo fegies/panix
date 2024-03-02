@@ -4,13 +4,16 @@ use core::str::Utf8Error;
 
 mod lexer;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token<'a> {
     Ident(&'a str),
+    Float(f64),
+    Integer(i64),
     At,
     CurlyOpen,
     CurlyClose,
     SquareOpen,
+    Ampersand,
     SquareClose,
     Dot,
     TripleDot,
@@ -48,19 +51,26 @@ pub enum Token<'a> {
     Not,
     Ne,
     Or,
+    And,
     QuestionMark,
     EOF,
+    Whitespace,
+    KwIf,
 }
+impl Eq for Token<'_> {}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum LexError {
     UnexpectedChar(Option<u8>),
     InvalidChar(u8),
+    InvalidEscapeSequence(u8),
     UnclosedString,
     InvalidString(Utf8Error),
     UnmatchedCloseBrace,
     NotRunToCompletion,
     NestedTooDeep,
+    InvalidFloat,
+    InvalidInt,
 }
 
 pub use lexer::run;

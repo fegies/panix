@@ -7,38 +7,39 @@ use crate::parser::{
     ParseResult, TokenSource,
 };
 
-use super::{parse_expr, unexpected};
+use super::{unexpected, Parser};
 
-fn parse_binding<'t>(source: &mut impl TokenSource<'t>) -> ParseResult<(&'t str, NixExpr<'t>)> {
-    let ident = match source.expect_next()? {
-        Token::Ident(ident) => ident,
-        t => return unexpected(t),
-    };
+impl<'t, S: TokenSource<'t>> Parser<S> {
+    fn parse_binding(&mut self) -> ParseResult<(&'t str, NixExpr<'t>)> {
+        let ident = match self.expect_next()? {
+            Token::Ident(ident) => ident,
+            t => return unexpected(t),
+        };
 
-    source.expect(Token::Eq)?;
+        self.expect(Token::Eq)?;
 
-    let body = parse_expr(source)?;
-    source.expect(Token::Semicolon)?;
+        let body = self.parse_expr()?;
+        self.expect(Token::Semicolon)?;
 
-    Ok((ident, body))
-}
-
-/// parse a let in expression.
-pub fn parse_let<'t>(source: &mut impl TokenSource<'t>) -> ParseResult<LetInExpr<'t>> {
-    source.expect(Token::KwLet)?;
-
-    let (ident, body) = parse_binding(source)?;
-    let mut bindings = HashMap::new();
-    bindings.insert(ident, body);
-
-    while let Some(Token::Ident(_)) = source.peek() {
-        let (ident, body) = parse_binding(source)?;
-        bindings.insert(ident, body);
+        Ok((ident, body))
     }
 
-    source.expect(Token::KwIn)?;
+    /// parse a let in expression.
+    /// assumes that the initial let has already been parsed
+    pub fn parse_let(&mut self) -> ParseResult<LetInExpr<'t>> {
+        let (ident, body) = self.parse_binding()?;
+        let mut bindings = HashMap::new();
+        bindings.insert(ident, body);
 
-    let body = Box::new(parse_expr(source)?);
+        while let Token::Ident(_) = self.expect_peek()? {
+            let (ident, body) = self.parse_binding()?;
+            bindings.insert(ident, body);
+        }
 
-    Ok(LetInExpr { bindings, body })
+        self.expect(Token::KwIn)?;
+
+        let body = Box::new(self.parse_expr()?);
+
+        Ok(LetInExpr { bindings, body })
+    }
 }

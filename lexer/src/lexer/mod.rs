@@ -7,7 +7,7 @@ mod tests;
 use lexer_impedance_matcher::{ImpedanceMatcher, IteratorAdapter};
 use memchr::memmem;
 
-use crate::{lexer::util::LineSplitter, LexError, Token};
+use crate::{LexError, Token};
 
 use self::{stackstack::Stack, util::ends_with_unsecaped_backslash};
 
@@ -25,7 +25,7 @@ struct Lexer<'input, 'matcher> {
 }
 
 const fn is_pathchar(char: u8) -> bool {
-    todo!()
+    matches!(char, b'A'..=b'z' | b'0'..=b'9')
 }
 
 macro_rules! whitespace_pat {
@@ -38,22 +38,14 @@ macro_rules! whitespace_pat {
 }
 macro_rules! ident_pat {
     (strip_minus) => {
-        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'
+        b'a'..=b'z' | b'A'..=b'Z' | b'_'
     };
     () => {
-        ident_pat!(strip_minus) | b'-'
+        ident_pat!(strip_minus) | b'-' | b'0'..=b'9'
     }
 }
 
 impl<'a, 'matcher> Lexer<'a, 'matcher> {
-    pub fn new(input: &'a [u8], matcher: &'matcher ImpedanceMatcher<Token<'a>>) -> Self {
-        Self {
-            input,
-            matcher,
-            brace_stack: Stack::new(),
-        }
-    }
-
     async fn run(mut self) -> Result<(), LexError> {
         self.lex_normal().await
     }
@@ -86,7 +78,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         }
         while let Some(cur) = self.input.first() {
             match *cur {
-                whitespace_pat!() => self.skip_whitespace(),
+                whitespace_pat!() => self.skip_whitespace().await,
                 b';' => single!(Token::Semicolon),
                 b'@' => single!(Token::At),
                 b'*' => single!(Token::Star),
@@ -95,6 +87,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 b'(' => single!(Token::RoundOpen),
                 b')' => single!(Token::RoundClose),
                 b'?' => single!(Token::QuestionMark),
+                b'&' => lookahead!(b'&', Token::And, Token::Ampersand),
                 b'{' => {
                     self.push_brace(BraceStackEntry::Normal)?;
                     single!(Token::CurlyOpen)
@@ -165,6 +158,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     }
                 }
                 b'i' if self.try_parse_keyword(b"in", Token::KwIn).await.is_some() => {}
+                b'i' if self.try_parse_keyword(b"if", Token::KwIf).await.is_some() => {}
                 b'l' if self.try_parse_keyword(b"let", Token::KwLet).await.is_some() => {}
                 b'r' if self.try_parse_keyword(b"rec", Token::KwRec).await.is_some() => {}
                 b'w' if self
@@ -178,6 +172,9 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 b'\'' if self.input.get(1) == Some(&b'\'') => {
                     self.lex_indented_string().await?;
                 }
+                b'0'..=b'9' => {
+                    self.lex_number().await?;
+                }
                 ident_pat!(strip_minus) => self.lex_ident().await?,
                 c => {
                     return Err(LexError::InvalidChar(c));
@@ -185,6 +182,35 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
             }
         }
         self.push(Token::EOF).await;
+        Ok(())
+    }
+
+    async fn lex_number(&mut self) -> Result<(), LexError> {
+        let digits_count = self
+            .input
+            .iter()
+            .take_while(|n| matches!(n, b'0'..=b'9'))
+            .count();
+        if self.input.get(digits_count) == Some(&b'.') {
+            // this is a float!
+            let second_part_digits = &self.input[digits_count + 1..]
+                .iter()
+                .take_while(|n| matches!(n, b'0'..=b'9'))
+                .count();
+            let total_chars = digits_count + 1 + second_part_digits;
+            let float = self
+                .consume_as_str(total_chars)?
+                .parse()
+                .map_err(|_| LexError::InvalidFloat)?;
+            self.push(Token::Float(float)).await;
+        } else {
+            // this is just a plain integer
+            let int = self
+                .consume_as_str(digits_count)?
+                .parse()
+                .map_err(|_| LexError::InvalidInt)?;
+            self.push(Token::Integer(int)).await;
+        }
         Ok(())
     }
 
@@ -279,10 +305,35 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         Ok(())
     }
 
-    async fn push_string_content(&mut self, content: &'a [u8]) -> Result<(), LexError> {
-        if memchr::memchr(b'\\', content).is_some() {
-            todo!()
+    async fn push_string_content(&mut self, mut content: &'a [u8]) -> Result<(), LexError> {
+        while let Some(backslash_pos) = memchr::memchr(b'\\', content) {
+            let unescaped_part = &content[..backslash_pos];
+            if unescaped_part.len() > 0 {
+                self.push(Token::StringContent(Self::convert_str(unescaped_part)?))
+                    .await;
+            }
+            // skip the leading part, including the backslash.
+            content = &content[backslash_pos + 1..];
+            match content.get(0) {
+                Some(b'n') => {
+                    self.push(Token::StringContent("\n")).await;
+                    content = &content[1..];
+                }
+                Some(b'r') => {
+                    self.push(Token::StringContent("\r")).await;
+                    content = &content[1..];
+                }
+                Some(b'\\') => {
+                    self.push(Token::StringContent("\\")).await;
+                    content = &content[1..];
+                }
+                Some(c) => {
+                    return Err(LexError::InvalidEscapeSequence(*c));
+                }
+                None => {}
+            }
         }
+
         let content = Self::convert_str(content)?;
         self.push(Token::StringContent(content)).await;
         Ok(())
@@ -404,11 +455,17 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 
         Err(LexError::UnclosedString)
     }
-    fn skip_whitespace(&mut self) {
+
+    async fn skip_whitespace(&mut self) {
+        let mut pushed = false;
         loop {
             match self.input.first() {
                 Some(whitespace_pat!()) => {
                     self.input = &self.input[1..];
+                    if !pushed {
+                        self.push(Token::Whitespace).await;
+                        pushed = true;
+                    }
                 }
                 _ => break,
             }
@@ -427,7 +484,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 pub fn run<'a, TRes>(
     input: &'a [u8],
     consumer: impl FnOnce(IteratorAdapter<'_, '_, Token<'a>, Result<(), LexError>>) -> TRes,
-) -> Result<TRes, LexError> {
+) -> Result<TRes, (LexError, TRes)> {
     let adapter = ImpedanceMatcher::new();
 
     let future = Lexer {
@@ -439,22 +496,9 @@ pub fn run<'a, TRes>(
 
     let (lex_res, consumer_res) = adapter.run(future, consumer);
 
-    lex_res
-        .unwrap_or(Err(LexError::NotRunToCompletion))
-        .and(Ok(consumer_res))
+    match lex_res {
+        Some(Ok(_)) => Ok(consumer_res),
+        Some(Err(e)) => Err((e, consumer_res)),
+        None => Err((LexError::NotRunToCompletion, consumer_res)),
+    }
 }
-
-// pub fn run_lexer<'a, TFConsumer, R>(
-//     input: &'a [u8],
-//     consumer: impl TokenConsumer<'a, R>,
-// ) -> Result<R, LexError> {
-//     let matcher = ImpedanceMatcher::new();
-//     let future = Lexer {
-//         input,
-//         matcher: &matcher,
-//         brace_stack: Stack::new(),
-//     }
-//     .run();
-
-//     let (lexer_res, res) = matcher.run(future, consumer);
-// }

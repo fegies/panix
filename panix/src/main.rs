@@ -20,6 +20,7 @@ fn process_file(file: &Path) {
     file.read_to_end(&mut buf).unwrap();
 
     let res = parser::parser::parse_nix(&buf).unwrap();
+    // let res = lexer::run(&buf, |it| it.collect::<Vec<_>>());
     println!("{res:?}");
     // let tokens = lexer::lex_input(buf.as_ref()).unwrap();
     // println!("{tokens:?}");
@@ -49,6 +50,8 @@ fn main() {
     let meta = std::fs::metadata(&input).unwrap();
     if meta.is_dir() {
         walk_dir(&mut input);
+    } else {
+        process_file(&input);
     }
 
     gc::init();

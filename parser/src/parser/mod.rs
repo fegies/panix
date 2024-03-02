@@ -2,7 +2,7 @@ use std::iter::Peekable;
 
 use lexer::{LexError, Token};
 
-use self::{ast::NixExpr, components::parse_expr};
+use self::{ast::NixExpr, components::parse_complete};
 
 pub mod ast;
 mod components;
@@ -10,20 +10,6 @@ mod components;
 trait TokenSource<'a> {
     fn next(&mut self) -> Option<Token<'a>>;
     fn peek(&mut self) -> Option<&Token<'a>>;
-
-    fn expect_next(&mut self) -> ParseResult<Token<'a>> {
-        self.next().ok_or(ParseError::UnexpectedEof)
-    }
-
-    fn expect(&mut self, token: Token<'static>) -> ParseResult<()> {
-        let next = self.expect_next()?;
-        if next == token {
-            Ok(())
-        } else {
-            let token = format!("{:?}", token);
-            Err(ParseError::UnexpectedToken(token))
-        }
-    }
 }
 
 impl<'a, I> TokenSource<'a> for Peekable<I>
@@ -53,15 +39,16 @@ impl From<LexError> for ParseError {
     }
 }
 
-fn parse_file<'t>(source: &mut impl TokenSource<'t>) -> ParseResult<NixExpr<'t>> {
-    let res = parse_expr(source)?;
-    source.expect(Token::EOF)?;
-    Ok(res)
-}
-
 pub fn parse_nix(input: &[u8]) -> ParseResult<NixExpr> {
-    lexer::run(input, |tokens| {
-        let mut source = tokens.peekable();
-        parse_file(&mut source)
-    })?
+    let res = lexer::run(input, |tokens| {
+        let source = tokens.peekable();
+        parse_complete(source)
+    });
+
+    match res {
+        Ok(Ok(e)) => Ok(e),
+        Err((lex, Ok(_))) => Err(lex.into()),
+        Err((_, Err(e))) => Err(e),
+        Ok(Err(e)) => Err(e),
+    }
 }
