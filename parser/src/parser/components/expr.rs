@@ -121,7 +121,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         let res = match self.expect_next()? {
             Token::Eq => {
                 // this is a true attrset
-                todo!()
+                let attrset = self.parse_attrset(first_ident)?;
+                NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
             }
             Token::QuestionMark => {
                 // this is a set of function args, the first one has a default arg
@@ -132,7 +133,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             }
             Token::Comma => {
                 // this is a set of function args, no default
-                todo!()
+                let lambda = self.parse_attrset_lambda(first_ident, None)?;
+                NixExpr::Code(Code::Lambda(lambda))
             }
             t => unexpected(t)?,
         };

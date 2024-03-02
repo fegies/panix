@@ -1,3 +1,4 @@
+pub mod attrset;
 pub mod expr;
 pub mod function;
 pub mod if_expr;
