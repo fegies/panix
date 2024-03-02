@@ -16,6 +16,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     NixExpr::Code(Code::ValueReference { ident })
                 }
             }
+            Token::KwIf => NixExpr::Code(Code::IfExpr(self.parse_if()?)),
             Token::Float(f) => NixExpr::BasicValue(BasicValue::Float(f)),
             Token::Integer(i) => NixExpr::BasicValue(BasicValue::Int(i)),
             Token::CurlyOpen => self.parse_attrset_or_destructuring_lambda()?,
@@ -50,8 +51,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
                 let token = self.expect_next_or_whitespace()?;
 
-                if token == Token::Whitespace && !self.peek().map_or(false, could_start_expression)
-                {
+                if token == Token::Whitespace && !could_start_expression(self.expect_peek()?) {
                     continue;
                 }
 
@@ -64,6 +64,10 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     Token::Whitespace => NixExpr::Code(Code::Op(Op::Call {
                         function: Box::new(lhs),
                         arg: Box::new(self.parse_with_bindingpower(r_bp)?),
+                    })),
+                    Token::Plus => NixExpr::Code(Code::Op(Op::Add {
+                        left: Box::new(lhs),
+                        right: Box::new(self.parse_with_bindingpower(r_bp)?),
                     })),
                     t => todo!("{:?}", t),
                 }
@@ -138,25 +142,26 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 }
 
 fn could_start_expression(token: &Token) -> bool {
-    match token {
+    matches!(
+        token,
         Token::Ident(_)
-        | Token::CurlyOpen
-        | Token::PathBegin
-        | Token::StringBegin
-        | Token::Float(_)
-        | Token::Integer(_)
-        | Token::KwIn
-        | Token::KwLet
-        | Token::KwRec
-        | Token::KwWith
-        | Token::Minus
-        | Token::RoundOpen
-        | Token::SquareOpen => true,
-        _ => false,
-    }
+            | Token::CurlyOpen
+            | Token::PathBegin
+            | Token::StringBegin
+            | Token::Float(_)
+            | Token::Integer(_)
+            | Token::KwIn
+            | Token::KwLet
+            | Token::KwRec
+            | Token::KwWith
+            | Token::Minus
+            | Token::RoundOpen
+            | Token::SquareOpen
+    )
 }
 
 fn infix_binding_power(token: &Token<'_>) -> Option<(u8, u8)> {
+    println!("getting infix for {token:?}");
     // the binding power table.
     // higher-precedence operators have higher binding powers
     // right-assoc ops have the higher power left, left-assoc ones on the right.

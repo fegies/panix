@@ -67,6 +67,13 @@ pub struct LetInExpr<'a> {
 }
 
 #[derive(Debug)]
+pub struct IfExpr<'a> {
+    pub condition: Box<NixExpr<'a>>,
+    pub truthy_case: Box<NixExpr<'a>>,
+    pub falsy_case: Box<NixExpr<'a>>,
+}
+
+#[derive(Debug)]
 pub struct WithExpr<'a> {
     pub binding: Box<NixExpr<'a>>,
     pub body: Box<NixExpr<'a>>,
@@ -88,6 +95,10 @@ pub enum Op<'a> {
         function: Box<NixExpr<'a>>,
         arg: Box<NixExpr<'a>>,
     },
+    Add {
+        left: Box<NixExpr<'a>>,
+        right: Box<NixExpr<'a>>,
+    },
 }
 
 #[derive(Debug)]
@@ -98,6 +109,7 @@ pub enum Code<'a> {
     WithExpr(WithExpr<'a>),
     Lambda(Lambda<'a>),
     Op(Op<'a>),
+    IfExpr(IfExpr<'a>),
 }
 
 #[derive(Debug)]

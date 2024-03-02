@@ -1,5 +1,6 @@
 pub mod expr;
 pub mod function;
+pub mod if_expr;
 pub mod let_expr;
 pub mod list;
 pub mod string;
@@ -47,10 +48,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     }
 
     fn expect_peek(&mut self) -> ParseResult<&Token<'t>> {
-        while let Some(Token::Whitespace) = self.peek() {
-            self.next();
+        if let Some(Token::Whitespace) = self.peek() {
+            self.source.peek_2().ok_or(ParseError::UnexpectedEof)
+        } else {
+            self.peek().ok_or(ParseError::UnexpectedEof)
         }
-        self.peek().ok_or(ParseError::UnexpectedEof)
     }
 
     fn expect(&mut self, token: Token<'static>) -> ParseResult<()> {

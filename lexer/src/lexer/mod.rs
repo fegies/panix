@@ -161,6 +161,14 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 b'i' if self.try_parse_keyword(b"if", Token::KwIf).await.is_some() => {}
                 b'l' if self.try_parse_keyword(b"let", Token::KwLet).await.is_some() => {}
                 b'r' if self.try_parse_keyword(b"rec", Token::KwRec).await.is_some() => {}
+                b't' if self
+                    .try_parse_keyword(b"then", Token::KwThen)
+                    .await
+                    .is_some() => {}
+                b'e' if self
+                    .try_parse_keyword(b"else", Token::KwElse)
+                    .await
+                    .is_some() => {}
                 b'w' if self
                     .try_parse_keyword(b"with", Token::KwWith)
                     .await

@@ -2,17 +2,19 @@ use std::iter::Peekable;
 
 use lexer::{LexError, Token};
 
-use self::{ast::NixExpr, components::parse_complete};
+use self::{ast::NixExpr, components::parse_complete, util::multipeek::Multipeek};
 
 pub mod ast;
 mod components;
+mod util;
 
 trait TokenSource<'a> {
     fn next(&mut self) -> Option<Token<'a>>;
     fn peek(&mut self) -> Option<&Token<'a>>;
+    fn peek_2(&mut self) -> Option<&Token<'a>>;
 }
 
-impl<'a, I> TokenSource<'a> for Peekable<I>
+impl<'a, I> TokenSource<'a> for Multipeek<I>
 where
     I: Iterator<Item = Token<'a>>,
 {
@@ -21,7 +23,11 @@ where
     }
 
     fn peek(&mut self) -> Option<&Token<'a>> {
-        Peekable::peek(self)
+        Multipeek::peek(self)
+    }
+
+    fn peek_2(&mut self) -> Option<&Token<'a>> {
+        Multipeek::peek_2(self)
     }
 }
 
@@ -41,7 +47,7 @@ impl From<LexError> for ParseError {
 
 pub fn parse_nix(input: &[u8]) -> ParseResult<NixExpr> {
     let res = lexer::run(input, |tokens| {
-        let source = tokens.peekable();
+        let source = Multipeek::new(tokens);
         parse_complete(source)
     });
 

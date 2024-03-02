@@ -56,6 +56,8 @@ pub enum Token<'a> {
     EOF,
     Whitespace,
     KwIf,
+    KwElse,
+    KwThen,
 }
 impl Eq for Token<'_> {}
 
