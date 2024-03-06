@@ -38,6 +38,7 @@ pub enum ParseError {
     UnexpectedToken(String),
     UnexpectedEof,
     LexerError(LexError),
+    AttributePathConflict(String),
 }
 impl From<LexError> for ParseError {
     fn from(value: LexError) -> Self {

@@ -43,11 +43,6 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             }
         }
     }
-
-    fn expect_peek_or_whitespace(&mut self) -> ParseResult<&Token<'t>> {
-        self.peek().ok_or(ParseError::UnexpectedEof)
-    }
-
     fn expect_peek(&mut self) -> ParseResult<&Token<'t>> {
         if let Some(Token::Whitespace) = self.peek() {
             self.source.peek_2().ok_or(ParseError::UnexpectedEof)
@@ -62,6 +57,13 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             Ok(())
         } else {
             unexpected_with_expected(next, token)
+        }
+    }
+
+    fn expect_ident(&mut self) -> ParseResult<&'t str> {
+        match self.expect_next()? {
+            Token::Ident(i) => Ok(i),
+            t => unexpected(t)?,
         }
     }
 }

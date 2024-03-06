@@ -4,10 +4,17 @@ use super::*;
 
 impl<'t, S: TokenSource<'t>> Parser<S> {
     pub fn parse_expr(&mut self) -> ParseResult<NixExpr<'t>> {
-        self.parse_with_bindingpower(0)
+        self.parse_with_bindingpower(0, true)
+    }
+    pub fn parse_expr_no_spaces(&mut self) -> ParseResult<NixExpr<'t>> {
+        self.parse_with_bindingpower(0, false)
     }
 
-    fn parse_with_bindingpower(&mut self, min_bp: u8) -> ParseResult<NixExpr<'t>> {
+    fn parse_with_bindingpower(
+        &mut self,
+        min_bp: u8,
+        allow_spaces: bool,
+    ) -> ParseResult<NixExpr<'t>> {
         let mut lhs = match self.expect_next()? {
             Token::Ident(ident) => {
                 if matches!(self.expect_peek()?, Token::At | Token::Colon) {
@@ -37,7 +44,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             Token::IndentedStringBegin => {
                 NixExpr::BasicValue(BasicValue::String(self.parse_multiline_string()?))
             }
-            Token::PathBegin => todo!(),
+            Token::PathBegin => NixExpr::BasicValue(BasicValue::Path(self.parse_path()?)),
             Token::Not => todo!(),
             t => unexpected(t)?,
         };
@@ -51,8 +58,13 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
                 let token = self.expect_next_or_whitespace()?;
 
-                if token == Token::Whitespace && !could_start_expression(self.expect_peek()?) {
-                    continue;
+                if token == Token::Whitespace {
+                    if !allow_spaces {
+                        break;
+                    }
+                    if !could_start_expression(self.expect_peek()?) {
+                        continue;
+                    }
                 }
 
                 lhs = match token {
@@ -63,11 +75,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     })),
                     Token::Whitespace => NixExpr::Code(Code::Op(Op::Call {
                         function: Box::new(lhs),
-                        arg: Box::new(self.parse_with_bindingpower(r_bp)?),
+                        arg: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
                     })),
                     Token::Plus => NixExpr::Code(Code::Op(Op::Add {
                         left: Box::new(lhs),
-                        right: Box::new(self.parse_with_bindingpower(r_bp)?),
+                        right: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
                     })),
                     t => todo!("{:?}", t),
                 }
@@ -119,6 +131,10 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         };
 
         let res = match self.expect_next()? {
+            Token::Dot => {
+                let attrset = self.parse_attrset_multipath(first_ident)?;
+                NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
+            }
             Token::Eq => {
                 // this is a true attrset
                 let attrset = self.parse_attrset(first_ident)?;

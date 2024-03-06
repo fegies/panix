@@ -27,4 +27,11 @@ impl<const N: usize, T> Stack<N, T> {
             None
         }
     }
+    // pub fn as_slice(&self) -> &[T] {
+    //     let slice = &self.inner[..self.top];
+    //     unsafe {
+    //         let ptr = slice.as_ptr() as *const T;
+    //         core::slice::from_raw_parts(ptr, slice.len())
+    //     }
+    // }
 }

@@ -58,6 +58,7 @@ pub enum Token<'a> {
     KwIf,
     KwElse,
     KwThen,
+    KwInherit,
 }
 impl Eq for Token<'_> {}
 

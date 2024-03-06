@@ -10,7 +10,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 self.expect_next()?;
                 break;
             }
-            todo!()
+            let expr = self.parse_expr_no_spaces()?;
+            entries.push(expr);
         }
 
         Ok(List { entries })

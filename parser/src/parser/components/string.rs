@@ -6,6 +6,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     fn parse_interpolated_string(
         &mut self,
         initial_part: NixString<'t>,
+        end_token: Token<'static>,
     ) -> ParseResult<NixString<'t>> {
         let mut parts = match initial_part {
             NixString::Literal(lit) => vec![InterpolationEntry::LiteralPiece(lit)],
@@ -30,7 +31,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     parts.push(InterpolationEntry::Expression(expr));
                     self.expect(Token::EndInterpol)?;
                 }
-                Token::StringEnd => {
+                t if t == end_token => {
                     return Ok(NixString::Interpolated(parts));
                 }
                 t => return unexpected(t),
@@ -38,34 +39,35 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         }
     }
 
-    fn parse_string_content(&mut self) -> ParseResult<NixString<'t>> {
+    fn parse_string_content(&mut self, end_token: Token<'static>) -> ParseResult<NixString<'t>> {
         let initial_content = match self.expect_next()? {
-            Token::StringEnd => return Ok(NixString::Empty),
             Token::StringContent(cont) => cont,
             Token::BeginInterpol => {
-                return self.parse_interpolated_string(NixString::Empty);
+                return self.parse_interpolated_string(NixString::Empty, end_token);
             }
+            t if t == end_token => return Ok(NixString::Empty),
             t => return unexpected(t),
         };
         let next_part = match self.expect_next()? {
-            Token::StringEnd => return Ok(NixString::Literal(initial_content)),
             Token::StringContent(cont) => cont,
             Token::BeginInterpol => {
-                return self.parse_interpolated_string(NixString::Literal(initial_content));
+                return self
+                    .parse_interpolated_string(NixString::Literal(initial_content), end_token);
             }
+            t if t == end_token => return Ok(NixString::Literal(initial_content)),
             t => return unexpected(t),
         };
         let mut parts = vec![initial_content, next_part];
 
         loop {
             match self.expect_next()? {
-                Token::StringEnd => return Ok(NixString::Composite(parts)),
                 Token::StringContent(cont) => {
                     parts.push(cont);
                 }
                 Token::BeginInterpol => {
-                    return self.parse_interpolated_string(NixString::Composite(parts));
+                    return self.parse_interpolated_string(NixString::Composite(parts), end_token);
                 }
+                t if t == end_token => return Ok(NixString::Composite(parts)),
                 t => return unexpected(t),
             }
         }
@@ -74,13 +76,18 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse a simple string.
     /// Assumes the string begin token has already been consumed.
     pub fn parse_simple_string(&mut self) -> ParseResult<NixString<'t>> {
-        self.parse_string_content()
+        self.parse_string_content(Token::StringEnd)
+    }
+    /// parse a path expression.
+    /// assumes the path begin token has already been consumed.
+    pub fn parse_path(&mut self) -> ParseResult<NixString<'t>> {
+        self.parse_string_content(Token::PathEnd)
     }
 
     /// parse a multiline string. Assumes the string begin token
     /// has already been consumed
     pub fn parse_multiline_string(&mut self) -> ParseResult<NixString<'t>> {
-        let mut str = self.parse_string_content()?;
+        let mut str = self.parse_string_content(Token::PathEnd)?;
 
         // we have the string parsed. Now we still need to look at the individual
         // lines inside and strip the appropriate amount of whitespace from it.

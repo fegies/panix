@@ -157,6 +157,10 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                         _ => single!(Token::Slash),
                     }
                 }
+                b'i' if self
+                    .try_parse_keyword(b"inherit", Token::KwInherit)
+                    .await
+                    .is_some() => {}
                 b'i' if self.try_parse_keyword(b"in", Token::KwIn).await.is_some() => {}
                 b'i' if self.try_parse_keyword(b"if", Token::KwIf).await.is_some() => {}
                 b'l' if self.try_parse_keyword(b"let", Token::KwLet).await.is_some() => {}
