@@ -36,7 +36,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             }
             Token::KwLet => NixExpr::Code(Code::LetInExpr(self.parse_let()?)),
             Token::KwWith => todo!(),
-            Token::KwRec => todo!(),
+            Token::KwRec => {
+                NixExpr::CompoundValue(CompoundValue::Attrset(self.parse_attrset_rec()?))
+            }
             Token::KwNull => NixExpr::BasicValue(BasicValue::Null),
             Token::StringBegin => {
                 NixExpr::BasicValue(BasicValue::String(self.parse_simple_string()?))
@@ -77,10 +79,21 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                         function: Box::new(lhs),
                         arg: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
                     })),
-                    Token::Plus => NixExpr::Code(Code::Op(Op::Add {
-                        left: Box::new(lhs),
-                        right: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
-                    })),
+                    t @ (Token::Plus | Token::DoublePlus | Token::DoubleSlash) => {
+                        let opcode = match t {
+                            Token::Plus => BinopOpcode::Add,
+                            Token::DoublePlus => BinopOpcode::ListConcat,
+                            Token::DoubleSlash => BinopOpcode::AttrsetMerge,
+                            _ => unreachable!(),
+                        };
+                        let left = Box::new(lhs);
+                        let right = Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?);
+                        NixExpr::Code(Code::Op(Op::Binop {
+                            left,
+                            right,
+                            opcode,
+                        }))
+                    }
                     t => todo!("{:?}", t),
                 }
             } else {
@@ -94,6 +107,12 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     fn parse_attrset_ref(&mut self) -> ParseResult<&'t str> {
         match self.expect_next()? {
             Token::Ident(ident) => Ok(ident),
+            Token::StringBegin => match self.parse_simple_string()? {
+                NixString::Literal(l) => Ok(l),
+                NixString::Composite(_) => todo!(),
+                NixString::Interpolated(_) => todo!(),
+                NixString::Empty => Ok(""),
+            },
             t => unexpected(t),
         }
     }
@@ -122,10 +141,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     return Ok(NixExpr::Code(Code::Lambda(lambda)));
                 }
                 // empty attrset
-                return Ok(NixExpr::CompoundValue(CompoundValue::Attrset(Attrset {
-                    is_recursive: false,
-                    attrs: HashMap::new(),
-                })));
+                return Ok(NixExpr::CompoundValue(CompoundValue::Attrset(
+                    Attrset::empty(),
+                )));
             }
             t => unexpected(t)?,
         };

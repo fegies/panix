@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::*;
 
@@ -24,7 +24,13 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
     /// parse an attribute set.
     /// Assumes the initial opening brace and an inherit keyword have been consumed.
-    pub fn parse_attrset_inherit(&mut self) {
+    pub fn parse_attrset_inherit(&mut self) -> ParseResult<Attrset<'t>> {
+        todo!()
+    }
+
+    /// parse an attribute set.
+    /// Assumes the initial rec keyword has been consumed.
+    pub fn parse_attrset_rec(&mut self) -> ParseResult<Attrset<'t>> {
         todo!()
     }
 
@@ -34,7 +40,22 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// additionally consumed the equality sign.
     fn parse_attrset_path(&mut self, pieces: &mut Vec<&'t str>) -> ParseResult<()> {
         loop {
-            pieces.push(self.expect_ident()?);
+            // parse part.
+            let ident = match self.expect_next()? {
+                Token::StringBegin => {
+                    let str = self.parse_simple_string()?;
+                    match str {
+                        NixString::Literal(l) => l,
+                        NixString::Composite(_) => todo!(),
+                        NixString::Interpolated(_) => todo!(),
+                        NixString::Empty => "",
+                    }
+                }
+                Token::Ident(i) => i,
+                t => unexpected(t)?,
+            };
+            pieces.push(ident);
+
             match self.expect_next()? {
                 Token::Eq => break,
                 Token::Dot => {}
@@ -44,11 +65,33 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         Ok(())
     }
 
-    fn parse_attrset_path_or_inherit(&mut self, pieces: &mut Vec<&'t str>) -> ParseResult<()> {
-        if let Token::KwInherit = self.expect_peek()? {
-            todo!()
+    fn parse_inherit(&mut self, inherit_keys: &mut HashSet<&'t str>) -> ParseResult<()> {
+        loop {
+            match self.expect_next()? {
+                Token::Ident(varname) => {
+                    if !inherit_keys.insert(varname) {
+                        return Err(ParseError::AttributePathConflict(varname.to_owned()));
+                    }
+                }
+                Token::Semicolon => return Ok(()),
+                t => unexpected(t)?,
+            }
         }
-        self.parse_attrset_path(pieces)
+    }
+
+    fn parse_attrset_path_or_inherit(
+        &mut self,
+        pieces: &mut Vec<&'t str>,
+        inherit_keys: &mut HashSet<&'t str>,
+    ) -> ParseResult<bool> {
+        if let Token::KwInherit = self.expect_peek()? {
+            self.expect_next()?;
+            self.parse_inherit(inherit_keys)?;
+            Ok(false)
+        } else {
+            self.parse_attrset_path(pieces)?;
+            Ok(true)
+        }
     }
 
     /// parse an attribute set.
@@ -58,6 +101,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         self.expect(Token::Semicolon)?;
 
         let mut attrs = HashMap::new();
+        let mut inherit_keys = HashSet::new();
         insert_nested_attrs(&mut attrs, &ident_buf, initial_value)?;
 
         loop {
@@ -67,16 +111,19 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             }
 
             ident_buf.clear();
-            self.parse_attrset_path_or_inherit(&mut ident_buf)?;
-            let value: NixExpr<'_> = self.parse_expr()?;
-            self.expect(Token::Semicolon)?;
+            if self.parse_attrset_path_or_inherit(&mut ident_buf, &mut inherit_keys)? {
+                println!("parsing key: {ident_buf:?}");
+                let value: NixExpr<'_> = self.parse_expr()?;
+                self.expect(Token::Semicolon)?;
 
-            insert_nested_attrs(&mut attrs, &ident_buf, value)?;
+                insert_nested_attrs(&mut attrs, &ident_buf, value)?;
+            }
         }
 
         Ok(Attrset {
             is_recursive: false,
             attrs: convert_nested_attrs(attrs),
+            inherit_keys,
         })
     }
 }
@@ -92,6 +139,7 @@ fn convert_nested_attrs<'t>(
                 let attrset = Attrset {
                     is_recursive: false,
                     attrs: convert_nested_attrs(n),
+                    inherit_keys: HashSet::new(),
                 };
                 let expr = NixExpr::CompoundValue(CompoundValue::Attrset(attrset));
                 (k, expr)

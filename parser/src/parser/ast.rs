@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt::Write};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Write,
+};
 
 pub enum NixString<'a> {
     Literal(&'a str),
@@ -48,6 +51,16 @@ pub enum BasicValue<'a> {
 pub struct Attrset<'a> {
     pub is_recursive: bool,
     pub attrs: HashMap<&'a str, NixExpr<'a>>,
+    pub inherit_keys: HashSet<&'a str>,
+}
+impl<'t> Attrset<'t> {
+    pub(crate) fn empty() -> Attrset<'t> {
+        Self {
+            is_recursive: false,
+            attrs: HashMap::new(),
+            inherit_keys: HashSet::new(),
+        }
+    }
 }
 #[derive(Debug)]
 pub struct List<'a> {
@@ -86,6 +99,13 @@ pub struct Lambda<'a> {
 }
 
 #[derive(Debug)]
+pub enum BinopOpcode {
+    Add,
+    ListConcat,
+    AttrsetMerge,
+}
+
+#[derive(Debug)]
 pub enum Op<'a> {
     AttrRef {
         left: Box<NixExpr<'a>>,
@@ -95,9 +115,10 @@ pub enum Op<'a> {
         function: Box<NixExpr<'a>>,
         arg: Box<NixExpr<'a>>,
     },
-    Add {
+    Binop {
         left: Box<NixExpr<'a>>,
         right: Box<NixExpr<'a>>,
+        opcode: BinopOpcode,
     },
 }
 
