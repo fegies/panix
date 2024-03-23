@@ -22,7 +22,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         parts.push(InterpolationEntry::Expression(expression));
         self.expect(Token::EndInterpol)?;
         loop {
-            match self.expect_next()? {
+            let t = self.expect_next()?;
+            match t.token {
                 Token::StringContent(str) => {
                     parts.push(InterpolationEntry::LiteralPiece(str));
                 }
@@ -34,33 +35,36 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 t if t == end_token => {
                     return Ok(NixString::Interpolated(parts));
                 }
-                t => return unexpected(t),
+                _ => return unexpected(t),
             }
         }
     }
 
     fn parse_string_content(&mut self, end_token: Token<'static>) -> ParseResult<NixString<'t>> {
-        let initial_content = match self.expect_next()? {
+        let t = self.expect_next()?;
+        let initial_content = match t.token {
             Token::StringContent(cont) => cont,
             Token::BeginInterpol => {
                 return self.parse_interpolated_string(NixString::Empty, end_token);
             }
             t if t == end_token => return Ok(NixString::Empty),
-            t => return unexpected(t),
+            _ => return unexpected(t),
         };
-        let next_part = match self.expect_next()? {
+        let t = self.expect_next()?;
+        let next_part = match t.token {
             Token::StringContent(cont) => cont,
             Token::BeginInterpol => {
                 return self
                     .parse_interpolated_string(NixString::Literal(initial_content), end_token);
             }
             t if t == end_token => return Ok(NixString::Literal(initial_content)),
-            t => return unexpected(t),
+            _ => return unexpected(t),
         };
         let mut parts = vec![initial_content, next_part];
 
         loop {
-            match self.expect_next()? {
+            let t = self.expect_next()?;
+            match t.token {
                 Token::StringContent(cont) => {
                     parts.push(cont);
                 }
@@ -68,7 +72,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     return self.parse_interpolated_string(NixString::Composite(parts), end_token);
                 }
                 t if t == end_token => return Ok(NixString::Composite(parts)),
-                t => return unexpected(t),
+                _ => return unexpected(t),
             }
         }
     }

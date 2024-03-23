@@ -7,6 +7,7 @@ use std::{
 };
 
 use clap::Parser;
+use parser::parser::ParseError;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -19,9 +20,22 @@ fn process_file(file: &Path) {
     let mut buf = Vec::new();
     file.read_to_end(&mut buf).unwrap();
 
-    let res = parser::parser::parse_nix(&buf).unwrap();
+    let mut ok = false;
+    match parser::parser::parse_nix(&buf) {
+        Ok(res) => {
+            println!("{res:?}");
+            ok = true;
+        }
+        Err(ParseError::UnexpectedToken(t)) => {
+            println!("unexpected token: {t}");
+        }
+        Err(e) => {
+            println!("{e:?}")
+        }
+    }
+    assert!(ok);
     // let res = lexer::run(&buf, |it| it.collect::<Vec<_>>());
-    println!("{res:?}");
+
     // let tokens = lexer::lex_input(buf.as_ref()).unwrap();
     // println!("{tokens:?}");
     // println!("{}", tokens.len());

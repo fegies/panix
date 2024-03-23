@@ -29,7 +29,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 self.expect(Token::Comma)?;
             }
 
-            match self.expect_next()? {
+            let t = self.expect_next()?;
+            match t.token {
                 Token::Ident(ident) => {
                     let body = if self.expect_peek()? == &Token::QuestionMark {
                         self.expect_next()?;
@@ -42,7 +43,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 Token::TripleDot => {
                     includes_rest_pattern = true;
                 }
-                t => return unexpected(t),
+                _ => return unexpected(t),
             }
         }
 
@@ -54,7 +55,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
     /// parse a lambda expression. Assumes an initial ident has already been consumed.
     pub fn parse_lambda(&mut self, initial_ident: &'t str) -> ParseResult<Lambda<'t>> {
-        match self.expect_next()? {
+        let t = self.expect_next()?;
+        match t.token {
             Token::At => {
                 self.expect(Token::CurlyOpen)?;
                 let args = self.parse_destructuring_args(None)?;
@@ -75,7 +77,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     body: Box::new(body),
                 })
             }
-            t => unexpected(t),
+            _ => unexpected(t),
         }
     }
 

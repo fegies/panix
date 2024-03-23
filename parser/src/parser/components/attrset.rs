@@ -41,7 +41,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     fn parse_attrset_path(&mut self, pieces: &mut Vec<&'t str>) -> ParseResult<()> {
         loop {
             // parse part.
-            let ident = match self.expect_next()? {
+            let t = self.expect_next()?;
+            let ident = match t.token {
                 Token::StringBegin => {
                     let str = self.parse_simple_string()?;
                     match str {
@@ -52,14 +53,15 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     }
                 }
                 Token::Ident(i) => i,
-                t => unexpected(t)?,
+                _ => unexpected(t)?,
             };
             pieces.push(ident);
 
-            match self.expect_next()? {
+            let t = self.expect_next()?;
+            match t.token {
                 Token::Eq => break,
                 Token::Dot => {}
-                t => unexpected(t)?,
+                _ => unexpected(t)?,
             }
         }
         Ok(())
@@ -67,14 +69,15 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
     fn parse_inherit(&mut self, inherit_keys: &mut HashSet<&'t str>) -> ParseResult<()> {
         loop {
-            match self.expect_next()? {
+            let t = self.expect_next()?;
+            match t.token {
                 Token::Ident(varname) => {
                     if !inherit_keys.insert(varname) {
                         return Err(ParseError::AttributePathConflict(varname.to_owned()));
                     }
                 }
                 Token::Semicolon => return Ok(()),
-                t => unexpected(t)?,
+                _ => unexpected(t)?,
             }
         }
     }

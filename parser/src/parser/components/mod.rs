@@ -6,7 +6,9 @@ pub mod let_expr;
 pub mod list;
 pub mod string;
 
-use lexer::Token;
+use std::backtrace::{self, Backtrace};
+
+use lexer::{Token, TokenWithPosition};
 
 use super::{ParseError, ParseResult, TokenSource};
 
@@ -24,28 +26,31 @@ struct Parser<S> {
 }
 
 impl<'t, S: TokenSource<'t>> Parser<S> {
-    fn next(&mut self) -> Option<Token<'t>> {
+    fn next(&mut self) -> Option<TokenWithPosition<'t>> {
         self.source.next()
     }
     fn peek(&mut self) -> Option<&Token<'t>> {
-        self.source.peek()
+        self.source.peek().map(|t| &t.token)
     }
 
-    fn expect_next_or_whitespace(&mut self) -> ParseResult<Token<'t>> {
+    fn expect_next_or_whitespace(&mut self) -> ParseResult<TokenWithPosition<'t>> {
         self.next().ok_or(ParseError::UnexpectedEof)
     }
 
-    fn expect_next(&mut self) -> ParseResult<Token<'t>> {
+    fn expect_next(&mut self) -> ParseResult<TokenWithPosition<'t>> {
         loop {
             let token = self.expect_next_or_whitespace()?;
-            if Token::Whitespace != token {
+            if Token::Whitespace != token.token {
                 return Ok(token);
             }
         }
     }
     fn expect_peek(&mut self) -> ParseResult<&Token<'t>> {
-        if let Some(Token::Whitespace) = self.peek() {
-            self.source.peek_2().ok_or(ParseError::UnexpectedEof)
+        if let Some(Token::Whitespace) = self.peek().as_ref() {
+            self.source
+                .peek_2()
+                .map(|t| &t.token)
+                .ok_or(ParseError::UnexpectedEof)
         } else {
             self.peek().ok_or(ParseError::UnexpectedEof)
         }
@@ -53,7 +58,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
     fn expect(&mut self, token: Token<'static>) -> ParseResult<()> {
         let next = self.expect_next()?;
-        if next == token {
+        if next.token == token {
             Ok(())
         } else {
             unexpected_with_expected(next, token)
@@ -61,20 +66,34 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     }
 
     fn expect_ident(&mut self) -> ParseResult<&'t str> {
-        match self.expect_next()? {
+        let t = self.expect_next()?;
+        match t.token {
             Token::Ident(i) => Ok(i),
-            t => unexpected(t)?,
+            _ => unexpected(t)?,
         }
     }
 }
 
 #[cold]
-fn unexpected<T>(t: Token) -> ParseResult<T> {
-    let token = format!("{:?}", t);
+fn unexpected<T>(t: TokenWithPosition) -> ParseResult<T> {
+    let t = t;
+    let token = format!(
+        "{t:?} at \n{}",
+        format_backtrace(std::backtrace::Backtrace::capture())
+    );
     Err(super::ParseError::UnexpectedToken(token))
 }
 #[cold]
-fn unexpected_with_expected<T>(t: Token, expected: Token) -> ParseResult<T> {
+fn unexpected_with_expected<T>(t: TokenWithPosition, expected: Token) -> ParseResult<T> {
     let token = format!("{t:?}, expected {expected:?}");
     Err(super::ParseError::UnexpectedToken(token))
+}
+#[inline]
+fn format_backtrace(backtrace: Backtrace) -> String {
+    let backtrace = format!("{}", backtrace);
+    backtrace
+        .lines()
+        .take_while(|l| !l.contains("parser::parser::parser_entrypoint"))
+        .map(|l| format!("{l}\n"))
+        .collect()
 }

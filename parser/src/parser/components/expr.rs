@@ -15,7 +15,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         min_bp: u8,
         allow_spaces: bool,
     ) -> ParseResult<NixExpr<'t>> {
-        let mut lhs = match self.expect_next()? {
+        let t = self.expect_next()?;
+        let mut lhs = match t.token {
             Token::Ident(ident) => {
                 if matches!(self.expect_peek()?, Token::At | Token::Colon) {
                     NixExpr::Code(Code::Lambda(self.parse_lambda(ident)?))
@@ -48,7 +49,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             }
             Token::PathBegin => NixExpr::BasicValue(BasicValue::Path(self.parse_path()?)),
             Token::Not => todo!(),
-            t => unexpected(t)?,
+            _ => unexpected(t)?,
         };
 
         loop {
@@ -60,7 +61,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
                 let token = self.expect_next_or_whitespace()?;
 
-                if token == Token::Whitespace {
+                if token.token == Token::Whitespace {
                     if !allow_spaces {
                         break;
                     }
@@ -69,7 +70,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     }
                 }
 
-                lhs = match token {
+                lhs = match token.token {
                     Token::Dot => NixExpr::Code(Code::Op(Op::AttrRef {
                         left: Box::new(lhs),
                         // attrset refs are not full expressions. They may only be strings or idents
@@ -105,7 +106,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     }
 
     fn parse_attrset_ref(&mut self) -> ParseResult<&'t str> {
-        match self.expect_next()? {
+        let t = self.expect_next()?;
+        match t.token {
             Token::Ident(ident) => Ok(ident),
             Token::StringBegin => match self.parse_simple_string()? {
                 NixString::Literal(l) => Ok(l),
@@ -113,7 +115,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 NixString::Interpolated(_) => todo!(),
                 NixString::Empty => Ok(""),
             },
-            t => unexpected(t),
+            _ => unexpected(t),
         }
     }
 
@@ -121,7 +123,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// without a total binding
     /// expects that the initial opening curly has already been consumed
     fn parse_attrset_or_destructuring_lambda(&mut self) -> ParseResult<NixExpr<'t>> {
-        let first_ident = match self.expect_next()? {
+        let t = self.expect_next()?;
+        let first_ident = match t.token {
             Token::Ident(i) => i,
             Token::CurlyClose => {
                 if let Token::Colon = self.expect_peek()? {
@@ -145,10 +148,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     Attrset::empty(),
                 )));
             }
-            t => unexpected(t)?,
+            _ => unexpected(t)?,
         };
 
-        let res = match self.expect_next()? {
+        let t = self.expect_next()?;
+        let res = match t.token {
             Token::Dot => {
                 let attrset = self.parse_attrset_multipath(first_ident)?;
                 NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
@@ -170,7 +174,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 let lambda = self.parse_attrset_lambda(first_ident, None)?;
                 NixExpr::Code(Code::Lambda(lambda))
             }
-            t => unexpected(t)?,
+            _ => unexpected(t)?,
         };
 
         Ok(res)

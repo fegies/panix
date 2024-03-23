@@ -11,9 +11,10 @@ use super::{unexpected, Parser};
 
 impl<'t, S: TokenSource<'t>> Parser<S> {
     fn parse_binding(&mut self) -> ParseResult<(&'t str, NixExpr<'t>)> {
-        let ident = match self.expect_next()? {
+        let t = self.expect_next()?;
+        let ident = match t.token {
             Token::Ident(ident) => ident,
-            t => return unexpected(t),
+            _ => return unexpected(t),
         };
 
         self.expect(Token::Eq)?;

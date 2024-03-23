@@ -1,6 +1,4 @@
-use std::iter::Peekable;
-
-use lexer::{LexError, Token};
+use lexer::{LexError, TokenWithPosition};
 
 use self::{ast::NixExpr, components::parse_complete, util::multipeek::Multipeek};
 
@@ -9,24 +7,24 @@ mod components;
 mod util;
 
 trait TokenSource<'a> {
-    fn next(&mut self) -> Option<Token<'a>>;
-    fn peek(&mut self) -> Option<&Token<'a>>;
-    fn peek_2(&mut self) -> Option<&Token<'a>>;
+    fn next(&mut self) -> Option<TokenWithPosition<'a>>;
+    fn peek(&mut self) -> Option<&TokenWithPosition<'a>>;
+    fn peek_2(&mut self) -> Option<&TokenWithPosition<'a>>;
 }
 
 impl<'a, I> TokenSource<'a> for Multipeek<I>
 where
-    I: Iterator<Item = Token<'a>>,
+    I: Iterator<Item = TokenWithPosition<'a>>,
 {
-    fn next(&mut self) -> Option<Token<'a>> {
+    fn next(&mut self) -> Option<TokenWithPosition<'a>> {
         Iterator::next(self)
     }
 
-    fn peek(&mut self) -> Option<&Token<'a>> {
+    fn peek(&mut self) -> Option<&TokenWithPosition<'a>> {
         Multipeek::peek(self)
     }
 
-    fn peek_2(&mut self) -> Option<&Token<'a>> {
+    fn peek_2(&mut self) -> Option<&TokenWithPosition<'a>> {
         Multipeek::peek_2(self)
     }
 }
@@ -46,7 +44,7 @@ impl From<LexError> for ParseError {
     }
 }
 
-pub fn parse_nix(input: &[u8]) -> ParseResult<NixExpr> {
+fn parse_nix_inner(input: &[u8]) -> ParseResult<NixExpr> {
     let res = lexer::run(input, |tokens| {
         let source = Multipeek::new(tokens);
         parse_complete(source)
@@ -58,4 +56,13 @@ pub fn parse_nix(input: &[u8]) -> ParseResult<NixExpr> {
         Err((_, Err(e))) => Err(e),
         Ok(Err(e)) => Err(e),
     }
+}
+
+// this is just a convenient point to cut off the stack trace.
+fn parser_entrypoint(input: &[u8]) -> ParseResult<NixExpr> {
+    parse_nix_inner(input)
+}
+
+pub fn parse_nix(input: &[u8]) -> ParseResult<NixExpr> {
+    parser_entrypoint(input)
 }

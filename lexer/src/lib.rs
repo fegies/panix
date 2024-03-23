@@ -62,13 +62,14 @@ pub enum Token<'a> {
 }
 impl Eq for Token<'_> {}
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct SourcePosition {
     pub line: u32,
     pub column: u16,
     pub file_id: u16,
 }
 
+#[derive(Debug)]
 pub struct TokenWithPosition<'a> {
     pub token: Token<'a>,
     pub position: SourcePosition,
