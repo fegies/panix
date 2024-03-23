@@ -1,7 +1,16 @@
 use super::*;
 
 fn lex_test(input: &str, expected: Result<&[Token<'_>], LexError>) {
-    let res = run(input.as_bytes(), |adapter| adapter.collect::<Vec<_>>());
+    let mut res = run(input.as_bytes(), |adapter| {
+        adapter.map(|t| t.token).collect::<Vec<_>>()
+    });
+
+    if let Ok(tokens) = &mut res {
+        let last = tokens
+            .pop()
+            .expect("at least the eof token must be present");
+        assert_eq!(Token::EOF, last);
+    }
 
     let res = res
         .as_ref()
@@ -16,12 +25,24 @@ fn assert_lex(input: &str, expected: &[Token<'_>]) {
 }
 
 #[test]
+fn empty() {
+    assert_lex("", &[]);
+}
+
+#[test]
+fn simple_ident() {
+    assert_lex("foo", &[Token::Ident("foo")]);
+}
+
+#[test]
+fn simple_string() {
+    assert_lex("\"\"", &[Token::StringBegin, Token::StringEnd])
+}
+
+#[test]
 fn multiline_string() {
     let str = "''''";
-    assert_lex(
-        str,
-        &[Token::IndentedStringBegin, Token::StringEnd, Token::EOF],
-    );
+    assert_lex(str, &[Token::IndentedStringBegin, Token::StringEnd]);
 
     let str = r#"
         ''
@@ -35,7 +56,6 @@ fn multiline_string() {
             Token::StringContent("        "),
             Token::StringEnd,
             Token::Whitespace,
-            Token::EOF,
         ],
     );
 }
@@ -68,7 +88,6 @@ fn multiline_string_complex() {
             Token::StringEnd,
             Token::Semicolon,
             Token::Whitespace,
-            Token::EOF,
         ],
     )
 }

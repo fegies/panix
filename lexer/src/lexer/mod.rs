@@ -1,5 +1,6 @@
 mod util;
 
+mod input;
 mod stackstack;
 #[cfg(test)]
 mod tests;
@@ -7,9 +8,9 @@ mod tests;
 use lexer_impedance_matcher::{ImpedanceMatcher, IteratorAdapter};
 use memchr::memmem;
 
-use crate::{LexError, Token};
+use crate::{LexError, SourcePosition, Token, TokenWithPosition};
 
-use self::{stackstack::Stack, util::ends_with_unsecaped_backslash};
+use self::{input::LexerInput, stackstack::Stack, util::ends_with_unsecaped_backslash};
 
 enum BraceStackEntry {
     Normal,
@@ -19,8 +20,8 @@ enum BraceStackEntry {
 }
 
 struct Lexer<'input, 'matcher> {
-    input: &'input [u8],
-    matcher: &'matcher ImpedanceMatcher<Token<'input>>,
+    input: LexerInput<'input>,
+    matcher: &'matcher ImpedanceMatcher<TokenWithPosition<'input>>,
     brace_stack: Stack<128, BraceStackEntry>,
 }
 
@@ -51,7 +52,13 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
     }
 
     async fn push(&mut self, token: Token<'a>) {
-        self.matcher.push(token).await
+        self.push_pos(token, self.input.pos()).await
+    }
+
+    async fn push_pos(&self, token: Token<'a>, position: crate::SourcePosition) {
+        self.matcher
+            .push(TokenWithPosition { token, position })
+            .await
     }
     fn push_brace(&mut self, entry: BraceStackEntry) -> Result<(), LexError> {
         self.brace_stack
@@ -63,21 +70,21 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         macro_rules! single {
             ($token: expr) => {{
                 self.push($token).await;
-                self.input = &self.input[1..];
+                self.input.advance_one();
             }};
         }
         macro_rules! lookahead {
             ($byte: expr, $match_token: expr, $fallback_token: expr) => {{
-                if Some($byte) == self.input.get(1).cloned() {
+                if Some($byte) == self.input.get(1) {
                     self.push($match_token).await;
-                    self.input = &self.input[2..];
+                    self.input.consume(2);
                 } else {
                     single!($fallback_token);
                 }
             }};
         }
-        while let Some(cur) = self.input.first() {
-            match *cur {
+        while let Some(cur) = self.input.get(0) {
+            match cur {
                 whitespace_pat!() => self.skip_whitespace().await,
                 b';' => single!(Token::Semicolon),
                 b'@' => single!(Token::At),
@@ -97,19 +104,24 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                         .brace_stack
                         .pop()
                         .ok_or(LexError::UnmatchedCloseBrace)?;
-                    self.consume(1);
+
+                    let pos = self.input.pos();
+                    self.input.advance_one();
+
                     match top {
-                        BraceStackEntry::Normal => self.push(Token::CurlyClose).await,
+                        BraceStackEntry::Normal => {
+                            self.push_pos(Token::CurlyClose, pos).await;
+                        }
                         BraceStackEntry::SimpleStringInterpolation => {
-                            self.push(Token::EndInterpol).await;
+                            self.push_pos(Token::EndInterpol, pos).await;
                             self.resume_lex_simple_string().await?;
                         }
                         BraceStackEntry::MultilineStringInterpolation => {
-                            self.push(Token::EndInterpol).await;
+                            self.push_pos(Token::EndInterpol, pos).await;
                             self.resume_lex_multiline_string().await?;
                         }
                         BraceStackEntry::PathInterpolation => {
-                            self.push(Token::EndInterpol).await;
+                            self.push_pos(Token::EndInterpol, pos).await;
                             self.resume_lex_path().await?;
                         }
                     }
@@ -125,29 +137,29 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 b'"' => self.lex_simple_string().await?,
                 b'#' => self.skip_comment(),
                 b'|' => {
-                    let next = self.input.get(1).cloned();
+                    let next = self.input.get(1);
                     if Some(b'|') == next {
                         self.push(Token::Or).await;
-                        self.input = &self.input[2..];
+                        self.input.consume(2);
                     } else {
                         return Err(LexError::UnexpectedChar(next));
                     }
                 }
                 b'.' => {
-                    if Some(b"...".as_ref()) == self.input.get(..3) {
+                    if self.input.matches("...") {
                         self.push(Token::TripleDot).await;
-                        self.input = &self.input[3..];
-                    } else if Some(&b'/') == self.input.get(1) {
+                        self.input.consume(3);
+                    } else if Some(b'/') == self.input.get(1) {
                         self.lex_path().await?;
                     } else {
                         single!(Token::Dot)
                     }
                 }
                 b'/' => {
-                    match self.input.get(1).cloned() {
+                    match self.input.get(1) {
                         Some(b'/') => {
                             self.push(Token::DoubleSlash).await;
-                            self.input = &self.input[2..];
+                            self.input.consume(2);
                         }
                         Some(b'*') => {
                             // we have to skip a multiline comment
@@ -158,30 +170,30 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     }
                 }
                 b'i' if self
-                    .try_parse_keyword(b"inherit", Token::KwInherit)
+                    .try_parse_keyword("inherit", Token::KwInherit)
                     .await
                     .is_some() => {}
-                b'i' if self.try_parse_keyword(b"in", Token::KwIn).await.is_some() => {}
-                b'i' if self.try_parse_keyword(b"if", Token::KwIf).await.is_some() => {}
-                b'l' if self.try_parse_keyword(b"let", Token::KwLet).await.is_some() => {}
-                b'r' if self.try_parse_keyword(b"rec", Token::KwRec).await.is_some() => {}
+                b'i' if self.try_parse_keyword("in", Token::KwIn).await.is_some() => {}
+                b'i' if self.try_parse_keyword("if", Token::KwIf).await.is_some() => {}
+                b'l' if self.try_parse_keyword("let", Token::KwLet).await.is_some() => {}
+                b'r' if self.try_parse_keyword("rec", Token::KwRec).await.is_some() => {}
                 b't' if self
-                    .try_parse_keyword(b"then", Token::KwThen)
+                    .try_parse_keyword("then", Token::KwThen)
                     .await
                     .is_some() => {}
                 b'e' if self
-                    .try_parse_keyword(b"else", Token::KwElse)
+                    .try_parse_keyword("else", Token::KwElse)
                     .await
                     .is_some() => {}
                 b'w' if self
-                    .try_parse_keyword(b"with", Token::KwWith)
+                    .try_parse_keyword("with", Token::KwWith)
                     .await
                     .is_some() => {}
                 b'n' if self
-                    .try_parse_keyword(b"null", Token::KwNull)
+                    .try_parse_keyword("null", Token::KwNull)
                     .await
                     .is_some() => {}
-                b'\'' if self.input.get(1) == Some(&b'\'') => {
+                b'\'' if self.input.get(1) == Some(b'\'') => {
                     self.lex_indented_string().await?;
                 }
                 b'0'..=b'9' => {
@@ -198,27 +210,31 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
     }
 
     async fn lex_number(&mut self) -> Result<(), LexError> {
-        let digits_count = self
-            .input
+        let input_slice = self.input.slice();
+
+        let digits_count = input_slice
             .iter()
             .take_while(|n| matches!(n, b'0'..=b'9'))
             .count();
-        if self.input.get(digits_count) == Some(&b'.') {
+        if self.input.get(digits_count) == Some(b'.') {
             // this is a float!
-            let second_part_digits = &self.input[digits_count + 1..]
+            let second_part_digits = input_slice[digits_count + 1..]
                 .iter()
                 .take_while(|n| matches!(n, b'0'..=b'9'))
                 .count();
             let total_chars = digits_count + 1 + second_part_digits;
-            let float = self
-                .consume_as_str(total_chars)?
+            let chars = self.input.consume(total_chars);
+            let float = core::str::from_utf8(chars)
+                .map_err(LexError::InvalidString)?
                 .parse()
                 .map_err(|_| LexError::InvalidFloat)?;
             self.push(Token::Float(float)).await;
         } else {
             // this is just a plain integer
-            let int = self
-                .consume_as_str(digits_count)?
+            let chars = self.input.consume(digits_count);
+
+            let int = core::str::from_utf8(chars)
+                .map_err(LexError::InvalidString)?
                 .parse()
                 .map_err(|_| LexError::InvalidInt)?;
             self.push(Token::Integer(int)).await;
@@ -227,29 +243,28 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
     }
 
     async fn lex_ident(&mut self) -> Result<(), LexError> {
-        let end_idx = self
-            .input
+        let input_slice = self.input.slice();
+        let end_idx = input_slice
             .iter()
             .enumerate()
             .find(|(_idx, char)| match char {
                 ident_pat!() => false,
                 _ => true,
-            });
-        let ident_slice;
-        if let Some((end_idx, _)) = end_idx {
-            ident_slice = self.consume(end_idx);
-        } else {
-            ident_slice = self.input;
-            self.input = &[];
-        }
+            })
+            .map(|(end_idx, _)| end_idx)
+            .unwrap_or(input_slice.len());
+
+        let pos = self.input.pos();
+        let ident_slice = self.input.consume(end_idx);
         let ident = Self::convert_str(ident_slice)?;
-        self.push(Token::Ident(ident)).await;
+        self.push_pos(Token::Ident(ident), pos).await;
         Ok(())
     }
 
-    async fn try_parse_keyword(&mut self, keyword: &'static [u8], token: Token<'a>) -> Option<()> {
+    async fn try_parse_keyword(&mut self, keyword: &'static str, token: Token<'a>) -> Option<()> {
         let kw_len = keyword.len();
-        if keyword != self.input.get(..kw_len)? {
+
+        if !self.input.matches(keyword) {
             return None;
         }
 
@@ -259,7 +274,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
             _ => {
                 // totally a keyword :)
                 self.push(token).await;
-                self.input = &self.input[kw_len..];
+                self.input.consume(kw_len);
                 Some(())
             }
         }
@@ -267,15 +282,6 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 
     fn convert_str(content: &[u8]) -> Result<&str, LexError> {
         core::str::from_utf8(content).map_err(LexError::InvalidString)
-    }
-    #[inline]
-    fn consume(&mut self, length: usize) -> &'a [u8] {
-        let res = &self.input[..length];
-        self.input = &self.input[length..];
-        res
-    }
-    fn consume_as_str(&mut self, length: usize) -> Result<&'a str, LexError> {
-        Self::convert_str(self.consume(length))
     }
 
     async fn lex_path(&mut self) -> Result<(), LexError> {
@@ -286,14 +292,17 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
     async fn resume_lex_path(&mut self) -> Result<(), LexError> {
         let mut end_idx = None;
 
-        for (idx, char) in self.input.iter().cloned().enumerate() {
+        let input_slice = self.input.slice();
+
+        for (idx, char) in input_slice.iter().cloned().enumerate() {
             match char {
                 ident_pat!() | b'/' | b'.' => {}
-                b'$' if matches!(self.input.get(idx + 1), Some(&b'{')) => {
-                    let str = self.consume_as_str(idx)?;
-                    self.input = &self.input[2..];
-                    self.push(Token::StringContent(str)).await;
+                b'$' if matches!(self.input.get(idx + 1), Some(b'{')) => {
+                    let pos = self.input.pos();
+                    let str = self.input.consume(idx);
+                    self.push_string_content(str, pos).await?;
                     self.push(Token::BeginInterpol).await;
+                    self.input.consume(2);
                     self.push_brace(BraceStackEntry::PathInterpolation)?;
                     return Ok(());
                 }
@@ -304,39 +313,42 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
             }
         }
 
-        let final_part;
-        if let Some(end_idx) = end_idx {
-            final_part = self.consume(end_idx);
-        } else {
-            final_part = self.input;
-            self.input = &[];
-        }
-        let final_part = Self::convert_str(final_part)?;
-        self.push(Token::StringContent(final_part)).await;
+        let end_idx = end_idx.unwrap_or_else(|| self.input.slice().len());
+
+        let pos = self.input.pos();
+        let final_part = self.input.consume(end_idx);
+        self.push_string_content(final_part, pos).await?;
         self.push(Token::PathEnd).await;
         Ok(())
     }
 
-    async fn push_string_content(&mut self, mut content: &'a [u8]) -> Result<(), LexError> {
+    async fn push_string_content(
+        &mut self,
+        mut content: &'a [u8],
+        pos: SourcePosition,
+    ) -> Result<(), LexError> {
         while let Some(backslash_pos) = memchr::memchr(b'\\', content) {
             let unescaped_part = &content[..backslash_pos];
             if unescaped_part.len() > 0 {
-                self.push(Token::StringContent(Self::convert_str(unescaped_part)?))
-                    .await;
+                self.push_pos(
+                    Token::StringContent(Self::convert_str(unescaped_part)?),
+                    pos,
+                )
+                .await;
             }
             // skip the leading part, including the backslash.
             content = &content[backslash_pos + 1..];
             match content.get(0) {
                 Some(b'n') => {
-                    self.push(Token::StringContent("\n")).await;
+                    self.push_pos(Token::StringContent("\n"), pos).await;
                     content = &content[1..];
                 }
                 Some(b'r') => {
-                    self.push(Token::StringContent("\r")).await;
+                    self.push_pos(Token::StringContent("\r"), pos).await;
                     content = &content[1..];
                 }
                 Some(b'\\') => {
-                    self.push(Token::StringContent("\\")).await;
+                    self.push_pos(Token::StringContent("\\"), pos).await;
                     content = &content[1..];
                 }
                 Some(c) => {
@@ -353,26 +365,27 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 
     async fn lex_simple_string(&mut self) -> Result<(), LexError> {
         // skip the starting quotation mark
-        self.consume(1);
         self.push(Token::StringBegin).await;
+        self.input.advance_one();
         self.resume_lex_simple_string().await
     }
 
     async fn lex_indented_string(&mut self) -> Result<(), LexError> {
-        // skip starting quot
-        self.consume(2);
         self.push(Token::IndentedStringBegin).await;
+        // skip starting quot
+        self.input.consume(2);
 
         // we need to skip all leading whitespace of the first line if it is actually
         // a multiline string
         let num_leading_spaces = self
             .input
+            .slice()
             .iter()
             .take_while(|c| matches!(**c, whitespace_pat!(no_newline)))
             .count();
-        if self.input.get(num_leading_spaces) == Some(&b'\n') {
+        if self.input.get(num_leading_spaces) == Some(b'\n') {
             // it is a multiline string!
-            self.consume(num_leading_spaces + 1);
+            self.input.consume(num_leading_spaces + 1);
         }
 
         self.resume_lex_multiline_string().await
@@ -380,42 +393,44 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 
     async fn resume_lex_multiline_string(&mut self) -> Result<(), LexError> {
         'outer: loop {
+            let input_slice = self.input.slice();
             let mut search_idx = 0;
-            while let Some(idx) = memchr::memchr3(b'\n', b'$', b'\'', &self.input[search_idx..]) {
+            while let Some(idx) = memchr::memchr3(b'\n', b'$', b'\'', &input_slice[search_idx..]) {
                 let decide_idx = search_idx + idx;
-                match self.input[decide_idx] {
+                let pos = self.input.pos();
+                match input_slice[decide_idx] {
                     b'\n' => {
-                        let part = self.consume_as_str(decide_idx + 1)?;
-                        self.push(Token::StringContent(part)).await;
+                        let part = self.input.consume(decide_idx + 1);
+                        self.push_string_content(part, pos).await?;
                         continue 'outer;
                     }
-                    b'$' if self.input.get(decide_idx + 1) == Some(&b'{') => {
-                        let part = self.consume_as_str(decide_idx)?;
+                    b'$' if self.input.get(decide_idx + 1) == Some(b'{') => {
+                        let part = self.input.consume(decide_idx);
                         if part.len() > 0 {
-                            self.push(Token::StringContent(part)).await;
+                            self.push_string_content(part, pos).await?;
                         }
                         // skip the opening dollar brace
-                        self.consume(2);
+                        self.input.consume(2);
                         self.push(Token::BeginInterpol).await;
                         self.push_brace(BraceStackEntry::MultilineStringInterpolation)?;
                         return Ok(());
                     }
-                    b'\'' if self.input.get(decide_idx + 1) == Some(&b'\'') => {
-                        match self.input.get(decide_idx + 2).cloned() {
+                    b'\'' if self.input.get(decide_idx + 1) == Some(b'\'') => {
+                        match self.input.get(decide_idx + 2) {
                             Some(b'$' | b'\'') => {
                                 // we found something that is escaped
                                 search_idx = decide_idx + 3;
                             }
                             _ => {
                                 // end of string
-                                let part = self.consume_as_str(decide_idx)?;
+                                let part = self.input.consume(decide_idx);
                                 if part.len() > 0 {
-                                    self.push(Token::StringContent(part)).await;
+                                    self.push_string_content(part, pos).await?;
                                 }
                                 self.push(Token::StringEnd).await;
 
                                 // skip the string close quotes
-                                self.consume(2);
+                                self.input.consume(2);
 
                                 return Ok(());
                             }
@@ -431,37 +446,45 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
     }
 
     async fn resume_lex_simple_string(&mut self) -> Result<(), LexError> {
-        for quot_pos in memchr::memchr_iter(b'"', self.input) {
+        let input_slice = self.input.slice();
+        for quot_pos in memchr::memchr_iter(b'"', input_slice) {
             if quot_pos == 0 {
                 // this is actually an empty string :)
                 self.push(Token::StringEnd).await;
-                self.input = &self.input[1..];
+                self.input.advance_one();
                 return Ok(());
             }
 
-            if self.input[quot_pos - 1] == b'\\' {
+            // we found a quotation mark.
+            let candidate = &input_slice[..quot_pos];
+
+            if ends_with_unsecaped_backslash(candidate) {
                 continue;
             }
-
-            // we found an unescaped quotation mark.
-            // let's see if there is an interpolation going on
-            let candidate = &self.input[..quot_pos];
 
             for idx in memmem::find_iter(candidate, b"${") {
                 let part_to_beginning_of_interpolation = &candidate[..idx];
 
                 if !ends_with_unsecaped_backslash(part_to_beginning_of_interpolation) {
                     // we actually found an interpolation!
-                    self.push_string_content(part_to_beginning_of_interpolation)
-                        .await?;
-                    self.consume(part_to_beginning_of_interpolation.len() + 2);
+                    let pos = self.input.pos();
+                    let cont = self.input.consume(part_to_beginning_of_interpolation.len());
+                    if cont.len() > 0 {
+                        self.push_string_content(cont, pos).await?;
+                    }
+                    // skip interpol marker
+                    self.input.consume(2);
                     self.push_brace(BraceStackEntry::SimpleStringInterpolation)?;
+                    return Ok(());
                 }
             }
 
-            self.push_string_content(candidate).await?;
+            // no interpolation found.
+            let pos = self.input.pos();
+            let cont = self.input.consume(candidate.len());
+            self.push_string_content(cont, pos).await?;
             self.push(Token::StringEnd).await;
-            self.input = &self.input[quot_pos + 1..];
+            self.input.advance_one();
             return Ok(());
         }
 
@@ -469,38 +492,35 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
     }
 
     async fn skip_whitespace(&mut self) {
-        let mut pushed = false;
-        loop {
-            match self.input.first() {
-                Some(whitespace_pat!()) => {
-                    self.input = &self.input[1..];
-                    if !pushed {
-                        self.push(Token::Whitespace).await;
-                        pushed = true;
-                    }
-                }
-                _ => break,
-            }
+        if let Some(whitespace_pat!()) = self.input.get(0) {
+            self.push(Token::Whitespace).await;
+            self.input.advance_one();
+        } else {
+            return;
+        }
+
+        while let Some(whitespace_pat!()) = self.input.get(0) {
+            self.input.advance_one();
         }
     }
 
     fn skip_comment(&mut self) {
-        if let Some(endline_pos) = memchr::memchr(b'\n', self.input) {
-            self.input = &self.input[endline_pos..];
+        if let Some(endline_pos) = memchr::memchr(b'\n', self.input.slice()) {
+            self.input.consume(endline_pos + 1);
         } else {
-            self.input = &[];
+            self.input.consume(self.input.slice().len());
         }
     }
 }
 
 pub fn run<'a, TRes>(
     input: &'a [u8],
-    consumer: impl FnOnce(IteratorAdapter<'_, '_, Token<'a>, Result<(), LexError>>) -> TRes,
+    consumer: impl FnOnce(IteratorAdapter<'_, '_, TokenWithPosition<'a>, Result<(), LexError>>) -> TRes,
 ) -> Result<TRes, (LexError, TRes)> {
     let adapter = ImpedanceMatcher::new();
 
     let future = Lexer {
-        input,
+        input: LexerInput::new(input, 0),
         matcher: &adapter,
         brace_stack: Stack::new(),
     }
