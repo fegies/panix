@@ -46,13 +46,13 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         }
     }
     fn expect_peek(&mut self) -> ParseResult<&Token<'t>> {
-        if let Some(Token::Whitespace) = self.peek().as_ref() {
-            self.source
+        match self.peek().ok_or(ParseError::UnexpectedEof)? {
+            Token::Whitespace => self
+                .source
                 .peek_2()
                 .map(|t| &t.token)
-                .ok_or(ParseError::UnexpectedEof)
-        } else {
-            self.peek().ok_or(ParseError::UnexpectedEof)
+                .ok_or(ParseError::UnexpectedEof),
+            _ => Ok(self.peek().expect("cannot be empty")),
         }
     }
 

@@ -108,7 +108,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         insert_nested_attrs(&mut attrs, &ident_buf, initial_value)?;
 
         loop {
-            if let Token::CurlyClose = self.expect_peek()? {
+            let peeked = self.expect_peek()?;
+            println!("{peeked:?}");
+            if let Token::CurlyClose = peeked {
                 self.expect_next()?;
                 break;
             }
@@ -160,6 +162,7 @@ fn insert_nested_attrs<'t>(
         .split_last()
         .expect("should not be called with an empty slice");
 
+    #[cold]
     fn conflict(pieces: &[&str], last: &str) -> ParseError {
         ParseError::AttributePathConflict(format!("{pieces:?}, {last:?}"))
     }

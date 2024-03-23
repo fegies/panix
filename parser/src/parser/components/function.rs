@@ -40,7 +40,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     };
                     bindings.insert(ident, body);
                 }
-                Token::TripleDot => {
+                Token::TripleDot if !includes_rest_pattern => {
                     includes_rest_pattern = true;
                 }
                 _ => return unexpected(t),

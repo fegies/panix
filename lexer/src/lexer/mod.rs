@@ -23,6 +23,7 @@ struct Lexer<'input, 'matcher> {
     input: LexerInput<'input>,
     matcher: &'matcher ImpedanceMatcher<TokenWithPosition<'input>>,
     brace_stack: Stack<128, BraceStackEntry>,
+    last_was_whitespace: bool,
 }
 
 const fn is_pathchar(char: u8) -> bool {
@@ -55,7 +56,17 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         self.push_pos(token, self.input.pos()).await
     }
 
-    async fn push_pos(&self, token: Token<'a>, position: crate::SourcePosition) {
+    async fn push_pos(&mut self, token: Token<'a>, position: crate::SourcePosition) {
+        // ensure the lexer swallows consecutive whitespaces
+        if token == Token::Whitespace {
+            if self.last_was_whitespace {
+                return;
+            } else {
+                self.last_was_whitespace = true;
+            }
+        } else {
+            self.last_was_whitespace = false;
+        }
         self.matcher
             .push(TokenWithPosition { token, position })
             .await
@@ -523,6 +534,7 @@ pub fn run<'a, TRes>(
         input: LexerInput::new(input, 0),
         matcher: &adapter,
         brace_stack: Stack::new(),
+        last_was_whitespace: false,
     }
     .run();
 

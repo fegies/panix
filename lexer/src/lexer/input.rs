@@ -11,8 +11,8 @@ impl<'input> LexerInput<'input> {
         Self {
             slice,
             current_position: SourcePosition {
-                line: 0,
-                column: 0,
+                line: 1,
+                column: 1,
                 file_id,
             },
             offset: 0,
@@ -29,7 +29,8 @@ impl<'input> LexerInput<'input> {
 
         match memchr::memchr_iter(b'\n', part).enumerate().last() {
             Some((num_newlines, last_idx)) => {
-                self.current_position.line += num_newlines as u32;
+                let num_newlines = num_newlines as u32 + 1;
+                self.current_position.line += num_newlines;
                 self.current_position.column = (part.len() - last_idx) as u16;
             }
             None => {
@@ -42,7 +43,6 @@ impl<'input> LexerInput<'input> {
     }
 
     pub fn advance_one(&mut self) {
-        self.offset += 1;
         if let Some(char) = self.slice.get(self.offset) {
             if *char == b'\n' {
                 self.current_position.line += 1;
@@ -51,6 +51,7 @@ impl<'input> LexerInput<'input> {
                 self.current_position.column += 1;
             }
         }
+        self.offset += 1;
     }
 
     pub fn get(&self, relative_index: usize) -> Option<u8> {
@@ -59,10 +60,9 @@ impl<'input> LexerInput<'input> {
 
     pub fn matches(&self, str: &str) -> bool {
         let str = str.as_bytes();
-        self.slice
-            .get(self.offset..str.len())
-            .map(|found| found == str)
-            .unwrap_or(false)
+        let found = self.slice.get(self.offset..(self.offset + str.len()));
+
+        found.map(|found| found == str).unwrap_or(false)
     }
 
     pub(crate) fn slice(&self) -> &[u8] {
