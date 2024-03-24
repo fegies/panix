@@ -91,7 +91,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse a multiline string. Assumes the string begin token
     /// has already been consumed
     pub fn parse_multiline_string(&mut self) -> ParseResult<NixString<'t>> {
-        let mut str = self.parse_string_content(Token::PathEnd)?;
+        let mut str = self.parse_string_content(Token::StringEnd)?;
 
         // we have the string parsed. Now we still need to look at the individual
         // lines inside and strip the appropriate amount of whitespace from it.
@@ -103,7 +103,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 .count()
         }
         fn ends_with_space(s: &str) -> bool {
-            s.as_bytes()[s.len() - 1] == b'\n'
+            if s.is_empty() {
+                false
+            } else {
+                s.as_bytes()[s.len() - 1] == b'\n'
+            }
         }
         fn min_spaces<'s>(s: impl Iterator<Item = &'s str>) -> usize {
             let mut counts = true;

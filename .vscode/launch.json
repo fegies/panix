@@ -77,7 +77,7 @@
                 }
             },
             "args": [
-                "/home/felix/nixos-config/hive.nix"
+                "/home/felix/nixos-config/util/installer_script.nix"
             ],
             "cwd": "${workspaceFolder}"
         },

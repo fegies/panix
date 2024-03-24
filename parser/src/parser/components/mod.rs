@@ -85,7 +85,10 @@ fn unexpected<T>(t: TokenWithPosition) -> ParseResult<T> {
 }
 #[cold]
 fn unexpected_with_expected<T>(t: TokenWithPosition, expected: Token) -> ParseResult<T> {
-    let token = format!("{t:?}, expected {expected:?}");
+    let token = format!(
+        "{t:?}, expected {expected:?} at \n{}",
+        format_backtrace(Backtrace::capture())
+    );
     Err(super::ParseError::UnexpectedToken(token))
 }
 #[inline]

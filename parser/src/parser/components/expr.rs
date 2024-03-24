@@ -53,7 +53,6 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         };
 
         loop {
-            println!("lhs: {lhs:?}");
             if let Some((l_bp, r_bp)) = self.peek().and_then(infix_binding_power) {
                 if l_bp < min_bp {
                     break;
@@ -188,6 +187,7 @@ fn could_start_expression(token: &Token) -> bool {
             | Token::CurlyOpen
             | Token::PathBegin
             | Token::StringBegin
+            | Token::IndentedStringBegin
             | Token::Float(_)
             | Token::Integer(_)
             | Token::KwIn
@@ -201,7 +201,6 @@ fn could_start_expression(token: &Token) -> bool {
 }
 
 fn infix_binding_power(token: &Token<'_>) -> Option<(u8, u8)> {
-    println!("getting infix for {token:?}");
     // the binding power table.
     // higher-precedence operators have higher binding powers
     // right-assoc ops have the higher power left, left-assoc ones on the right.

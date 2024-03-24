@@ -109,7 +109,6 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
         loop {
             let peeked = self.expect_peek()?;
-            println!("{peeked:?}");
             if let Token::CurlyClose = peeked {
                 self.expect_next()?;
                 break;
@@ -117,7 +116,6 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
             ident_buf.clear();
             if self.parse_attrset_path_or_inherit(&mut ident_buf, &mut inherit_keys)? {
-                println!("parsing key: {ident_buf:?}");
                 let value: NixExpr<'_> = self.parse_expr()?;
                 self.expect(Token::Semicolon)?;
 
