@@ -23,7 +23,7 @@ fn process_file(file: &Path) {
     let mut ok = false;
     match parser::parser::parse_nix(&buf) {
         Ok(res) => {
-            println!("{res:?}");
+            println!("{res:#?}");
             ok = true;
         }
         Err(ParseError::UnexpectedToken(t)) => {
@@ -60,6 +60,8 @@ fn walk_dir(dir: &mut PathBuf) {
 fn main() {
     let args = Args::parse();
 
+    gc::init();
+
     let mut input = args.input_file;
     let meta = std::fs::metadata(&input).unwrap();
     if meta.is_dir() {
@@ -67,6 +69,4 @@ fn main() {
     } else {
         process_file(&input);
     }
-
-    gc::init();
 }

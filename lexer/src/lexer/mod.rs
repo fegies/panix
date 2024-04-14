@@ -483,6 +483,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     if cont.len() > 0 {
                         self.push_string_content(cont, pos).await?;
                     }
+                    self.push_pos(Token::BeginInterpol, pos).await;
                     // skip interpol marker
                     self.input.consume(2);
                     self.push_brace(BraceStackEntry::SimpleStringInterpolation)?;

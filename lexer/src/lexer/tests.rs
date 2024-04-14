@@ -36,7 +36,67 @@ fn simple_ident() {
 
 #[test]
 fn simple_string() {
-    assert_lex("\"\"", &[Token::StringBegin, Token::StringEnd])
+    assert_lex("\"\"", &[Token::StringBegin, Token::StringEnd]);
+    assert_lex(
+        "\"foo\"",
+        &[
+            Token::StringBegin,
+            Token::StringContent("foo"),
+            Token::StringEnd,
+        ],
+    );
+    assert_lex(
+        "\" ${foo}\"",
+        &[
+            Token::StringBegin,
+            Token::StringContent(" "),
+            Token::BeginInterpol,
+            Token::Ident("foo"),
+            Token::EndInterpol,
+            Token::StringEnd,
+        ],
+    )
+}
+
+#[test]
+fn simple_string_with_immediate_interpol() {
+    assert_lex(
+        "\"${foo}\"",
+        &[
+            Token::StringBegin,
+            Token::BeginInterpol,
+            Token::Ident("foo"),
+            Token::EndInterpol,
+            Token::StringEnd,
+        ],
+    );
+}
+
+#[test]
+fn multiline_string_trivial() {
+    assert_lex("''''", &[Token::IndentedStringBegin, Token::StringEnd]);
+
+    assert_lex(
+        "''foo''",
+        &[
+            Token::IndentedStringBegin,
+            Token::StringContent("foo"),
+            Token::StringEnd,
+        ],
+    )
+}
+#[test]
+fn multiline_interpolated() {
+    assert_lex(
+        "''${foo}''",
+        &[
+            Token::IndentedStringBegin,
+            Token::BeginInterpol,
+            Token::Ident("foo"),
+            Token::EndInterpol,
+            Token::StringEnd,
+        ],
+    )
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, mem::MaybeUninit};
+use std::{cell::UnsafeCell, io::Write, mem::MaybeUninit};
 
 use memmap2::{MmapMut, MmapOptions};
 
@@ -10,12 +10,14 @@ const PAGE_SIZE: usize = 1 << PAGE_BITS;
 
 pub struct Heap {
     map: MmapMut,
-    pages: Vec<PageInfo>,
+    // free_pages: Vec<PageInfo>,
+    // gen0: PageInfo,
+    // gen1: Vec<PageInfo>,
+    // gen2: Vec<PageInfo>,
 }
 
 struct PageInfo {
     base: *mut u8,
-    generation: u8,
     status: Vec<GcRegion>,
 }
 
@@ -25,12 +27,19 @@ impl Heap {
     pub fn init(heap_size: usize) -> Self {
         assert!(heap_size % PAGE_SIZE == 0);
 
-        let map = alloc_map(heap_size, true);
+        // 16 pages for the start...
+        let initial = alloc_map(PAGE_SIZE * 16);
 
-        Self {
-            map,
-            pages: Vec::new(),
-        }
+        Self { map: initial }
+        // let initial = Box::leak(Box::new(initial)).as_mut_ptr();
+        // let gen0 = alloc_map(PAGE_SIZE);
+
+        // for base_addr in
+
+        // Self {
+        //     map,
+        //     pages: Vec::new(),
+        // }
     }
 
     pub fn base_address(&self) -> *mut u8 {
@@ -42,18 +51,19 @@ impl Heap {
     }
 }
 
-fn alloc_map(heap_size: usize, map_huge: bool) -> MmapMut {
-    let mut options = MmapOptions::new();
-    options.len(heap_size);
-
-    if map_huge {
-        options.huge(Some(PAGE_BITS));
-        options
-            .map_anon()
-            .unwrap_or_else(|_| alloc_map(heap_size, false))
-    } else {
-        options.map_anon().unwrap()
+fn alloc_map(size: usize) -> MmapMut {
+    fn inner(size: usize, map_huge: bool) -> MmapMut {
+        let mut options = MmapOptions::new();
+        options.len(size);
+        if map_huge {
+            options.huge(Some(PAGE_BITS));
+            options.map_anon().unwrap_or_else(|e| inner(size, false))
+        } else {
+            options.map_anon().unwrap()
+        }
     }
+
+    inner(size, true)
 }
 
 pub fn init(heap_size: usize) {

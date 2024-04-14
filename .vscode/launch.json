@@ -6,6 +6,21 @@
     "configurations": [
         {
             "type": "lldb",
+            "request": "custom",
+            "name": "rr replay",
+            "targetCreateCommands": [
+                "target create ${workspaceFolder}/target/debug/panix"
+            ],
+            "processCreateCommands": [
+                "gdb-remote 127.0.0.1:13377",
+            ],
+            "reverseDebugging": true,
+            "sourceLanguages": [
+                "rust"
+            ]
+        },
+        {
+            "type": "lldb",
             "request": "launch",
             "name": "Debug unit tests in library 'lexer'",
             "cargo": {
@@ -21,45 +36,10 @@
                 }
             },
             "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in library 'lexer_impedance_matcher'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--lib",
-                    "--package=lexer_impedance_matcher"
-                ],
-                "filter": {
-                    "name": "lexer_impedance_matcher",
-                    "kind": "lib"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in library 'parser'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--lib",
-                    "--package=parser"
-                ],
-                "filter": {
-                    "name": "parser",
-                    "kind": "lib"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": [
+                "rust"
+            ]
         },
         {
             "type": "lldb",
@@ -79,64 +59,10 @@
             "args": [
                 "/home/felix/nixos-config/util/installer_script.nix"
             ],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": [
+                "rust"
+            ]
         },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in executable 'panix'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--bin=panix",
-                    "--package=panix"
-                ],
-                "filter": {
-                    "name": "panix",
-                    "kind": "bin"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in library 'gc'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--lib",
-                    "--package=gc"
-                ],
-                "filter": {
-                    "name": "gc",
-                    "kind": "lib"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in library 'identpool'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--lib",
-                    "--package=identpool"
-                ],
-                "filter": {
-                    "name": "identpool",
-                    "kind": "lib"
-                }
-            },
-            "args": [],
-            "cwd": "${workspaceFolder}"
-        }
     ]
 }

@@ -13,6 +13,7 @@ pub struct GcRegion {
     region_id: RegionId,
     base_address: *mut GcRegionHeader,
     free_top: UnsafeCell<*mut GcRegionHeader>,
+    scavenge_top: *mut GcRegionHeader,
 }
 
 type ErasedTraceFnPtr = fn(*const u8, &mut dyn FnMut(&mut RawGcPointer));
