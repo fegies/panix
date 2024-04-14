@@ -36,7 +36,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 expr
             }
             Token::KwLet => NixExpr::Code(Code::LetInExpr(self.parse_let()?)),
-            Token::KwWith => todo!(),
+            Token::KwWith => NixExpr::Code(Code::WithExpr(self.parse_with_expr()?)),
             Token::KwRec => {
                 NixExpr::CompoundValue(CompoundValue::Attrset(self.parse_attrset_rec()?))
             }

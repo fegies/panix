@@ -5,6 +5,7 @@ pub mod if_expr;
 pub mod let_expr;
 pub mod list;
 pub mod string;
+mod with;
 
 use std::backtrace::{self, Backtrace};
 
