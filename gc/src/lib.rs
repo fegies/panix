@@ -1,5 +1,7 @@
 mod heap;
+pub mod heap_page;
 pub mod loh;
+mod object;
 mod region;
 mod rootset;
 
@@ -7,8 +9,7 @@ use std::{marker::PhantomData, num::NonZeroI16};
 
 use region::*;
 
-#[derive(Copy)]
-pub struct GcPointer<TData: Trace> {
+pub struct GcPointer<TData> {
     ptr: RawGcPointer,
     data: PhantomData<TData>,
 }

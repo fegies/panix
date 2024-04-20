@@ -57,7 +57,13 @@ fn walk_dir(dir: &mut PathBuf) {
     }
 }
 
+fn foo() {}
+
 fn main() {
+    let ptr: fn() = foo;
+    println!("{:?}, align: {}", ptr, core::mem::align_of_val(&ptr));
+    return;
+
     let args = Args::parse();
 
     gc::init();
