@@ -2,7 +2,7 @@ use std::{cell::UnsafeCell, io::Write, mem::MaybeUninit};
 
 use memmap2::{MmapMut, MmapOptions};
 
-use crate::{region::GcRegion, RawGcPointer};
+use crate::RawGcPointer;
 
 // 2 MB pages
 const PAGE_BITS: u8 = 21;

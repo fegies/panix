@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::{marker::PhantomData, ops::DerefMut};
 
-use crate::{GcPointer, RawGcPointer, Trace};
+use crate::{GcPointer, RawGcPointer};
 
 pub struct RootSet {
     inner: Vec<Option<RawGcPointer>>,

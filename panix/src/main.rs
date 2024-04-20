@@ -57,16 +57,10 @@ fn walk_dir(dir: &mut PathBuf) {
     }
 }
 
-fn foo() {}
-
 fn main() {
-    let ptr: fn() = foo;
-    println!("{:?}, align: {}", ptr, core::mem::align_of_val(&ptr));
-    return;
+    gc::init();
 
     let args = Args::parse();
-
-    gc::init();
 
     let mut input = args.input_file;
     let meta = std::fs::metadata(&input).unwrap();
