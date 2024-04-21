@@ -7,10 +7,14 @@ pub mod specialized_types;
 
 use std::{alloc::Layout, marker::PhantomData, num::NonZeroI16};
 
+use heap_page::HeapEntry;
+
 pub struct GcPointer<TData> {
     ptr: RawGcPointer,
     data: PhantomData<TData>,
 }
+
+pub(crate) const GC_PAGE_SIZE: usize = 4096 * 8;
 
 impl<T> Clone for GcPointer<T> {
     fn clone(&self) -> Self {
@@ -44,7 +48,7 @@ impl RawGcPointer {
     /// This function is only valid if the heap address
     /// is properly allocated on the gc heap and
     /// valid.
-    pub(crate) unsafe fn from_heap_addr(raw_ptr: *mut u8) -> Self {
+    pub(crate) unsafe fn from_heap_addr(raw_ptr: *mut HeapEntry) -> Self {
         let value = (raw_ptr as usize >> 32) as u32;
         Self { content: value }
     }
@@ -75,9 +79,10 @@ impl RawGcPointer {
 // }
 
 pub fn init() {
-    let heap_layout = Layout::from_size_align(1 << 31, 1 << 31).unwrap();
+    let heap_layout = Layout::from_size_align(1 << 32, 1 << 32).unwrap();
 
     unsafe {
-        std::alloc::alloc(heap_layout);
+        let ptr = std::alloc::alloc(heap_layout);
+        println!("allocated heap at {ptr:?}");
     }
 }

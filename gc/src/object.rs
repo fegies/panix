@@ -1,12 +1,16 @@
+use core::any::Any;
+
 use crate::RawGcPointer;
 
 pub type TraceCallback<'a> = &'a mut dyn FnMut(&mut RawGcPointer);
+
+pub(crate) type WideningAccessor = for<'r> fn(&'r mut u8) -> &'r mut dyn HeapObject;
 
 /// this is a lower-level trait compared to the trace trait.
 ///
 /// You should only need to implement manually it if your object is
 /// dynamically sized.
-pub unsafe trait HeapObject {
+pub unsafe trait HeapObject: Any {
     /// A method that allows to introspect the contents of the allocation.
     ///
     /// It should invoke the callback once for every pointer internal to the object.
