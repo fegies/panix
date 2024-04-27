@@ -1,9 +1,9 @@
-use std::{cell::UnsafeCell, marker::PhantomData, mem::MaybeUninit};
-
 use crate::{
     object::{widen, HeapObject, WideningAccessor},
+    pointer::{HeapGcPointer, RawHeapGcPointer},
     GcPointer, RawGcPointer, GC_PAGE_SIZE,
 };
+use std::cell::UnsafeCell;
 
 pub(crate) struct HeapEntry {
     widening_function: WideningAccessor,
@@ -15,6 +15,10 @@ impl HeapEntry {
             widening_function: widen::<T>,
         }
     }
+    pub(crate) fn load(&mut self) -> &mut dyn HeapObject {
+        let data_reference = unsafe { &mut *((self as *mut HeapEntry).add(1) as *mut u8) };
+        (self.widening_function)(data_reference)
+    }
 }
 
 pub(crate) struct Page {
@@ -23,7 +27,15 @@ pub(crate) struct Page {
     /// the latest non-free byte of this page.
     /// (e.g. a value 1 past the free range)
     free_top: UnsafeCell<*mut HeapEntry>,
-    // scavenge_top: UnsafeCell<*mut HeapEntry>,
+}
+
+struct ScavengeStatus {
+    /// a past-the-end pointer to the highest non-scavengable memory address
+    scavenge_end: *const u8,
+    /// a pointer to the address that scavenging this page began at.
+    scavenge_start: *const u8,
+    /// a pointer to the current heap entry being scavenged.
+    scavenge_current: *const u8,
 }
 
 impl Page {
@@ -37,9 +49,56 @@ impl Page {
         }
     }
 
+    pub(crate) fn scavenge_content(&self) {
+        // a past-the-end pointer to the highest non-scavengable memory address
+        let mut scavenge_end_addr = self.base_address as usize + GC_PAGE_SIZE;
+        // a pointer to the place we began to scavenge.
+        let mut scavenge_start = unsafe { *self.free_top.get() };
+
+        while (scavenge_start as usize) < scavenge_end_addr {
+            let mut scavenge_current = scavenge_start as *mut HeapEntry;
+            while (scavenge_current as usize) < scavenge_end_addr {
+                // scavenge pointed-to object.
+                let object = unsafe {
+                    // the pointed_to object is actually a hole in the heap caused by alignment.
+                    // instead, search for the next value by searching for the next properly-aligned heap entry
+                    if core::ptr::read(scavenge_current as *const usize) == 0 {
+                        scavenge_current = scavenge_current.add(1);
+                        continue;
+                    }
+                    (&mut *scavenge_current).load()
+                };
+
+                object.trace(&mut |gc_pointer| todo!("implement trace callback"));
+                scavenge_current = advance_entrypointer(scavenge_current, object.allocation_size());
+            }
+            // set the end to where we started as everything up to here has been scavenged
+            scavenge_end_addr = scavenge_start as usize;
+            // and the start to the allocation pointer, as there may have been additional objects added that need to be scavenged too
+            scavenge_start = unsafe { *self.free_top.get() };
+        }
+
+        fn advance_entrypointer(ptr: *mut HeapEntry, allocation_size: usize) -> *mut HeapEntry {
+            let mut addr = ptr as usize;
+            // the header itself
+            addr += core::mem::size_of::<HeapEntry>();
+            // the allocated data
+            addr += allocation_size;
+
+            // ensure the correct alignment to account for padding.
+            const ALIGN: usize = core::mem::align_of::<HeapEntry>();
+            let align = addr % ALIGN;
+            if align > 0 {
+                addr += ALIGN - align;
+            }
+
+            addr as *mut HeapEntry
+        }
+    }
+
     /// attempt to move the provided object into this heap page.
     /// Will return the object on failure.
-    pub fn try_alloc<T: HeapObject + 'static>(&mut self, object: T) -> Result<GcPointer<T>, T> {
+    pub fn try_alloc<T: HeapObject + 'static>(&mut self, object: T) -> Result<HeapGcPointer<T>, T> {
         if let Some((header_ptr, data_ptr)) =
             self.try_reserve(object.allocation_size(), core::mem::align_of_val(&object))
         {
@@ -47,11 +106,12 @@ impl Page {
             unsafe {
                 core::ptr::write(cast_data_ptr, object);
                 core::ptr::write(header_ptr, HeapEntry::for_object(&*cast_data_ptr));
-                let gc_ptr = RawGcPointer::from_heap_addr(header_ptr);
-                Ok(GcPointer {
-                    ptr: gc_ptr,
-                    data: PhantomData,
-                })
+
+                // unroot all data pointers in there to ensure we don't get leaks
+                (*cast_data_ptr).trace(&mut |ptr| ptr.unroot());
+
+                let gc_ptr = RawHeapGcPointer::from_addr(header_ptr);
+                Ok(HeapGcPointer::from_raw_unchecked(gc_ptr))
             }
         } else {
             Err(object)
@@ -104,6 +164,14 @@ impl Page {
 
         if (header_ptr as usize) < self.base_address as usize {
             // our allocation is legal, so perform it by writing the free top.
+
+            // zero out the new allocation.
+            unsafe {
+                let len = free_top as usize - header_ptr as usize;
+                core::slice::from_raw_parts_mut(header_ptr as *mut u8, len)
+            }
+            .fill(0);
+
             unsafe { *self.free_top.get() = header_ptr };
             // and return the pointer to the allocation
             Some((header_ptr, data_ptr))

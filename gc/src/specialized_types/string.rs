@@ -1,8 +1,7 @@
-use std::marker::PhantomData;
-
 use crate::{
     heap_page::{HeapEntry, Page},
     object::{HeapObject, TraceCallback},
+    pointer::{HeapGcPointer, RawHeapGcPointer},
     GcPointer, RawGcPointer,
 };
 
@@ -19,7 +18,7 @@ unsafe impl HeapObject for SimpleGcString {
     }
 
     fn allocation_size(&self) -> usize {
-        self.length as usize + core::mem::size_of_val(&self)
+        self.length as usize + core::mem::size_of_val(self)
     }
 }
 
@@ -34,7 +33,7 @@ impl AsRef<str> for SimpleGcString {
 }
 
 impl Page {
-    pub fn try_alloc_string(&mut self, str: &str) -> Option<GcPointer<SimpleGcString>> {
+    pub fn try_alloc_string(&mut self, str: &str) -> Option<HeapGcPointer<SimpleGcString>> {
         let len = str.len();
         let required_space = len + core::mem::size_of::<SimpleGcString>();
         let (header_pointer, data_pointer) =
@@ -47,11 +46,8 @@ impl Page {
             let string_begin_pointer = cast_data_pointer.add(1) as *mut u8;
             let dest = core::slice::from_raw_parts_mut(string_begin_pointer, len);
             dest.copy_from_slice(str.as_bytes());
-            let raw_ptr = RawGcPointer::from_heap_addr(header_pointer);
-            Some(GcPointer {
-                ptr: raw_ptr,
-                data: PhantomData,
-            })
+            let raw_ptr = RawHeapGcPointer::from_addr(header_pointer);
+            Some(HeapGcPointer::from_raw_unchecked(raw_ptr))
         }
     }
 }
