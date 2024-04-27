@@ -20,6 +20,10 @@ unsafe impl HeapObject for SimpleGcString {
     fn allocation_size(&self) -> usize {
         self.length as usize + core::mem::size_of_val(self)
     }
+
+    fn allocation_alignment(&self) -> usize {
+        1
+    }
 }
 
 impl AsRef<str> for SimpleGcString {

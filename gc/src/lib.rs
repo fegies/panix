@@ -8,6 +8,7 @@ pub mod specialized_types;
 
 use std::{alloc::Layout, num::NonZeroI16};
 
+use heap_page::Page;
 use object::HeapObject;
 pub use pointer::{GcPointer, RawGcPointer};
 
@@ -33,6 +34,19 @@ static mut HEAP_BASE: *mut u8 = core::ptr::null_mut();
 
 pub(crate) fn get_heap_base() -> *mut u8 {
     unsafe { HEAP_BASE }
+}
+
+enum GcError {
+    OutOfMemory,
+}
+
+struct CollectionHandle<'a> {
+    fun: &'a (),
+}
+impl<'a> CollectionHandle<'a> {
+    pub fn get_allocation_page(&mut self) -> &'a mut Page {
+        todo!()
+    }
 }
 
 impl MemoryManager {

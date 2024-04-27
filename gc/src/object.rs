@@ -18,6 +18,9 @@ pub unsafe trait HeapObject: Any {
 
     /// the total size of the allocation, excluding the object header
     fn allocation_size(&self) -> usize;
+
+    /// the requested alignment for the allocation.
+    fn allocation_alignment(&self) -> usize;
 }
 
 /// returns a function that should turn a raw pointer to the allocation
@@ -38,6 +41,10 @@ where
         let size = core::mem::size_of::<T>();
         debug_assert!(size <= u32::MAX as usize);
         size
+    }
+
+    fn allocation_alignment(&self) -> usize {
+        core::mem::align_of::<T>()
     }
 
     fn trace(&mut self, cb: TraceCallback) {

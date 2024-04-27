@@ -53,6 +53,14 @@ impl RawHeapGcPointer {
         let value = (raw_ptr as usize >> (32 - HEAP_ENTRY_SHIFT)) as u32;
         Self { content: value }
     }
+
+    pub(crate) unsafe fn from_bits(bitrep: u32) -> Self {
+        Self { content: bitrep }
+    }
+    /// get the bitpattern representing this pointer.
+    pub(crate) fn to_bits(&self) -> u32 {
+        self.content
+    }
 }
 
 pub(crate) struct RootsetReference {
@@ -92,8 +100,9 @@ const ROOT_REF_BIT: u32 = 1 << 31;
 const HEAP_ENTRY_SHIFT: usize = core::mem::align_of::<HeapEntry>().ilog2() as usize;
 
 impl RootsetReference {
-    pub fn resolve(&self) -> *const HeapEntry {
-        self.get_heapref().resolve()
+    pub fn resolve(&mut self) -> &mut HeapEntry {
+        let short = self.get_heapref().resolve() as *mut HeapEntry;
+        unsafe { &mut *short }
     }
 
     #[inline]
@@ -103,14 +112,15 @@ impl RootsetReference {
     }
 }
 impl RawHeapGcPointer {
-    pub fn resolve(&self) -> *const HeapEntry {
+    pub fn resolve(&mut self) -> &mut HeapEntry {
         let gcptr = self.content;
         // it is not a root entry, and the top bit is 0.
         // that means we can just zero extend it and add the heap base to arrive
         // at the address
         let heap_base = get_heap_base();
         let addr = ((gcptr as usize) << HEAP_ENTRY_SHIFT) + heap_base as usize;
-        addr as *const HeapEntry
+        let ptr = addr as *mut HeapEntry;
+        unsafe { &mut *ptr }
     }
 }
 
@@ -160,8 +170,26 @@ impl RawGcPointer {
         self.decode().unwrap_or_else(|e| e.get_heapref())
     }
 
+    /// gets the heap ref repr without checking the root bit.
+    /// only safe if the pointer is known to be a heap pointer (like if it is found on the heap)
+    #[inline]
+    pub(crate) unsafe fn get_heapref_unchecked(&self) -> RawHeapGcPointer {
+        RawHeapGcPointer {
+            content: self.content,
+        }
+    }
+
     /// resolve the pointer to the final heap address it is pointing to.
-    pub(crate) fn resolve(&self) -> *const HeapEntry {
-        self.decode().map_or_else(|i| i.resolve(), |i| i.resolve())
+    pub(crate) fn resolve(&mut self) -> &mut HeapEntry {
+        self.decode().map_or_else(
+            |mut i| {
+                let short = i.resolve() as *mut HeapEntry;
+                unsafe { &mut *short }
+            },
+            |mut i| {
+                let short = i.resolve() as *mut HeapEntry;
+                unsafe { &mut *short }
+            },
+        )
     }
 }

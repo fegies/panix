@@ -17,6 +17,10 @@ unsafe impl HeapObject for HeterogeneousArray {
     fn allocation_size(&self) -> usize {
         self.length as usize + core::mem::size_of_val(self)
     }
+
+    fn allocation_alignment(&self) -> usize {
+        core::mem::align_of::<RawGcPointer>()
+    }
 }
 
 impl AsRef<[RawGcPointer]> for HeterogeneousArray {
