@@ -4,7 +4,7 @@ use crate::RawGcPointer;
 
 pub type TraceCallback<'a> = &'a mut dyn FnMut(&mut RawGcPointer);
 
-pub(crate) type WideningAccessor = for<'r> fn(&'r mut u8) -> &'r mut dyn HeapObject;
+pub(crate) type WideningAccessor = fn(*mut u8) -> *mut dyn HeapObject;
 
 /// this is a lower-level trait compared to the trace trait.
 ///
@@ -28,9 +28,8 @@ pub unsafe trait HeapObject: Any {
 ///
 /// Done this way to get around the ptr_metadata feature not being stable
 #[inline]
-pub(crate) fn widen<'r, T: HeapObject + 'static>(raw: &'r mut u8) -> &'r mut dyn HeapObject {
-    let ptr = raw as *mut u8 as *mut T;
-    unsafe { &mut *ptr }
+pub(crate) fn widen<T: HeapObject>(raw: *mut u8) -> *mut (dyn HeapObject + 'static) {
+    raw as *mut u8 as *mut T
 }
 
 unsafe impl<T> HeapObject for T

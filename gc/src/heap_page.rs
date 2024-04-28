@@ -17,6 +17,18 @@ mod header {
         pub pointer: RawHeapGcPointer,
         pub alloc_size: u32,
     }
+    impl ForwardingPointer {
+        /// follow the chain of forwardigs to the end.
+        /// returns a pointer that is guaranteed to not be a forwarding entry
+        pub(crate) fn follow_to_end(mut self) -> RawHeapGcPointer {
+            loop {
+                match self.pointer.resolve_mut().decode_mut() {
+                    Ok(_) => return self.pointer,
+                    Err(forward) => self = forward,
+                }
+            }
+        }
+    }
 
     impl HeapEntry {
         #[inline]
@@ -26,42 +38,69 @@ mod header {
             }
         }
 
-        pub fn decode(&mut self) -> Result<&mut dyn HeapObject, ForwardingPointer> {
+        fn decode_forward(bitrep: usize) -> ForwardingPointer {
+            let alloc_size = bitrep as u32 >> 1;
+            let pointer = unsafe { RawHeapGcPointer::from_bits((bitrep >> 32) as u32) };
+            ForwardingPointer {
+                pointer,
+                alloc_size,
+            }
+        }
+
+        pub fn decode_mut(&mut self) -> Result<&mut dyn HeapObject, ForwardingPointer> {
             if self.widening_function as usize & 1 == 0 {
-                Ok((self.widening_function)(self.get_dataref()))
+                Ok(unsafe { &mut *(self.widening_function)(self.get_dataref()) })
             } else {
                 // this is actually a forwarding pointer.
                 let bitrep = self.widening_function as usize;
-                let alloc_size = bitrep as u32 >> 1;
-                let pointer = unsafe { RawHeapGcPointer::from_bits((bitrep >> 32) as u32) };
-                Err(ForwardingPointer {
-                    pointer,
-                    alloc_size,
-                })
+                Err(Self::decode_forward(bitrep))
+            }
+        }
+        fn decode(&self) -> Result<&dyn HeapObject, ForwardingPointer> {
+            if self.widening_function as usize & 1 == 0 {
+                Ok(unsafe { &*(self.widening_function)(self.get_dataref()) })
+            } else {
+                // this is actually a forwarding pointer.
+                let bitrep = self.widening_function as usize;
+                Err(Self::decode_forward(bitrep))
             }
         }
 
         pub fn forward_to(&mut self, other: RawHeapGcPointer) {
-            if self.widening_function as usize & 1 == 0 {
+            let cont = self.widening_function as usize;
+            if cont & 1 == 0 {
                 // this was not forwarded yet.
                 // we need to write the old width to lower half to keep track of it.
-                let size = (self.widening_function)(self.get_dataref()).allocation_size();
+                let size =
+                    unsafe { (*(self.widening_function)(self.get_dataref())).allocation_size() };
                 // and use the lowest bit to mark the value as a forwarding pointer.
                 let size = (size << 1) | 1;
 
                 let final_value = ((other.to_bits() as usize) << 32) | size;
                 self.widening_function = unsafe { core::mem::transmute(final_value) };
+            } else {
+                // this was actually forwarded.
+                // just replace the higher 32 bits.
+                let result = (other.to_bits() as usize) << 32 | (cont as u32 as usize);
+                self.widening_function = unsafe { core::mem::transmute(result) }
             }
         }
 
-        fn get_dataref(&self) -> &mut u8 {
-            unsafe { &mut *((self as *const HeapEntry).add(1) as *mut u8) }
+        fn get_dataref(&self) -> *mut u8 {
+            unsafe { (self as *const HeapEntry).add(1) as *mut u8 }
         }
 
-        pub(crate) fn load(&mut self) -> &mut dyn HeapObject {
-            self.decode().unwrap_or_else(|mut forward| unsafe {
-                let resolved = forward.pointer.resolve() as *mut HeapEntry;
-                (*resolved).load()
+        pub(crate) fn load(&self) -> &dyn HeapObject {
+            self.decode().unwrap_or_else(|forward| {
+                let resolved = forward.pointer.resolve() as *const HeapEntry;
+                unsafe { &*resolved }.load()
+            })
+        }
+
+        pub(crate) fn load_mut(&mut self) -> &mut dyn HeapObject {
+            self.decode_mut().unwrap_or_else(|mut forward| unsafe {
+                let resolved = forward.pointer.resolve_mut() as *mut HeapEntry;
+                (*resolved).load_mut()
             })
         }
     }
@@ -105,7 +144,7 @@ impl Page {
                         scavenge_current = scavenge_current.add(1);
                         continue;
                     }
-                    (&mut *scavenge_current).load()
+                    (&mut *scavenge_current).load_mut()
                 };
 
                 object.trace(&mut |gc_pointer| {
@@ -114,8 +153,8 @@ impl Page {
                     // TODO: decide if the pointer should be scavenged, or it is fine because it lives in a higher generation
                     // than the one we are collecting now.
 
-                    let header = heap_ptr.resolve();
-                    match header.decode() {
+                    let header = heap_ptr.resolve_mut();
+                    let new_gc_pointer = match header.decode_mut() {
                         Ok(obj) => {
                             // copy the value.
                             let alloc_size = obj.allocation_size();
@@ -137,27 +176,22 @@ impl Page {
                                         );
                                         dest_bytes.copy_from_slice(source_bytes);
 
-                                        core::ptr::write(
-                                            gc_pointer as *mut RawGcPointer,
-                                            RawHeapGcPointer::from_addr(destination_header).into(),
-                                        )
+                                        break RawHeapGcPointer::from_addr(destination_header);
                                     }
-                                    break;
                                 }
                                 allocation_page = gc_handle.get_allocation_page();
                             }
                         }
                         Err(forward) => {
                             // the pointer was already forwarded.
-                            // update our pointer to point to the forwarded-to value.
-                            // pointer write instead of assignment to avoid the drop impl (even though it would do nothing)
-                            unsafe {
-                                core::ptr::write(
-                                    gc_pointer as *mut RawGcPointer,
-                                    forward.pointer.into(),
-                                )
-                            }
+                            // since there may have been a chain of forwardings, follow them until the final heap entry
+                            forward.follow_to_end()
                         }
+                    };
+
+                    // pointer write instead of assignment to avoid the drop impl (even though it would do nothing)
+                    unsafe {
+                        core::ptr::write(gc_pointer as *mut RawGcPointer, new_gc_pointer.into())
                     }
                 });
                 scavenge_current = advance_entrypointer(scavenge_current, object.allocation_size());

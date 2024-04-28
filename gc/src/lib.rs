@@ -63,6 +63,15 @@ impl MemoryManager {
         Self { heap_backing: ptr }
     }
 
+    pub fn load_raw<'s>(&'s self, ptr: &RawGcPointer) -> &'s dyn HeapObject {
+        todo!()
+    }
+
+    pub fn load<'s, TData>(&'s mut self, ptr: &GcPointer<TData>) -> &'s TData {
+        let raw = self.load_raw(ptr.as_ref());
+        unsafe { &*(raw as *const dyn HeapObject as *const TData) }
+    }
+
     // /// announce that referencing_pointer now has a reference to data_ptr.
     // /// This gives the GC an opportunity to promote the object to that generation immediately.
     // pub fn announce(

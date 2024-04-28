@@ -101,7 +101,7 @@ const HEAP_ENTRY_SHIFT: usize = core::mem::align_of::<HeapEntry>().ilog2() as us
 
 impl RootsetReference {
     pub fn resolve(&mut self) -> &mut HeapEntry {
-        let short = self.get_heapref().resolve() as *mut HeapEntry;
+        let short = self.get_heapref().resolve_mut() as *mut HeapEntry;
         unsafe { &mut *short }
     }
 
@@ -112,14 +112,22 @@ impl RootsetReference {
     }
 }
 impl RawHeapGcPointer {
-    pub fn resolve(&mut self) -> &mut HeapEntry {
+    fn resolve_untyped(&self) -> usize {
         let gcptr = self.content;
         // it is not a root entry, and the top bit is 0.
         // that means we can just zero extend it and add the heap base to arrive
         // at the address
         let heap_base = get_heap_base();
-        let addr = ((gcptr as usize) << HEAP_ENTRY_SHIFT) + heap_base as usize;
-        let ptr = addr as *mut HeapEntry;
+        ((gcptr as usize) << HEAP_ENTRY_SHIFT) + heap_base as usize
+    }
+
+    pub fn resolve(&self) -> &HeapEntry {
+        let ptr = self.resolve_untyped() as *const HeapEntry;
+        unsafe { &*ptr }
+    }
+
+    pub fn resolve_mut(&mut self) -> &mut HeapEntry {
+        let ptr = self.resolve_untyped() as *mut HeapEntry;
         unsafe { &mut *ptr }
     }
 }
@@ -187,7 +195,7 @@ impl RawGcPointer {
                 unsafe { &mut *short }
             },
             |mut i| {
-                let short = i.resolve() as *mut HeapEntry;
+                let short = i.resolve_mut() as *mut HeapEntry;
                 unsafe { &mut *short }
             },
         )
