@@ -44,6 +44,11 @@ impl<T> Into<RawHeapGcPointer> for HeapGcPointer<T> {
         self.raw
     }
 }
+impl<T> AsRef<RawHeapGcPointer> for HeapGcPointer<T> {
+    fn as_ref(&self) -> &RawHeapGcPointer {
+        &self.raw
+    }
+}
 
 impl RawHeapGcPointer {
     /// Create a new instance of this pointer.
@@ -79,6 +84,14 @@ impl<TData> GcPointer<TData> {
         &mut self.ptr
     }
 }
+impl<TData> From<HeapGcPointer<TData>> for GcPointer<TData> {
+    fn from(value: HeapGcPointer<TData>) -> Self {
+        Self {
+            ptr: value.raw.into(),
+            data: PhantomData,
+        }
+    }
+}
 
 impl<TData> Into<RawGcPointer> for GcPointer<TData> {
     fn into(self) -> RawGcPointer {
@@ -98,7 +111,7 @@ impl<TData> AsMut<RawGcPointer> for GcPointer<TData> {
 
 const ROOT_REF_BIT: u32 = 1 << 31;
 
-const HEAP_ENTRY_SHIFT: usize = core::mem::align_of::<HeapEntry>().ilog2() as usize;
+pub(crate) const HEAP_ENTRY_SHIFT: usize = core::mem::align_of::<HeapEntry>().ilog2() as usize;
 
 impl RootsetReference {
     pub fn resolve(&mut self) -> &mut HeapEntry {

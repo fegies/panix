@@ -7,6 +7,8 @@ use crate::{GcPointer, RawGcPointer};
 
 pub(super) use pointerslab::Slabkey;
 
+use super::{HeapGcPointer, RawHeapGcPointer};
+
 pub struct RootSet {
     inner: Pointerslab,
 }
@@ -20,10 +22,14 @@ thread_local! {
 }
 
 impl RootSet {
-    fn root_raw(&mut self, ptr: &RawGcPointer) -> RawGcPointer {
-        let heapref = ptr.get_heapref();
+    fn root_heapref(&mut self, heapref: &RawHeapGcPointer) -> RawGcPointer {
         let rootref = self.inner.insert(heapref.content);
         super::RootsetReference { content: rootref }.into()
+    }
+
+    fn root_raw(&mut self, ptr: &RawGcPointer) -> RawGcPointer {
+        let heapref = ptr.get_heapref();
+        self.root_heapref(&heapref)
     }
 
     /// replace the pointer representation to instead be a plain heap-only pointer.
@@ -65,6 +71,19 @@ impl<T> GcPointer<T> {
         let raw = raw.root();
         // SAFETY: we know that the pointer we just rooted is of the correct type
         // because we got it as a param.v
+        unsafe { GcPointer::from_raw_unchecked(raw) }
+    }
+}
+impl RawHeapGcPointer {
+    pub fn root(&self) -> RawGcPointer {
+        with_rootset(|set| set.root_heapref(self))
+    }
+}
+
+impl<T> HeapGcPointer<T> {
+    pub fn root(&self) -> GcPointer<T> {
+        let raw: &RawHeapGcPointer = self.as_ref();
+        let raw = raw.root();
         unsafe { GcPointer::from_raw_unchecked(raw) }
     }
 }
