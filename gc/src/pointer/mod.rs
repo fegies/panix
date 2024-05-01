@@ -1,6 +1,7 @@
 mod rootset;
 
 pub use internal::*;
+pub(crate) use rootset::inspect_roots;
 
 mod internal;
 

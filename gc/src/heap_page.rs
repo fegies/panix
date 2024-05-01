@@ -1,10 +1,9 @@
 use crate::{
-    heap::Heap,
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    CollectionHandle, GcError, Generation, RawGcPointer, GC_PAGE_SIZE,
+    CollectionHandle, GcError, Generation, GC_PAGE_SIZE,
 };
-use std::cell::UnsafeCell;
+use std::cell::{Cell, UnsafeCell};
 
 pub(crate) use header::HeapEntry;
 
@@ -135,19 +134,26 @@ mod header {
 
 pub(crate) struct Page {
     /// the lowest valid address that belongs to this page
-    base_address: *const u8,
+    base_address: *mut u8,
     /// the latest non-free byte of this page.
     /// (e.g. a value 1 past the free range)
     free_top: UnsafeCell<*mut HeapEntry>,
+    /// tracks if this particular page has been scavenged before.
+    scavenged: Cell<bool>,
 }
 
 impl Page {
+    pub(crate) fn get_base(&self) -> *mut u8 {
+        self.base_address
+    }
+
     pub(crate) fn new(base_address: *mut u8) -> Self {
         debug_assert!(base_address as usize % GC_PAGE_SIZE == 0);
 
         let free_top = unsafe { base_address.add(GC_PAGE_SIZE) } as *mut HeapEntry;
         Self {
             base_address,
+            scavenged: Cell::new(false),
             free_top: UnsafeCell::new(free_top),
         }
     }
@@ -157,6 +163,11 @@ impl Page {
         gc_handle: &mut CollectionHandle,
         gc_max_generation: Generation,
     ) -> Result<(), GcError> {
+        if self.scavenged.get() {
+            return Ok(());
+        }
+        self.scavenged.set(true);
+
         // a past-the-end pointer to the highest non-scavengable memory address
         let mut scavenge_end_addr = self.base_address as usize + GC_PAGE_SIZE;
         // a pointer to the place we began to scavenge.
@@ -178,58 +189,8 @@ impl Page {
 
                 object.trace(&mut |gc_pointer| {
                     let mut heap_ptr = unsafe { gc_pointer.get_heapref_unchecked() };
-
-                    let generation = gc_handle.generation_table.get_generation(&heap_ptr);
-                    if generation > gc_max_generation {
-                        // we do not need to scavenge this particular pointer.
-                        return;
-                    }
-
-                    let header = heap_ptr.resolve_mut();
-                    let new_gc_pointer = match header.decode_mut() {
-                        Ok(obj) => {
-                            // copy the value.
-                            copy_object_to_new_allocation(obj, gc_handle, generation.next_higher())
-                        }
-                        Err(forward) if forward.fully_resolved => forward.pointer,
-                        Err(forward) => {
-                            // the pointer was already forwarded.
-                            // since there may have been a chain of forwardings, follow them until the final heap entry
-                            let (mut resolved, fully_resolved) = forward.follow_to_end();
-                            if fully_resolved {
-                                // at some point in the chain, we already scavenged whatever this pointer was pointing to.
-                                // so we can just use that value.
-                                resolved
-                            } else {
-                                let generation =
-                                    gc_handle.generation_table.get_generation(&resolved);
-                                if generation > gc_max_generation {
-                                    // the pointer was pointing to some value in a generation we are not collecting yet.
-                                    resolved
-                                } else {
-                                    // we _do_ have to scavenge the value it is pointing to.
-                                    let final_header = resolved.resolve_mut();
-                                    let new_pointer = copy_object_to_new_allocation(
-                                        final_header.load_mut(),
-                                        gc_handle,
-                                        generation.next_higher(),
-                                    );
-                                    // ensure that the header of the final object is updated too, to ensure it is not
-                                    // duplicated if there is another reference to it later.
-                                    final_header.forward_to_final(&new_pointer);
-                                    new_pointer
-                                }
-                            }
-                        }
-                    };
-                    // we know that the old location is now completely resolved.
-                    // so we can store that for possible future lookups.
-                    header.forward_to_final(&new_gc_pointer);
-
-                    // pointer write instead of assignment to avoid the drop impl (even though it would do nothing)
-                    unsafe {
-                        core::ptr::write(gc_pointer as *mut RawGcPointer, new_gc_pointer.into())
-                    }
+                    scavenge_object(gc_handle, &mut heap_ptr, gc_max_generation);
+                    unsafe { core::ptr::write(gc_pointer, heap_ptr.into()) }
                 });
                 scavenge_current = advance_entrypointer(scavenge_current, object.allocation_size());
             }
@@ -237,37 +198,6 @@ impl Page {
             scavenge_end_addr = scavenge_start as usize;
             // and the start to the allocation pointer, as there may have been additional objects added that need to be scavenged too
             scavenge_start = unsafe { *self.free_top.get() };
-        }
-
-        fn copy_object_to_new_allocation(
-            obj: &mut dyn HeapObject,
-            gc_handle: &mut CollectionHandle,
-            target_generation: Generation,
-        ) -> RawHeapGcPointer {
-            let alloc_size = obj.allocation_size();
-            let alloc_align = obj.allocation_alignment();
-
-            let header = unsafe { (obj as *const dyn HeapObject as *const HeapEntry).offset(-1) };
-            loop {
-                let allocation_page = gc_handle.get_allocation_page(target_generation);
-                if let Some((destination_header, _destination_data)) =
-                    allocation_page.try_reserve(alloc_size, alloc_align)
-                {
-                    let total_copy_size = alloc_size + core::mem::size_of::<HeapEntry>();
-                    unsafe {
-                        let source_bytes =
-                            core::slice::from_raw_parts(header as *const u8, total_copy_size);
-                        let dest_bytes = core::slice::from_raw_parts_mut(
-                            destination_header as *mut u8,
-                            total_copy_size,
-                        );
-                        dest_bytes.copy_from_slice(source_bytes);
-
-                        break RawHeapGcPointer::from_addr(destination_header);
-                    }
-                }
-                gc_handle.finish_allocation_page(target_generation);
-            }
         }
 
         fn advance_entrypointer(ptr: *mut HeapEntry, allocation_size: usize) -> *mut HeapEntry {
@@ -375,5 +305,123 @@ impl Page {
             // performing this allocation would result in us going off the page.
             None
         }
+    }
+}
+
+pub(crate) fn scavenge_object(
+    gc_handle: &mut CollectionHandle,
+    heap_ptr: &mut RawHeapGcPointer,
+    gc_max_generation: Generation,
+) {
+    let generation = gc_handle.get_generation(&heap_ptr);
+    if generation > gc_max_generation {
+        // we do not need to scavenge this particular pointer.
+        return;
+    }
+    let header = heap_ptr.resolve_mut();
+    let new_gc_pointer = match header.decode_mut() {
+        Ok(obj) => {
+            // copy the value.
+            copy_object_to_new_allocation(obj, gc_handle, generation.next_higher())
+        }
+        Err(forward) if forward.fully_resolved => forward.pointer,
+        Err(forward) => {
+            // the pointer was already forwarded.
+            // since there may have been a chain of forwardings, follow them until the final heap entry
+            let (mut resolved, fully_resolved) = forward.follow_to_end();
+            if fully_resolved {
+                // at some point in the chain, we already scavenged whatever this pointer was pointing to.
+                // so we can just use that value.
+                resolved
+            } else {
+                let generation = gc_handle.get_generation(&resolved);
+                if generation > gc_max_generation {
+                    // the pointer was pointing to some value in a generation we are not collecting yet.
+                    resolved
+                } else {
+                    // we _do_ have to scavenge the value it is pointing to.
+                    let final_header = resolved.resolve_mut();
+                    let new_pointer = copy_object_to_new_allocation(
+                        final_header.load_mut(),
+                        gc_handle,
+                        generation.next_higher(),
+                    );
+                    // ensure that the header of the final object is updated too, to ensure it is not
+                    // duplicated if there is another reference to it later.
+                    final_header.forward_to_final(&new_pointer);
+                    new_pointer
+                }
+            }
+        }
+    };
+    header.forward_to_final(&new_gc_pointer);
+}
+
+pub(crate) fn promote_object(
+    gc_handle: &mut CollectionHandle,
+    heap_ptr: &mut RawHeapGcPointer,
+    target_generation: Generation,
+) -> RawHeapGcPointer {
+    let header = heap_ptr.resolve_mut();
+
+    let new_heap_ptr = match header.decode_mut() {
+        Ok(obj) => copy_object_to_new_allocation(obj, gc_handle, target_generation),
+        Err(forward) => {
+            let (mut resolved, _) = forward.follow_to_end();
+            if gc_handle.get_generation(&resolved).0 >= target_generation.0 {
+                // the object it was pointing to was already a member of the target generation.
+                resolved
+            } else {
+                // we need to copy the object.
+                let header = resolved.resolve_mut();
+                let mut new_value =
+                    copy_object_to_new_allocation(header.load_mut(), gc_handle, target_generation);
+
+                // ensure that all the indirectly referenced values are also promoted.
+                new_value.resolve_mut().load_mut().trace(&mut |ptr| {
+                    let mut heap_ptr = unsafe { ptr.get_heapref_unchecked() };
+                    if gc_handle.get_generation(&heap_ptr) >= target_generation {
+                        return;
+                    }
+                    let new_value = promote_object(gc_handle, &mut heap_ptr, target_generation);
+                    unsafe { core::ptr::write(ptr, new_value.into()) }
+                });
+
+                header.forward_to(new_value.clone());
+                new_value
+            }
+        }
+    };
+
+    header.forward_to(new_heap_ptr.clone());
+    new_heap_ptr
+}
+
+fn copy_object_to_new_allocation(
+    obj: &mut dyn HeapObject,
+    gc_handle: &mut CollectionHandle,
+    target_generation: Generation,
+) -> RawHeapGcPointer {
+    let alloc_size = obj.allocation_size();
+    let alloc_align = obj.allocation_alignment();
+
+    let header = unsafe { (obj as *const dyn HeapObject as *const HeapEntry).offset(-1) };
+    loop {
+        let allocation_page = gc_handle.get_allocation_page(target_generation);
+        if let Some((destination_header, _destination_data)) =
+            allocation_page.try_reserve(alloc_size, alloc_align)
+        {
+            let total_copy_size = alloc_size + core::mem::size_of::<HeapEntry>();
+            unsafe {
+                let source_bytes =
+                    core::slice::from_raw_parts(header as *const u8, total_copy_size);
+                let dest_bytes =
+                    core::slice::from_raw_parts_mut(destination_header as *mut u8, total_copy_size);
+                dest_bytes.copy_from_slice(source_bytes);
+
+                break RawHeapGcPointer::from_addr(destination_header);
+            }
+        }
+        gc_handle.finish_allocation_page(target_generation);
     }
 }

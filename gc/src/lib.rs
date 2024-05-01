@@ -1,5 +1,5 @@
 // mod heap;
-pub mod heap_page;
+mod heap_page;
 mod object;
 // mod rootset;
 mod heap;
@@ -12,35 +12,27 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use heap::{GenerationAnalyzer, Heap};
-use heap_page::Page;
+use heap::{GenerationAnalyzer, Pagetracker};
+use heap_page::{scavenge_object, Page};
 use init::get_global_gc;
 use object::HeapObject;
+use pointer::{inspect_roots, RawHeapGcPointer};
 pub use pointer::{GcPointer, RawGcPointer};
+
+use crate::heap_page::promote_object;
 
 pub(crate) const GC_PAGE_SIZE: usize = 4096 * 128;
 pub(crate) const GC_GEN_HIGHEST: u8 = 8;
 
-// impl<TData> GcPointer<TData> {
-//     pub fn as_raw(&self) -> RawGcPointer {
-//         self.ptr
-//     }
-// }
-
-type RegionId = NonZeroI16;
-
-// A pointer to the GC header of the next entry.
-
 mod init;
 
 struct GlobalGc {
-    heap: Heap,
+    heap: Pagetracker,
 }
 
 pub struct GcHandle {
     global: Arc<Mutex<GlobalGc>>,
-    /// the gen0 page new allocations are placed in.
-    nursery_page: Page,
+    alloc_pages: AllocationPages,
 }
 
 const HEAP_LAYOUT: Layout = unsafe { Layout::from_size_align_unchecked(1 << 32, 1 << 32) };
@@ -77,15 +69,20 @@ pub enum GcError {
 pub type GcResult<T> = Result<T, GcError>;
 
 struct CollectionHandle<'a> {
-    fun: &'a (),
-    pub generation_table: GenerationAnalyzer,
+    pages: &'a mut AllocationPages,
+    global: &'a Mutex<GlobalGc>,
 }
 impl<'a> CollectionHandle<'a> {
-    pub fn get_allocation_page(&mut self, generation: Generation) -> &'a mut Page {
-        todo!()
+    pub fn get_allocation_page(&mut self, generation: Generation) -> &mut Page {
+        self.pages.get_allocation_page(generation)
     }
     pub fn finish_allocation_page(&mut self, generation: Generation) {
-        todo!()
+        let mut guard = self.global.lock().unwrap();
+        self.pages
+            .finish_allocation_page(generation, &mut guard.heap);
+    }
+    pub fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation {
+        self.pages.generations.get_generation(ptr)
     }
 }
 
@@ -99,9 +96,64 @@ where
     Ok(res)
 }
 
+struct AllocationPages {
+    pages: [Page; GC_GEN_HIGHEST as usize],
+    scavenge_pending_set: [Vec<Page>; GC_GEN_HIGHEST as usize],
+    generations: GenerationAnalyzer,
+}
+impl AllocationPages {
+    pub fn new(heap: &mut Pagetracker) -> Self {
+        todo!()
+    }
+    pub fn get_fresh_allocpages(&mut self, heap: &mut Pagetracker, target_generation: Generation) {
+        for gen in 0..target_generation.0 + 1 {
+            let gen = Generation(gen);
+            let old_page =
+                core::mem::replace(&mut self.pages[gen.0 as usize], heap.get_page(gen).unwrap());
+            heap.track_used_page(old_page, gen);
+        }
+    }
+
+    pub fn get_allocation_page(&mut self, generation: Generation) -> &mut Page {
+        &mut self.pages[generation.0 as usize]
+    }
+    pub fn finish_allocation_page(&mut self, generation: Generation, heap: &mut Pagetracker) {
+        let prev_page = core::mem::replace(
+            self.get_allocation_page(generation),
+            heap.get_page(generation).unwrap(),
+        );
+        heap.track_used_page(prev_page, generation);
+    }
+}
+
 impl GcHandle {
+    fn run_gc(&mut self, target_generation: Generation) {
+        let mut guard = self.global.lock().unwrap();
+
+        self.alloc_pages
+            .get_fresh_allocpages(&mut guard.heap, target_generation);
+
+        drop(guard);
+
+        let mut handle = CollectionHandle {
+            pages: &mut self.alloc_pages,
+            global: &self.global,
+        };
+
+        inspect_roots(|root| {
+            let gen = handle.get_generation(root);
+            if gen > target_generation {
+                return;
+            }
+
+            scavenge_object(&mut handle, root, target_generation);
+        })
+
+        // TODO: scavenge only once
+    }
+
     fn clear_nursery(&mut self) -> GcResult<()> {
-        // self.nursery_page.scavenge_content(gc_handle, 0)
+        self.run_gc(Generation(0));
         Ok(())
     }
 
@@ -109,11 +161,11 @@ impl GcHandle {
         &mut self,
         data: TData,
     ) -> GcResult<GcPointer<TData>> {
-        let heap_ptr = match self.nursery_page.try_alloc(data) {
+        let heap_ptr = match self.alloc_pages.pages[0].try_alloc(data) {
             Ok(ptr) => ptr,
             Err(value) => {
                 self.clear_nursery()?;
-                self.nursery_page
+                self.alloc_pages.pages[0]
                     .try_alloc(value)
                     .map_err(|_| GcError::ObjectBiggerThanPage)?
             }
@@ -123,15 +175,12 @@ impl GcHandle {
 
     fn get() -> GcResult<Self> {
         let global = get_global_gc();
-        let nursery_page = global
-            .lock()
-            .unwrap()
-            .heap
-            .get_page(Generation(0))
-            .ok_or(GcError::OutOfPages)?;
+        let mut guard = global.lock().unwrap();
+        let alloc_pages = AllocationPages::new(&mut guard.heap);
+        drop(guard);
         Ok(Self {
             global,
-            nursery_page,
+            alloc_pages,
         })
     }
 
@@ -147,7 +196,50 @@ impl GcHandle {
     /// replace the value the pointer points to to instead refer to the new value.
     /// Since this operation may trigger a garbage collection due to the promotion of new_value
     /// the gc needs to be taken by mut.
-    pub fn replace<'s, TData>(&mut self, ptr: GcPointer<TData>, new_value: GcPointer<TData>) {
-        todo!()
+    ///
+    /// will return a pointer to the new value.
+    pub fn replace<TData>(
+        &mut self,
+        ptr: GcPointer<TData>,
+        new_value: GcPointer<TData>,
+    ) -> GcPointer<TData> {
+        let target_generation = self
+            .alloc_pages
+            .generations
+            .get_generation(&ptr.as_ref().get_heapref());
+
+        let replacement_gen = self
+            .alloc_pages
+            .generations
+            .get_generation(&new_value.as_ref().get_heapref());
+
+        if replacement_gen >= target_generation {
+            // the replacement is already in a generation that will live at least as long as the source.
+            // so we can just set up the forwarding.
+            ptr.as_ref()
+                .get_heapref()
+                .resolve_mut()
+                .forward_to(new_value.as_ref().get_heapref());
+            new_value
+        } else {
+            // the source reference would outlive the replacement value.
+            // to ensure this does not happen, we need to promote the value to the generation the source is in.
+            let new_value = promote_object(
+                &mut CollectionHandle {
+                    pages: &mut self.alloc_pages,
+                    global: &self.global,
+                },
+                &mut new_value.as_ref().get_heapref(),
+                replacement_gen,
+            );
+
+            ptr.as_ref()
+                .get_heapref()
+                .resolve_mut()
+                .forward_to(new_value.clone());
+
+            let ptr = new_value.root();
+            unsafe { GcPointer::<TData>::from_raw_unchecked(ptr) }
+        }
     }
 }

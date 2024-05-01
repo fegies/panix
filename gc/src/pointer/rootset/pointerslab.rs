@@ -1,7 +1,11 @@
+use crate::pointer::RawHeapGcPointer;
+
 pub struct Pointerslab {
-    storage: Vec<u32>,
+    storage: Vec<RawHeapGcPointer>,
     free_slots: Vec<Slabkey>,
 }
+
+const INVALID_SLOT: RawHeapGcPointer = unsafe { RawHeapGcPointer::from_bits(u32::MAX) };
 
 pub struct Slabkey(pub u32);
 
@@ -13,15 +17,17 @@ impl Pointerslab {
         }
     }
 
-    pub fn get(&self, key: &Slabkey) -> u32 {
-        self.storage[key.0 as usize]
+    #[inline]
+    pub fn get(&self, key: &Slabkey) -> RawHeapGcPointer {
+        self.storage[key.0 as usize].clone()
     }
 
-    fn get_mut(&mut self, key: &Slabkey) -> &mut u32 {
+    #[inline]
+    fn get_mut(&mut self, key: &Slabkey) -> &mut RawHeapGcPointer {
         unsafe { self.storage.get_unchecked_mut(key.0 as usize) }
     }
 
-    pub fn insert(&mut self, value: u32) -> Slabkey {
+    pub fn insert(&mut self, value: RawHeapGcPointer) -> Slabkey {
         if let Some(free_slot) = self.free_slots.pop() {
             let slot = self.get_mut(&free_slot);
             *slot = value;
@@ -34,14 +40,15 @@ impl Pointerslab {
         }
     }
 
+    #[inline]
     /// remove the key, return the previously stored value
-    pub fn remove(&mut self, key: Slabkey) -> u32 {
-        let result = core::mem::replace(self.get_mut(&key), u32::MAX);
+    pub fn remove(&mut self, key: Slabkey) -> RawHeapGcPointer {
+        let result = core::mem::replace(self.get_mut(&key), INVALID_SLOT);
         self.free_slots.push(key);
         result
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = u32> + '_ {
-        self.storage.iter().copied().filter(|e| *e < u32::MAX)
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut RawHeapGcPointer> {
+        self.storage.iter_mut().filter(|e| e.content < u32::MAX)
     }
 }

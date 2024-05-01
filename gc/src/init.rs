@@ -13,7 +13,7 @@ pub fn get_global_gc() -> Arc<Mutex<GlobalGc>> {
                 HEAP_BASE = ptr;
             }
             println!("allocated heap at {ptr:?}");
-            let heap = Heap::new(ptr, HEAP_LAYOUT.size());
+            let heap = Pagetracker::new(ptr, HEAP_LAYOUT.size());
 
             let global = GlobalGc { heap };
             Arc::new(Mutex::new(global))

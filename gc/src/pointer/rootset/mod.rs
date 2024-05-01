@@ -21,23 +21,25 @@ thread_local! {
     };
 }
 
+pub(crate) fn inspect_roots(func: impl FnMut(&mut RawHeapGcPointer)) {
+    with_rootset(|rootset| rootset.inner.iter_mut().for_each(func))
+}
+
 impl RootSet {
     fn root_heapref(&mut self, heapref: &RawHeapGcPointer) -> RawGcPointer {
-        let rootref = self.inner.insert(heapref.content);
+        let rootref = self.inner.insert(heapref.clone());
         super::RootsetReference { content: rootref }.into()
     }
 
     fn root_raw(&mut self, ptr: &RawGcPointer) -> RawGcPointer {
-        let heapref = ptr.get_heapref();
-        self.root_heapref(&heapref)
+        self.root_heapref(&ptr.get_heapref())
     }
 
     /// replace the pointer representation to instead be a plain heap-only pointer.
     fn unroot_raw(&mut self, ptr: &mut RawGcPointer) {
         if let Err(rootref) = ptr.decode() {
             let loaded = self.inner.remove(rootref.content);
-            let loaded = super::RawHeapGcPointer { content: loaded }.into();
-            unsafe { core::ptr::write(ptr as *mut RawGcPointer, loaded) }
+            unsafe { core::ptr::write(ptr as *mut RawGcPointer, loaded.into()) }
         }
     }
 }
@@ -49,7 +51,7 @@ fn with_rootset<TR>(func: impl FnOnce(&mut RootSet) -> TR) -> TR {
     })
 }
 
-pub(super) fn read_rootset_entry(entry: &Slabkey) -> u32 {
+pub(super) fn read_rootset_entry(entry: &Slabkey) -> RawHeapGcPointer {
     with_rootset(|set| set.inner.get(entry))
 }
 

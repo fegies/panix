@@ -23,9 +23,11 @@ pub struct RawGcPointer {
 /// representation:
 /// the lower 32 bits of the heap addr, shifted right by the min alignment of
 /// the heap header
+#[derive(Clone)]
 pub(crate) struct RawHeapGcPointer {
     pub(super) content: u32,
 }
+
 pub(crate) struct HeapGcPointer<T> {
     raw: RawHeapGcPointer,
     data: PhantomData<T>,
@@ -60,7 +62,7 @@ impl RawHeapGcPointer {
         Self { content: value }
     }
 
-    pub(crate) unsafe fn from_bits(bitrep: u32) -> Self {
+    pub(crate) const unsafe fn from_bits(bitrep: u32) -> Self {
         Self { content: bitrep }
     }
     /// get the bitpattern representing this pointer.
@@ -79,9 +81,6 @@ impl<TData> GcPointer<TData> {
             ptr,
             data: PhantomData,
         }
-    }
-    pub(crate) fn as_raw_mut(&mut self) -> &mut RawGcPointer {
-        &mut self.ptr
     }
 }
 impl<TData> From<HeapGcPointer<TData>> for GcPointer<TData> {
@@ -114,15 +113,9 @@ const ROOT_REF_BIT: u32 = 1 << 31;
 pub(crate) const HEAP_ENTRY_SHIFT: usize = core::mem::align_of::<HeapEntry>().ilog2() as usize;
 
 impl RootsetReference {
-    pub fn resolve(&mut self) -> &mut HeapEntry {
-        let short = self.get_heapref().resolve_mut() as *mut HeapEntry;
-        unsafe { &mut *short }
-    }
-
     #[inline]
     pub fn get_heapref(&self) -> RawHeapGcPointer {
-        let entry = read_rootset_entry(&self.content);
-        RawHeapGcPointer { content: entry }
+        read_rootset_entry(&self.content)
     }
 }
 impl RawHeapGcPointer {
@@ -201,19 +194,5 @@ impl RawGcPointer {
         RawHeapGcPointer {
             content: self.content,
         }
-    }
-
-    /// resolve the pointer to the final heap address it is pointing to.
-    pub(crate) fn resolve(&mut self) -> &mut HeapEntry {
-        self.decode().map_or_else(
-            |mut i| {
-                let short = i.resolve() as *mut HeapEntry;
-                unsafe { &mut *short }
-            },
-            |mut i| {
-                let short = i.resolve_mut() as *mut HeapEntry;
-                unsafe { &mut *short }
-            },
-        )
     }
 }
