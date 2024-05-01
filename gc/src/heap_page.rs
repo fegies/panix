@@ -1,5 +1,5 @@
 use crate::{
-    object::{widen, HeapObject, WideningAccessor},
+    object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
     CollectionHandle, GcError, RawGcPointer, GC_PAGE_SIZE,
 };
@@ -8,14 +8,15 @@ use std::cell::UnsafeCell;
 pub(crate) use header::HeapEntry;
 
 mod header {
+    use crate::object::{widen::WideningAccessor, HeapObject};
+
     use super::*;
     pub(crate) struct HeapEntry {
-        widening_function: WideningAccessor,
+        widening_function: usize,
     }
 
     pub struct ForwardingPointer {
         pub pointer: RawHeapGcPointer,
-        pub alloc_size: u32,
     }
     impl ForwardingPointer {
         /// follow the chain of forwardigs to the end.
@@ -34,22 +35,23 @@ mod header {
         #[inline]
         pub(crate) fn for_object<T: HeapObject + 'static>(_object: &T) -> Self {
             Self {
-                widening_function: widen::<T>,
+                widening_function: WideningAccessor::for_type::<T>().to_bitpattern(),
             }
         }
 
         fn decode_forward(bitrep: usize) -> ForwardingPointer {
-            let alloc_size = bitrep as u32 >> 1;
             let pointer = unsafe { RawHeapGcPointer::from_bits((bitrep >> 32) as u32) };
-            ForwardingPointer {
-                pointer,
-                alloc_size,
-            }
+            ForwardingPointer { pointer }
+        }
+
+        unsafe fn get_widener(&self) -> WideningAccessor {
+            WideningAccessor::from_bitpattern(self.widening_function)
         }
 
         pub fn decode_mut(&mut self) -> Result<&mut dyn HeapObject, ForwardingPointer> {
             if self.widening_function as usize & 1 == 0 {
-                Ok(unsafe { &mut *(self.widening_function)(self.get_dataref()) })
+                let loaded = unsafe { self.get_widener() }.widen_mut(self.get_dataref_mut());
+                Ok(loaded)
             } else {
                 // this is actually a forwarding pointer.
                 let bitrep = self.widening_function as usize;
@@ -58,7 +60,8 @@ mod header {
         }
         fn decode(&self) -> Result<&dyn HeapObject, ForwardingPointer> {
             if self.widening_function as usize & 1 == 0 {
-                Ok(unsafe { &*(self.widening_function)(self.get_dataref()) })
+                let loaded = unsafe { self.get_widener().widen(self.get_dataref_unchecked()) };
+                Ok(loaded)
             } else {
                 // this is actually a forwarding pointer.
                 let bitrep = self.widening_function as usize;
@@ -67,27 +70,25 @@ mod header {
         }
 
         pub fn forward_to(&mut self, other: RawHeapGcPointer) {
-            let cont = self.widening_function as usize;
-            if cont & 1 == 0 {
-                // this was not forwarded yet.
-                // we need to write the old width to lower half to keep track of it.
-                let size =
-                    unsafe { (*(self.widening_function)(self.get_dataref())).allocation_size() };
-                // and use the lowest bit to mark the value as a forwarding pointer.
-                let size = (size << 1) | 1;
+            let repr = ((other.to_bits() as usize) << 32) | 1;
+            self.widening_function = repr;
+        }
 
-                let final_value = ((other.to_bits() as usize) << 32) | size;
-                self.widening_function = unsafe { core::mem::transmute(final_value) };
+        fn get_dataref_mut(&mut self) -> &mut () {
+            unsafe { &mut *((self as *mut HeapEntry).add(1) as *mut ()) }
+        }
+
+        pub fn get_dataref(&self) -> &'static () {
+            if self.widening_function as usize & 1 == 0 {
+                unsafe { self.get_dataref_unchecked() }
             } else {
-                // this was actually forwarded.
-                // just replace the higher 32 bits.
-                let result = (other.to_bits() as usize) << 32 | (cont as u32 as usize);
-                self.widening_function = unsafe { core::mem::transmute(result) }
+                let forward = Self::decode_forward(self.widening_function);
+                forward.pointer.resolve().get_dataref()
             }
         }
 
-        fn get_dataref(&self) -> *mut u8 {
-            unsafe { (self as *const HeapEntry).add(1) as *mut u8 }
+        unsafe fn get_dataref_unchecked(&self) -> &'static () {
+            &*((self as *const HeapEntry).add(1) as *const ())
         }
 
         pub(crate) fn load(&self) -> &dyn HeapObject {

@@ -64,7 +64,7 @@ impl<T> GcPointer<T> {
         let raw: &RawGcPointer = self.as_ref();
         let raw = raw.root();
         // SAFETY: we know that the pointer we just rooted is of the correct type
-        // because we got it as a param.
+        // because we got it as a param.v
         unsafe { GcPointer::from_raw_unchecked(raw) }
     }
 }

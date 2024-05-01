@@ -1,4 +1,3 @@
-pub(crate) mod constants;
 // mod heap;
 pub mod heap_page;
 mod object;
@@ -24,7 +23,7 @@ type RegionId = NonZeroI16;
 
 // A pointer to the GC header of the next entry.
 
-struct MemoryManager {
+pub struct MemoryManager {
     heap_backing: *mut u8,
 }
 
@@ -54,7 +53,7 @@ impl MemoryManager {
         todo!()
     }
 
-    pub fn new() -> Self {
+    pub fn get() -> Self {
         let ptr = unsafe { std::alloc::alloc(HEAP_LAYOUT) };
         unsafe {
             HEAP_BASE = ptr;
@@ -64,12 +63,19 @@ impl MemoryManager {
     }
 
     pub fn load_raw<'s>(&'s self, ptr: &RawGcPointer) -> &'s dyn HeapObject {
-        todo!()
+        ptr.get_heapref().resolve().load()
     }
 
-    pub fn load<'s, TData>(&'s mut self, ptr: &GcPointer<TData>) -> &'s TData {
-        let raw = self.load_raw(ptr.as_ref());
-        unsafe { &*(raw as *const dyn HeapObject as *const TData) }
+    pub fn load<'s, TData>(&'s self, ptr: &GcPointer<TData>) -> &'s TData {
+        let data_ptr = ptr.as_ref().get_heapref().resolve().get_dataref() as *const ();
+        unsafe { &*data_ptr.cast::<TData>() }
+    }
+
+    /// replace the value the pointer points to to instead refer to the new value.
+    /// Since this operation may trigger a garbage collection due to the promotion of new_value
+    /// the gc needs to be taken by mut.
+    pub fn replace<'s, TData>(&mut self, ptr: GcPointer<TData>, new_value: GcPointer<TData>) {
+        todo!()
     }
 
     // /// announce that referencing_pointer now has a reference to data_ptr.
@@ -80,16 +86,4 @@ impl MemoryManager {
     //     data_ptr: &mut GcPointer<impl Trace>,
     // ) {
     // }
-}
-
-impl Drop for MemoryManager {
-    fn drop(&mut self) {
-        unsafe {
-            std::alloc::dealloc(self.heap_backing, HEAP_LAYOUT);
-        }
-    }
-}
-
-pub fn init() {
-    MemoryManager::new();
 }

@@ -58,8 +58,6 @@ fn walk_dir(dir: &mut PathBuf) {
 }
 
 fn main() {
-    gc::init();
-
     let args = Args::parse();
 
     let mut input = args.input_file;

@@ -17,6 +17,7 @@ pub struct GcPointer<TData> {
 ///     0 -> This is a heap reference
 pub struct RawGcPointer {
     content: u32,
+    _not_send: PhantomData<*const ()>,
 }
 
 /// representation:
@@ -121,7 +122,7 @@ impl RawHeapGcPointer {
         ((gcptr as usize) << HEAP_ENTRY_SHIFT) + heap_base as usize
     }
 
-    pub fn resolve(&self) -> &HeapEntry {
+    pub fn resolve(&self) -> &'static HeapEntry {
         let ptr = self.resolve_untyped() as *const HeapEntry;
         unsafe { &*ptr }
     }
@@ -137,6 +138,7 @@ impl From<RootsetReference> for RawGcPointer {
     fn from(value: RootsetReference) -> Self {
         Self {
             content: value.content.0 | ROOT_REF_BIT,
+            _not_send: PhantomData,
         }
     }
 }
@@ -145,6 +147,7 @@ impl From<RawHeapGcPointer> for RawGcPointer {
     fn from(value: RawHeapGcPointer) -> Self {
         Self {
             content: value.content,
+            _not_send: PhantomData,
         }
     }
 }
