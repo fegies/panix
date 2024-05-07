@@ -3,7 +3,7 @@ use std::{cell::Cell, sync::Arc};
 use crate::{
     heap_page::{HeapEntry, Page},
     pointer::RawHeapGcPointer,
-    Generation, GC_GEN_HIGHEST, GC_PAGE_SIZE,
+    Generation, GC_GEN_HIGHEST, GC_NUM_GENERATIONS, GC_PAGE_SIZE,
 };
 
 #[derive(Clone)]
@@ -29,7 +29,8 @@ pub struct Pagetracker {
     size: usize,
     next_free_base: *mut u8,
     free_pages: Vec<ZeroedPage>,
-    used_pages: [Vec<AllocatedInactivePage>; GC_GEN_HIGHEST as usize],
+    used_pages_current: [Vec<AllocatedPage>; GC_NUM_GENERATIONS],
+    used_pages_previous: [Vec<AllocatedPage>; GC_NUM_GENERATIONS],
     generations: GenerationAnalyzer,
 }
 unsafe impl Send for Pagetracker {}
@@ -41,13 +42,14 @@ impl Pagetracker {
             .into_boxed_slice()
             .into();
         let analyzer = GenerationAnalyzer { inner: generations };
-        const EMPTYVEC: Vec<AllocatedInactivePage> = Vec::new();
+        const EMPTYVEC: Vec<AllocatedPage> = Vec::new();
         Self {
             base,
             size,
             next_free_base: base,
             free_pages: Vec::new(),
-            used_pages: [EMPTYVEC; GC_GEN_HIGHEST as usize],
+            used_pages_current: [EMPTYVEC; GC_NUM_GENERATIONS],
+            used_pages_previous: [EMPTYVEC; GC_NUM_GENERATIONS],
             generations: analyzer,
         }
     }
@@ -55,18 +57,47 @@ impl Pagetracker {
         &self.generations
     }
 
+    /// compute the optimal collection target according to internal metrics
+    pub fn suggest_collection_target_generation(&self) -> Generation {
+        let mut budget = 1;
+        for gen in 1..=GC_GEN_HIGHEST {
+            budget *= 4;
+            if self.used_pages_current.len() < budget {
+                return Generation(gen - 1);
+            }
+        }
+
+        // everything is over budget. do a full collection instead.
+        Generation(GC_GEN_HIGHEST)
+    }
+
+    /// rotate out the tracked pages in the specified generations.
+    /// free the previously used pages and marke the currently used ones as previously used.
+    pub fn rotate_used_pages_to_generation(&mut self, target_generation: Generation) {
+        for gen in 0..=target_generation.0 {
+            let gen = gen as usize;
+            for page in self.used_pages_previous[gen].drain(..) {
+                self.free_pages.push(page.zero());
+            }
+            core::mem::swap(
+                &mut self.used_pages_current[gen],
+                &mut self.used_pages_previous[gen],
+            );
+        }
+    }
+    /// move the pages from the current generation to the previous one, ensuring the current set is empty.
+    pub fn mark_current_pages_as_previous(&mut self, target_generation: Generation) {
+        for gen in 0..=target_generation.0 as usize {
+            self.used_pages_previous[gen].append(&mut self.used_pages_current[gen])
+        }
+    }
+
     pub fn get_page(&mut self, generation: Generation) -> Option<Page> {
         let page = self.free_pages.pop().or_else(|| self.grow_heap())?;
         self.generations.set_generation(page.base, generation);
+        self.used_pages_current[generation.0 as usize].push(AllocatedPage { base: page.base });
         let page = Page::new(page.base);
         Some(page)
-    }
-
-    pub fn return_pages(&mut self, pages: impl Iterator<Item = ZeroedPage>) {
-        self.free_pages.extend(pages)
-    }
-    pub fn track_used_page(&mut self, page: Page, generation: Generation) {
-        self.used_pages[generation.0 as usize].push(page.into())
     }
 
     fn grow_heap(&mut self) -> Option<ZeroedPage> {
@@ -95,13 +126,22 @@ impl ZeroedPage {
 }
 
 /// a page
-pub(crate) struct AllocatedInactivePage {
+pub(crate) struct AllocatedPage {
     base: *mut u8,
 }
-impl From<Page> for AllocatedInactivePage {
+impl From<Page> for AllocatedPage {
     fn from(value: Page) -> Self {
         Self {
             base: value.get_base(),
+        }
+    }
+}
+impl AllocatedPage {
+    fn zero(self) -> ZeroedPage {
+        unsafe {
+            let slice = core::slice::from_raw_parts_mut(self.base, GC_PAGE_SIZE);
+            slice.fill(0);
+            ZeroedPage::from_zeroed_addr(self.base)
         }
     }
 }

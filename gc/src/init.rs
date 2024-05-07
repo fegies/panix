@@ -2,9 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 
-static GLOBAL_GC: Mutex<Option<Arc<Mutex<GlobalGc>>>> = Mutex::new(None);
+static GLOBAL_GC: Mutex<Option<Arc<Mutex<Pagetracker>>>> = Mutex::new(None);
 
-pub fn get_global_gc() -> Arc<Mutex<GlobalGc>> {
+pub fn get_global_gc() -> Arc<Mutex<Pagetracker>> {
     let mut guard = GLOBAL_GC.lock().unwrap();
     guard
         .get_or_insert_with(|| {
@@ -15,8 +15,7 @@ pub fn get_global_gc() -> Arc<Mutex<GlobalGc>> {
             println!("allocated heap at {ptr:?}");
             let heap = Pagetracker::new(ptr, HEAP_LAYOUT.size());
 
-            let global = GlobalGc { heap };
-            Arc::new(Mutex::new(global))
+            Arc::new(Mutex::new(heap))
         })
         .clone()
 }

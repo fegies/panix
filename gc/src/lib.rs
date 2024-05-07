@@ -8,7 +8,8 @@ pub mod specialized_types;
 
 use std::{
     alloc::Layout,
-    num::NonZeroI16,
+    collections::VecDeque,
+    rc::Rc,
     sync::{Arc, Mutex},
 };
 
@@ -22,16 +23,12 @@ pub use pointer::{GcPointer, RawGcPointer};
 use crate::heap_page::promote_object;
 
 pub(crate) const GC_PAGE_SIZE: usize = 4096 * 128;
-pub(crate) const GC_GEN_HIGHEST: u8 = 8;
+pub(crate) const GC_GEN_HIGHEST: u8 = 7;
+pub(crate) const GC_NUM_GENERATIONS: usize = GC_GEN_HIGHEST as usize + 1;
 
 mod init;
 
-struct GlobalGc {
-    heap: Pagetracker,
-}
-
 pub struct GcHandle {
-    global: Arc<Mutex<GlobalGc>>,
     alloc_pages: AllocationPages,
 }
 
@@ -62,28 +59,81 @@ impl Ord for Generation {
     }
 }
 
+#[derive(Debug)]
 pub enum GcError {
     OutOfPages,
     ObjectBiggerThanPage,
 }
 pub type GcResult<T> = Result<T, GcError>;
 
+struct ScavengePendingSet {
+    entries: [VecDeque<Rc<Page>>; GC_GEN_HIGHEST as usize],
+}
+impl ScavengePendingSet {
+    pub const fn new() -> Self {
+        const EMPTY_QUEUE: VecDeque<Rc<Page>> = VecDeque::new();
+        Self {
+            entries: [EMPTY_QUEUE; GC_GEN_HIGHEST as usize],
+        }
+    }
+}
+
 struct CollectionHandle<'a> {
     pages: &'a mut AllocationPages,
-    global: &'a Mutex<GlobalGc>,
+    scavenge_pending_set: ScavengePendingSet,
 }
-impl<'a> CollectionHandle<'a> {
-    pub fn get_allocation_page(&mut self, generation: Generation) -> &mut Page {
+struct PromotionHandle<'a> {
+    pages: &'a mut AllocationPages,
+}
+
+impl PageSource for CollectionHandle<'_> {
+    fn get_allocation_page(&mut self, generation: Generation) -> &Page {
         self.pages.get_allocation_page(generation)
     }
-    pub fn finish_allocation_page(&mut self, generation: Generation) {
-        let mut guard = self.global.lock().unwrap();
-        self.pages
-            .finish_allocation_page(generation, &mut guard.heap);
+    fn finish_allocation_page(&mut self, generation: Generation) {
+        let gen = generation.0 as usize;
+
+        let new_page = self
+            .pages
+            .global
+            .lock()
+            .unwrap()
+            .get_page(generation)
+            .unwrap();
+        let new_page = Rc::new(new_page);
+        self.pages.pages[gen] = new_page.clone();
+        self.scavenge_pending_set.entries[gen].push_back(new_page);
     }
-    pub fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation {
+    fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation {
         self.pages.generations.get_generation(ptr)
     }
+}
+impl PageSource for PromotionHandle<'_> {
+    fn get_allocation_page(&mut self, generation: Generation) -> &Page {
+        self.pages.get_allocation_page(generation)
+    }
+
+    fn finish_allocation_page(&mut self, generation: Generation) {
+        let gen = generation.0 as usize;
+        let new_page = self
+            .pages
+            .global
+            .lock()
+            .unwrap()
+            .get_page(generation)
+            .unwrap();
+        self.pages.pages[gen] = Rc::new(new_page);
+    }
+
+    fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation {
+        self.pages.generations.get_generation(ptr)
+    }
+}
+
+trait PageSource {
+    fn get_allocation_page(&mut self, generation: Generation) -> &Page;
+    fn finish_allocation_page(&mut self, generation: Generation);
+    fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation;
 }
 
 pub fn with_gc<F, R>(action: F) -> GcResult<R>
@@ -97,48 +147,52 @@ where
 }
 
 struct AllocationPages {
-    pages: [Page; GC_GEN_HIGHEST as usize],
-    scavenge_pending_set: [Vec<Page>; GC_GEN_HIGHEST as usize],
+    pages: [Rc<Page>; GC_GEN_HIGHEST as usize],
     generations: GenerationAnalyzer,
+    global: Arc<Mutex<Pagetracker>>,
 }
 impl AllocationPages {
-    pub fn new(heap: &mut Pagetracker) -> Self {
-        todo!()
-    }
-    pub fn get_fresh_allocpages(&mut self, heap: &mut Pagetracker, target_generation: Generation) {
-        for gen in 0..target_generation.0 + 1 {
-            let gen = Generation(gen);
-            let old_page =
-                core::mem::replace(&mut self.pages[gen.0 as usize], heap.get_page(gen).unwrap());
-            heap.track_used_page(old_page, gen);
+    pub fn new(heap: Arc<Mutex<Pagetracker>>) -> Self {
+        let mut guard = heap.lock().unwrap();
+        let pages =
+            std::array::from_fn(|gen| Rc::new(guard.get_page(Generation(gen as u8)).unwrap()));
+        let generations = guard.get_analyzer().clone();
+        drop(guard);
+        Self {
+            pages,
+            generations,
+            global: heap,
         }
     }
+    pub fn get_fresh_allocpages(&mut self) -> Generation {
+        let mut heap = self.global.lock().unwrap();
+        let target_generation = heap.suggest_collection_target_generation();
+        for gen in 0..=target_generation.0 {
+            let gen = Generation(gen);
+            self.pages[gen.0 as usize] = Rc::new(heap.get_page(gen).unwrap());
+        }
 
-    pub fn get_allocation_page(&mut self, generation: Generation) -> &mut Page {
-        &mut self.pages[generation.0 as usize]
+        heap.mark_current_pages_as_previous(target_generation);
+        target_generation
     }
-    pub fn finish_allocation_page(&mut self, generation: Generation, heap: &mut Pagetracker) {
-        let prev_page = core::mem::replace(
-            self.get_allocation_page(generation),
-            heap.get_page(generation).unwrap(),
-        );
-        heap.track_used_page(prev_page, generation);
+
+    pub fn get_allocation_page(&mut self, generation: Generation) -> &Page {
+        &self.pages[generation.0 as usize]
     }
 }
 
 impl GcHandle {
-    fn run_gc(&mut self, target_generation: Generation) {
-        let mut guard = self.global.lock().unwrap();
-
-        self.alloc_pages
-            .get_fresh_allocpages(&mut guard.heap, target_generation);
-
-        drop(guard);
+    fn run_gc(&mut self) {
+        let target_generation = self.alloc_pages.get_fresh_allocpages();
 
         let mut handle = CollectionHandle {
             pages: &mut self.alloc_pages,
-            global: &self.global,
+            scavenge_pending_set: ScavengePendingSet::new(),
         };
+
+        for gen in 0..=target_generation.0 as usize {
+            handle.scavenge_pending_set.entries[gen].push_back(handle.pages.pages[gen].clone());
+        }
 
         inspect_roots(|root| {
             let gen = handle.get_generation(root);
@@ -147,13 +201,27 @@ impl GcHandle {
             }
 
             scavenge_object(&mut handle, root, target_generation);
-        })
+        });
 
-        // TODO: scavenge only once
+        for gen in 1..=target_generation.next_higher().0 {
+            while let Some(next_page) =
+                handle.scavenge_pending_set.entries[gen as usize].pop_front()
+            {
+                next_page
+                    .scavenge_content(&mut handle, target_generation)
+                    .unwrap();
+            }
+        }
+
+        self.alloc_pages
+            .global
+            .lock()
+            .unwrap()
+            .rotate_used_pages_to_generation(target_generation);
     }
 
     fn clear_nursery(&mut self) -> GcResult<()> {
-        self.run_gc(Generation(0));
+        self.run_gc();
         Ok(())
     }
 
@@ -175,13 +243,8 @@ impl GcHandle {
 
     fn get() -> GcResult<Self> {
         let global = get_global_gc();
-        let mut guard = global.lock().unwrap();
-        let alloc_pages = AllocationPages::new(&mut guard.heap);
-        drop(guard);
-        Ok(Self {
-            global,
-            alloc_pages,
-        })
+        let alloc_pages = AllocationPages::new(global);
+        Ok(Self { alloc_pages })
     }
 
     pub fn load_raw<'s>(&'s self, ptr: &RawGcPointer) -> &'s dyn HeapObject {
@@ -224,11 +287,11 @@ impl GcHandle {
         } else {
             // the source reference would outlive the replacement value.
             // to ensure this does not happen, we need to promote the value to the generation the source is in.
+            let mut handle = PromotionHandle {
+                pages: &mut self.alloc_pages,
+            };
             let new_value = promote_object(
-                &mut CollectionHandle {
-                    pages: &mut self.alloc_pages,
-                    global: &self.global,
-                },
+                &mut handle,
                 &mut new_value.as_ref().get_heapref(),
                 replacement_gen,
             );
