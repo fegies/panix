@@ -9,7 +9,7 @@ members = [
     "panix",
     "identpool",
     "gc",
-    "lexer_impedance_matcher",
+    "lexer_impedance_matcher", "gc_bench",
 ]
 
 [workspace.dependencies]

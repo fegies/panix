@@ -20,12 +20,28 @@ pub struct RawGcPointer {
     _not_send: PhantomData<*const ()>,
 }
 
+impl core::fmt::Debug for RawGcPointer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_struct("RawGcPointer");
+        match self.decode() {
+            Ok(raw) => debug.field("raw_value", &raw),
+            Err(root) => debug.field("root_reference", &root),
+        };
+        debug.finish()
+    }
+}
+
 /// representation:
 /// the lower 32 bits of the heap addr, shifted right by the min alignment of
 /// the heap header
 #[derive(Clone)]
 pub(crate) struct RawHeapGcPointer {
     pub(super) content: u32,
+}
+impl core::fmt::Debug for RawHeapGcPointer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:#x}", self.content))
+    }
 }
 
 pub(crate) struct HeapGcPointer<T> {
@@ -58,7 +74,8 @@ impl RawHeapGcPointer {
     /// is properly allocated on the gc heap and
     /// valid.
     pub(crate) unsafe fn from_addr(raw_ptr: *mut HeapEntry) -> Self {
-        let value = (raw_ptr as usize >> (32 - HEAP_ENTRY_SHIFT)) as u32;
+        let mask: usize = 0xff_ff_ff_ff;
+        let value = ((raw_ptr as usize & mask) >> HEAP_ENTRY_SHIFT) as u32;
         Self { content: value }
     }
 
@@ -74,6 +91,14 @@ impl RawHeapGcPointer {
 pub(crate) struct RootsetReference {
     pub(super) content: Slabkey,
 }
+impl core::fmt::Debug for RootsetReference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RootsetReference")
+            .field("id", &self.content.0)
+            .field("object", &self.get_heapref())
+            .finish()
+    }
+}
 
 impl<TData> GcPointer<TData> {
     pub(crate) unsafe fn from_raw_unchecked(ptr: RawGcPointer) -> Self {
@@ -81,6 +106,9 @@ impl<TData> GcPointer<TData> {
             ptr,
             data: PhantomData,
         }
+    }
+    pub fn as_raw(&self) -> &RawGcPointer {
+        self.as_ref()
     }
 }
 impl<TData> From<HeapGcPointer<TData>> for GcPointer<TData> {

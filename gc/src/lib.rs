@@ -14,10 +14,12 @@ use std::{
 };
 
 use heap::{GenerationAnalyzer, Pagetracker};
-use heap_page::{scavenge_object, Page};
+use heap_page::{scavenge_heap_pointer, Page};
 use init::get_global_gc;
 use object::HeapObject;
 use pointer::{inspect_roots, RawHeapGcPointer};
+
+pub use object::{Tracable, TraceCallback};
 pub use pointer::{GcPointer, RawGcPointer};
 
 use crate::heap_page::promote_object;
@@ -167,12 +169,14 @@ impl AllocationPages {
     pub fn get_fresh_allocpages(&mut self) -> Generation {
         let mut heap = self.global.lock().unwrap();
         let target_generation = heap.suggest_collection_target_generation();
+
+        heap.mark_current_pages_as_previous(target_generation);
+
         for gen in 0..=target_generation.0 {
             let gen = Generation(gen);
             self.pages[gen.0 as usize] = Rc::new(heap.get_page(gen).unwrap());
         }
 
-        heap.mark_current_pages_as_previous(target_generation);
         target_generation
     }
 
@@ -183,6 +187,7 @@ impl AllocationPages {
 
 impl GcHandle {
     fn run_gc(&mut self) {
+        println!("gc triggered!");
         let target_generation = self.alloc_pages.get_fresh_allocpages();
 
         let mut handle = CollectionHandle {
@@ -190,17 +195,13 @@ impl GcHandle {
             scavenge_pending_set: ScavengePendingSet::new(),
         };
 
-        for gen in 0..=target_generation.0 as usize {
+        // we will never allocate anything in gen0 during GC
+        for gen in 1..=target_generation.next_higher().0 as usize {
             handle.scavenge_pending_set.entries[gen].push_back(handle.pages.pages[gen].clone());
         }
 
         inspect_roots(|root| {
-            let gen = handle.get_generation(root);
-            if gen > target_generation {
-                return;
-            }
-
-            scavenge_object(&mut handle, root, target_generation);
+            scavenge_heap_pointer(&mut handle, root, target_generation);
         });
 
         for gen in 1..=target_generation.next_higher().0 {
@@ -218,6 +219,10 @@ impl GcHandle {
             .lock()
             .unwrap()
             .rotate_used_pages_to_generation(target_generation);
+    }
+
+    pub fn force_collect(&mut self) {
+        self.run_gc();
     }
 
     fn clear_nursery(&mut self) -> GcResult<()> {

@@ -64,5 +64,26 @@
                 "rust"
             ]
         },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'gc_bench'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=gc_bench",
+                    "--package=gc_bench"
+                ],
+                "filter": {
+                    "name": "gc_bench",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "sourceLanguages": [
+                "rust"
+            ]
+        }
     ]
 }

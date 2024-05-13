@@ -155,7 +155,7 @@ impl Page {
         Self {
             base_address,
             free_top: Cell::new(free_top),
-            scavenge_end_addr: Cell::new(base_address as usize + GC_PAGE_SIZE),
+            scavenge_end_addr: Cell::new(free_top as usize),
         }
     }
 
@@ -185,7 +185,7 @@ impl Page {
 
                 object.trace(&mut |gc_pointer| {
                     let mut heap_ptr = unsafe { gc_pointer.get_heapref_unchecked() };
-                    scavenge_object(gc_handle, &mut heap_ptr, gc_max_generation);
+                    scavenge_heap_pointer(gc_handle, &mut heap_ptr, gc_max_generation);
                     unsafe { core::ptr::write(gc_pointer, heap_ptr.into()) }
                 });
                 scavenge_current = advance_entrypointer(scavenge_current, object.allocation_size());
@@ -283,9 +283,8 @@ impl Page {
         // as much as the object header needs.
         let header_ptr = unsafe { (data_ptr as *mut HeapEntry).sub(1) };
 
-        if (header_ptr as usize) < self.base_address as usize {
+        if (self.base_address as usize) < header_ptr as usize {
             // our allocation is legal, so perform it by writing the free top.
-
             self.free_top.set(header_ptr);
             // and return the pointer to the allocation
             Some((header_ptr, data_ptr))
@@ -296,7 +295,9 @@ impl Page {
     }
 }
 
-pub(crate) fn scavenge_object(
+/// scavenge the provided heap pointer, ensuring that it points to a location
+/// that is valid after the current collection is complete.
+pub(crate) fn scavenge_heap_pointer(
     gc_handle: &mut CollectionHandle,
     heap_ptr: &mut RawHeapGcPointer,
     gc_max_generation: Generation,
@@ -310,14 +311,16 @@ pub(crate) fn scavenge_object(
     let new_gc_pointer = match header.decode_mut() {
         Ok(obj) => {
             // copy the value.
-            copy_object_to_new_allocation(obj, gc_handle, generation.next_higher())
+            let copy = copy_object_to_new_allocation(obj, gc_handle, generation.next_higher());
+            header.forward_to_final(&copy);
+            copy
         }
         Err(forward) if forward.fully_resolved => forward.pointer,
         Err(forward) => {
             // the pointer was already forwarded.
             // since there may have been a chain of forwardings, follow them until the final heap entry
             let (mut resolved, fully_resolved) = forward.follow_to_end();
-            if fully_resolved {
+            let new_gc_pointer = if fully_resolved {
                 // at some point in the chain, we already scavenged whatever this pointer was pointing to.
                 // so we can just use that value.
                 resolved
@@ -339,10 +342,11 @@ pub(crate) fn scavenge_object(
                     final_header.forward_to_final(&new_pointer);
                     new_pointer
                 }
-            }
+            };
+            header.forward_to_final(&new_gc_pointer);
+            new_gc_pointer
         }
     };
-    header.forward_to_final(&new_gc_pointer);
     *heap_ptr = new_gc_pointer;
 }
 

@@ -1,6 +1,7 @@
 use std::{cell::Cell, sync::Arc};
 
 use crate::{
+    get_heap_base,
     heap_page::{HeapEntry, Page},
     pointer::RawHeapGcPointer,
     Generation, GC_GEN_HIGHEST, GC_NUM_GENERATIONS, GC_PAGE_SIZE,
@@ -17,7 +18,7 @@ impl GenerationAnalyzer {
         self.inner[page].get()
     }
     fn set_generation(&self, page: *const u8, generation: Generation) {
-        let page = page as usize / GC_PAGE_SIZE;
+        let page = (page as usize - get_heap_base() as usize) / GC_PAGE_SIZE;
         self.inner[page].replace(generation);
     }
 }
@@ -38,7 +39,7 @@ unsafe impl Send for Pagetracker {}
 impl Pagetracker {
     pub fn new(base: *mut u8, size: usize) -> Self {
         let num_pages = size / GC_PAGE_SIZE;
-        let generations = vec![Cell::new(Generation(255)); num_pages]
+        let generations = vec![Cell::new(Generation(u8::MAX)); num_pages]
             .into_boxed_slice()
             .into();
         let analyzer = GenerationAnalyzer { inner: generations };
@@ -62,7 +63,7 @@ impl Pagetracker {
         let mut budget = 1;
         for gen in 1..=GC_GEN_HIGHEST {
             budget *= 4;
-            if self.used_pages_current.len() < budget {
+            if self.used_pages_current[gen as usize].len() < budget {
                 return Generation(gen - 1);
             }
         }
@@ -108,8 +109,11 @@ impl Pagetracker {
             return None;
         } else {
             self.next_free_base = next_free;
-            // all pages tracked as free must be zeroed.
-            Some(ZeroedPage { base: page })
+            // because we do not want to zero out the entire memory block initially, and only
+            // touch the parts we absolutely have to, we instead zero the newly carved out pages
+            // individually.
+            let page = AllocatedPage { base: page };
+            Some(page.zero())
         }
     }
 }
