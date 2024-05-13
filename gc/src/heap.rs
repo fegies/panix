@@ -77,9 +77,10 @@ impl Pagetracker {
     pub fn rotate_used_pages_to_generation(&mut self, target_generation: Generation) {
         for gen in 0..=target_generation.0 {
             let gen = gen as usize;
-            for page in self.used_pages_previous[gen].drain(..) {
-                self.free_pages.push(page.zero());
-            }
+
+            self.free_pages
+                .extend(self.used_pages_previous[gen].drain(..).map(|p| p.zero()));
+
             core::mem::swap(
                 &mut self.used_pages_current[gen],
                 &mut self.used_pages_previous[gen],

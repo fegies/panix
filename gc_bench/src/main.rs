@@ -1,4 +1,4 @@
-use gc::{GcHandle, Tracable, TraceCallback};
+use gc::{GcHandle, GcResult, Tracable, TraceCallback};
 
 #[derive(Debug)]
 struct Simple {
@@ -6,12 +6,10 @@ struct Simple {
 }
 
 impl Tracable for Simple {
-    fn trace(&mut self, trace_fn: TraceCallback) {
-        println!("tracing: {:?}", self)
-    }
+    fn trace(&mut self, trace_fn: TraceCallback) {}
 }
 
-fn perform_work(gc: &mut GcHandle) {
+fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
     println!("initialized");
     let value = gc
         .alloc(Simple {
@@ -19,10 +17,14 @@ fn perform_work(gc: &mut GcHandle) {
         })
         .unwrap();
     let cloned = value.clone();
+
+    let str = gc.alloc_string("a test string")?;
+    println!("str: {:?}, {}", str.as_raw(), gc.load(&str).as_ref());
+
     println!("{:?}, {:?}", value.as_raw(), cloned.as_raw());
+
     for _ in 0..100 {
-        let value = gc.alloc(Simple { f: [1; 256] }).unwrap();
-        println!("allocated {:?}", value.as_raw())
+        let _value = gc.alloc(Simple { f: [1; 256] }).unwrap();
     }
     gc.force_collect();
     println!(
@@ -31,8 +33,12 @@ fn perform_work(gc: &mut GcHandle) {
         cloned.as_raw(),
         gc.load(&value)
     );
+
+    println!("{:?}, {}", str.as_raw(), gc.load(&str).as_ref());
+
+    Ok(())
 }
 
 fn main() {
-    gc::with_gc(|gc| perform_work(gc)).unwrap();
+    gc::with_gc(|gc| perform_work(gc)).unwrap().unwrap();
 }

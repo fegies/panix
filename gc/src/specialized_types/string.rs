@@ -2,7 +2,7 @@ use crate::{
     heap_page::{HeapEntry, Page},
     object::{HeapObject, TraceCallback},
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    GcPointer, RawGcPointer,
+    GcError, GcHandle, GcPointer, GcResult,
 };
 
 pub struct SimpleGcString {
@@ -22,7 +22,7 @@ unsafe impl HeapObject for SimpleGcString {
     }
 
     fn allocation_alignment(&self) -> usize {
-        1
+        core::mem::align_of_val(self)
     }
 }
 
@@ -37,7 +37,7 @@ impl AsRef<str> for SimpleGcString {
 }
 
 impl Page {
-    pub fn try_alloc_string(&mut self, str: &str) -> Option<HeapGcPointer<SimpleGcString>> {
+    fn try_alloc_string(&self, str: &str) -> Option<HeapGcPointer<SimpleGcString>> {
         let len = str.len();
         let required_space = len + core::mem::size_of::<SimpleGcString>();
         let (header_pointer, data_pointer) =
@@ -53,5 +53,20 @@ impl Page {
             let raw_ptr = RawHeapGcPointer::from_addr(header_pointer);
             Some(HeapGcPointer::from_raw_unchecked(raw_ptr))
         }
+    }
+}
+
+impl GcHandle {
+    pub fn alloc_string(&mut self, str: &str) -> GcResult<GcPointer<SimpleGcString>> {
+        let ptr = match self.alloc_pages.pages[0].try_alloc_string(str) {
+            Some(ptr) => ptr,
+            None => {
+                self.clear_nursery()?;
+                self.alloc_pages.pages[0]
+                    .try_alloc_string(str)
+                    .ok_or(GcError::ObjectBiggerThanPage)?
+            }
+        };
+        Ok(ptr.root())
     }
 }
