@@ -1,6 +1,5 @@
-use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, quote_spanned, ToTokens};
-use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput, Field, Type};
+use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput, Field, Variant};
 
 #[proc_macro_derive(Trace)]
 pub fn derive_tracable(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -22,58 +21,48 @@ pub fn derive_tracable(input: proc_macro::TokenStream) -> proc_macro::TokenStrea
     proc_macro::TokenStream::from(expanded)
 }
 
-fn generate_field_access(idx: usize, field: &Field) -> proc_macro2::TokenStream {
+fn generate_field_access(
+    idx: usize,
+    field: &Field,
+    parent_expr: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
     let accessor = field
         .ident
         .as_ref()
         .map(|i| i.into_token_stream())
-        .unwrap_or(idx.into_token_stream());
-    match &field.ty {
-        Type::Array(_) => todo!("a"),
-        Type::Group(_) => todo!("group"),
-        Type::Infer(_) => todo!("infer"),
-        Type::Macro(_) => panic!("macro in type"),
-        Type::Paren(_) => todo!("paren"),
-        Type::Path(p) => {
-            let name = p
-                .path
-                .segments
-                .last()
-                .expect("expecting at least one path segment entry");
+        .unwrap_or(syn::Index::from(idx).into_token_stream());
+    quote_spanned! {field.span() => ::gc::Trace::trace(#parent_expr.#accessor, trace_fn);}
+}
 
-            let ident = &name.ident;
-            if ident == "RawGcPointer" {
-                quote_spanned! {field.span() => trace_fn(&mut self.#accessor);}
-            } else if ident == "GcPointer" {
-                quote_spanned! {field.span() => trace_fn(self.#accessor.as_mut());}
-            } else {
-                quote!()
-            }
-        }
-        Type::Reference(_) => todo!("reference"),
-        Type::Slice(_) => todo!("slice"),
-        Type::Tuple(_) => todo!("tuple"),
-        Type::Verbatim(_) => todo!("verbatim"),
-        Type::BareFn(_)
-        | Type::ImplTrait(_)
-        | Type::Never(_)
-        | Type::Ptr(_)
-        | Type::TraitObject(_) => quote!(),
-        _ => unimplemented!("not available at time of crate authoring"),
+fn generate_variant_access(variant: &Variant) -> proc_macro2::TokenStream {
+    let ident = &variant.ident;
+    let mut_t = quote!(&mut);
+
+    if variant.fields.len() == 0 {
+        quote!(Self::#ident => {})
+    } else {
+        todo!()
     }
 }
 
 fn generate_trace_body(data: &Data) -> proc_macro2::TokenStream {
     match data {
         Data::Struct(s) => {
+            let self_expr = quote!(&mut self);
             let fields = s
                 .fields
                 .iter()
                 .enumerate()
-                .map(|(idx, f)| generate_field_access(idx, f));
+                .map(|(idx, f)| generate_field_access(idx, f, &self_expr));
             quote!(#(#fields)*)
         }
-        Data::Enum(_) => todo!(),
+        Data::Enum(e) => {
+            let variants = e.variants.iter().map(generate_variant_access);
+            let variants = quote!(#(#variants)*);
+            quote!(match self {
+                #variants
+            })
+        }
         Data::Union(_) => {
             panic!("C unions are not supported as there is no indication which variant is correct.")
         }

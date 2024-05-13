@@ -1,13 +1,9 @@
 use gc::{specialized_types::string::SimpleGcString, GcHandle, GcPointer, GcResult, RawGcPointer};
 use gc_derive::Trace;
 
-#[derive(Debug)]
+#[derive(Debug, Trace)]
 struct Simple {
     f: [usize; 256],
-}
-
-unsafe impl gc::Trace for Simple {
-    fn trace(&mut self, trace_fn: gc::TraceCallback) {}
 }
 
 #[derive(Trace)]
@@ -16,6 +12,15 @@ struct Referencing {
     other: GcPointer<SimpleGcString>,
     no_pointer: u16,
 }
+
+#[derive(Trace)]
+struct ReferencingTup(u16, GcPointer<Referencing>);
+
+// #[derive(Trace)]
+// enum AllocEnum {
+//     A(usize),
+//     B { f: usize },
+// }
 
 fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
     println!("initialized");

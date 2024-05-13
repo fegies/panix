@@ -1,4 +1,4 @@
-use crate::RawGcPointer;
+use crate::{GcPointer, RawGcPointer};
 
 pub type TraceCallback<'a> = &'a mut dyn FnMut(&mut RawGcPointer);
 
@@ -80,4 +80,69 @@ where
 
 pub unsafe trait Trace {
     fn trace(&mut self, trace_fn: TraceCallback);
+}
+
+unsafe impl Trace for RawGcPointer {
+    #[inline]
+    fn trace(&mut self, trace_fn: TraceCallback) {
+        trace_fn(self)
+    }
+}
+unsafe impl<T> Trace for GcPointer<T> {
+    #[inline]
+    fn trace(&mut self, trace_fn: TraceCallback) {
+        trace_fn(self.as_mut())
+    }
+}
+unsafe impl<const N: usize, T> Trace for [T; N]
+where
+    T: Trace,
+{
+    #[inline]
+    fn trace(&mut self, trace_fn: TraceCallback) {
+        for entry in self {
+            entry.trace(trace_fn)
+        }
+    }
+}
+macro_rules! nop_trace_impl {
+    ($ty: ty) => {
+        unsafe impl Trace for $ty {
+            #[inline]
+            fn trace(&mut self, _trace_fn: TraceCallback) {}
+        }
+    };
+    ($first: ty, $($rest: ty),+) => {
+        nop_trace_impl!($first);
+        nop_trace_impl!($($rest),+);
+    };
+}
+nop_trace_impl!(
+    bool,
+    char,
+    f32,
+    f64,
+    i128,
+    i16,
+    i32,
+    i64,
+    i8,
+    isize,
+    u128,
+    u16,
+    u32,
+    u64,
+    u8,
+    usize,
+    ()
+);
+unsafe impl<T> Trace for Option<T>
+where
+    T: Trace,
+{
+    fn trace(&mut self, trace_fn: TraceCallback) {
+        if let Some(v) = self.as_mut() {
+            v.trace(trace_fn);
+        }
+    }
 }
