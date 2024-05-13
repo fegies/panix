@@ -19,7 +19,7 @@ use init::get_global_gc;
 use object::HeapObject;
 use pointer::{inspect_roots, RawHeapGcPointer};
 
-pub use object::{Tracable, TraceCallback};
+pub use object::{Trace, TraceCallback};
 pub use pointer::{GcPointer, RawGcPointer};
 
 use crate::heap_page::promote_object;

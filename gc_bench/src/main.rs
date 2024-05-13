@@ -1,12 +1,20 @@
-use gc::{GcHandle, GcResult, Tracable, TraceCallback};
+use gc::{specialized_types::string::SimpleGcString, GcHandle, GcPointer, GcResult, RawGcPointer};
+use gc_derive::Trace;
 
 #[derive(Debug)]
 struct Simple {
     f: [usize; 256],
 }
 
-impl Tracable for Simple {
-    fn trace(&mut self, trace_fn: TraceCallback) {}
+unsafe impl gc::Trace for Simple {
+    fn trace(&mut self, trace_fn: gc::TraceCallback) {}
+}
+
+#[derive(Trace)]
+struct Referencing {
+    raw: RawGcPointer,
+    other: GcPointer<SimpleGcString>,
+    no_pointer: u16,
 }
 
 fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
@@ -26,6 +34,14 @@ fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
     for _ in 0..100 {
         let _value = gc.alloc(Simple { f: [1; 256] }).unwrap();
     }
+
+    let refer = gc.alloc(Referencing {
+        raw: value.as_raw().clone(),
+        other: str.clone(),
+        no_pointer: 42,
+    })?;
+    println!("refer: {:?}", refer.as_raw());
+
     gc.force_collect();
     println!(
         "{:?}, {:?}, {:?}",
@@ -35,6 +51,9 @@ fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
     );
 
     println!("{:?}, {}", str.as_raw(), gc.load(&str).as_ref());
+    println!("{:?}", refer.as_raw());
+    let other = &gc.load(&refer).other;
+    println!("{:?}, {}", other.as_raw(), gc.load(other).as_ref());
 
     Ok(())
 }

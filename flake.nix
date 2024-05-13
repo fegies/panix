@@ -39,7 +39,7 @@
                     components = [ "rustc" "cargo" "clippy" "rust-analyzer" "rust-src" "rustfmt" ];
                   };
                   # https://devenv.sh/reference/options/
-                  packages = [ pkgs.mold ];
+                  packages = [ pkgs.mold pkgs.cargo-expand ];
 
                   # enterShell = ''
                   #   hello

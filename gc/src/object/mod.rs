@@ -61,7 +61,7 @@ pub unsafe trait HeapObject {
 
 unsafe impl<T> HeapObject for T
 where
-    T: Tracable + Sized + 'static,
+    T: Trace + Sized + 'static,
 {
     fn allocation_size(&self) -> usize {
         let size = core::mem::size_of::<T>();
@@ -78,6 +78,6 @@ where
     }
 }
 
-pub trait Tracable {
+pub unsafe trait Trace {
     fn trace(&mut self, trace_fn: TraceCallback);
 }

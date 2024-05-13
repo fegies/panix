@@ -1,10 +1,15 @@
 [package]
-name = "gc_bench"
+name = "gc_derive"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+proc-macro = true
+
 [dependencies]
 gc.workspace = true
-gc_derive.workspace = true
+syn = "2"
+quote = "1"
+proc-macro2 = "1"

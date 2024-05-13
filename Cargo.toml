@@ -9,7 +9,9 @@ members = [
     "panix",
     "identpool",
     "gc",
-    "lexer_impedance_matcher", "gc_bench",
+    "gc_derive",
+    "lexer_impedance_matcher",
+    "gc_bench",
 ]
 
 [workspace.dependencies]
@@ -17,5 +19,6 @@ parser = {path = "./parser"}
 identpool = {path = "./identpool"}
 lexer = {path = "./lexer" }
 gc = {path = "./gc"}
+gc_derive = {path = "./gc_derive"}
 lexer_impedance_matcher = {path = "./lexer_impedance_matcher"}
 memchr = "2.6.4"

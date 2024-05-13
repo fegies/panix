@@ -111,6 +111,17 @@ name = "gc_bench"
 version = "0.1.0"
 dependencies = [
  "gc",
+ "gc_derive",
+]
+
+[[package]]
+name = "gc_derive"
+version = "0.1.0"
+dependencies = [
+ "gc",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
