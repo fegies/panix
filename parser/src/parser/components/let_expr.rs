@@ -28,9 +28,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse a let in expression.
     /// assumes that the initial let has already been parsed
     pub fn parse_let(&mut self) -> ParseResult<LetInExpr<'t>> {
-        let (ident, body) = self.parse_binding()?;
         let mut bindings = HashMap::new();
-        bindings.insert(ident, body);
 
         while let Token::Ident(_) = self.expect_peek()? {
             let (ident, body) = self.parse_binding()?;
