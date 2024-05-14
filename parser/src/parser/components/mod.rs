@@ -35,7 +35,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     }
 
     fn expect_next_or_whitespace(&mut self) -> ParseResult<TokenWithPosition<'t>> {
-        self.next().ok_or(ParseError::UnexpectedEof)
+        self.next().ok_or_else(unexpected_eof)
     }
 
     fn expect_next(&mut self) -> ParseResult<TokenWithPosition<'t>> {
@@ -47,12 +47,12 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         }
     }
     fn expect_peek(&mut self) -> ParseResult<&Token<'t>> {
-        match self.peek().ok_or(ParseError::UnexpectedEof)? {
+        match self.peek().ok_or_else(unexpected_eof)? {
             Token::Whitespace => self
                 .source
                 .peek_2()
                 .map(|t| &t.token)
-                .ok_or(ParseError::UnexpectedEof),
+                .ok_or_else(unexpected_eof),
             _ => Ok(self.peek().expect("cannot be empty")),
         }
     }
@@ -73,6 +73,15 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             _ => unexpected(t)?,
         }
     }
+}
+
+#[cold]
+fn unexpected_eof() -> ParseError {
+    println!(
+        "unexpected eof at: \n{}",
+        format_backtrace(std::backtrace::Backtrace::capture())
+    );
+    ParseError::UnexpectedEof
 }
 
 #[cold]
