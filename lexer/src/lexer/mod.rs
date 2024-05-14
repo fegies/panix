@@ -156,15 +156,15 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                         return Err(LexError::UnexpectedChar(next));
                     }
                 }
+                b'.' if self.input.matches("...") => {
+                    self.push(Token::TripleDot).await;
+                    self.input.consume(3);
+                }
+                b'.' if self.input.matches("./") || self.input.matches("../") => {
+                    self.lex_path().await?
+                }
                 b'.' => {
-                    if self.input.matches("...") {
-                        self.push(Token::TripleDot).await;
-                        self.input.consume(3);
-                    } else if Some(b'/') == self.input.get(1) {
-                        self.lex_path().await?;
-                    } else {
-                        single!(Token::Dot)
-                    }
+                    single!(Token::Dot)
                 }
                 b'/' => {
                     match self.input.get(1) {

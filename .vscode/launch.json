@@ -57,7 +57,7 @@
                 }
             },
             "args": [
-                "/home/felix/nixos-config/util/installer_script.nix"
+                "/home/felix/nixos-config/src/util/acme.nix"
             ],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": [

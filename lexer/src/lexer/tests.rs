@@ -151,3 +151,21 @@ fn multiline_string_complex() {
         ],
     )
 }
+
+#[test]
+fn path_with_doubledot() {
+    let str = r#"
+    ../secrets/cloudflare_dns.age;
+    "#;
+    assert_lex(
+        str,
+        &[
+            Token::Whitespace,
+            Token::PathBegin,
+            Token::StringContent("../secrets/cloudflare_dns.age"),
+            Token::PathEnd,
+            Token::Semicolon,
+            Token::Whitespace,
+        ],
+    )
+}
