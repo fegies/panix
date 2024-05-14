@@ -104,16 +104,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         Ok(lhs)
     }
 
-    fn parse_attrset_ref(&mut self) -> ParseResult<&'t str> {
+    fn parse_attrset_ref(&mut self) -> ParseResult<NixString<'t>> {
         let t = self.expect_next()?;
         match t.token {
-            Token::Ident(ident) => Ok(ident),
-            Token::StringBegin => match self.parse_simple_string()? {
-                NixString::Literal(l) => Ok(l),
-                NixString::Composite(_) => todo!(),
-                NixString::Interpolated(_) => todo!(),
-                NixString::Empty => Ok(""),
-            },
+            Token::Ident(ident) => Ok(NixString::Literal(ident)),
+            Token::StringBegin => self.parse_simple_string(),
             _ => unexpected(t),
         }
     }

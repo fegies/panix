@@ -100,7 +100,7 @@ pub enum BinopOpcode {
 pub enum Op<'a> {
     AttrRef {
         left: Box<NixExpr<'a>>,
-        name: &'a str,
+        name: NixString<'a>,
     },
     Call {
         function: Box<NixExpr<'a>>,
