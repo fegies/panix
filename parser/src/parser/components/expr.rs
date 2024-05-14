@@ -139,8 +139,46 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// expects that the initial opening curly has already been consumed
     fn parse_attrset_or_destructuring_lambda(&mut self) -> ParseResult<NixExpr<'t>> {
         let t = self.expect_next()?;
-        let first_ident = match t.token {
-            Token::Ident(i) => i,
+        match t.token {
+            Token::Ident(first_ident) => {
+                // we found an identifier. Now we need to figure out
+                // if it is actually an attrset or a lambda.
+                let t = self.expect_next()?;
+                let res = match t.token {
+                    Token::Dot => {
+                        let attrset = self.parse_attrset_multipath(first_ident)?;
+                        NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
+                    }
+                    Token::Eq => {
+                        // this is a true attrset
+                        let attrset = self.parse_attrset(NixString::Literal(first_ident))?;
+                        NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
+                    }
+                    Token::QuestionMark => {
+                        // this is a set of function args, the first one has a default arg
+                        let default = self.parse_expr()?;
+                        self.expect(Token::Comma)?;
+                        let lambda = self.parse_attrset_lambda(first_ident, Some(default))?;
+                        NixExpr::Code(Code::Lambda(lambda))
+                    }
+                    Token::Comma => {
+                        // this is a set of function args, no default
+                        let lambda = self.parse_attrset_lambda(first_ident, None)?;
+                        NixExpr::Code(Code::Lambda(lambda))
+                    }
+                    _ => unexpected(t)?,
+                };
+
+                Ok(res)
+            }
+            Token::StringBegin => {
+                // only attribute sets may have string keys.
+                // so we know now it must be one.
+                let initial_ident = self.parse_simple_string()?;
+                self.expect(Token::Eq)?;
+                let attrset = self.parse_attrset(initial_ident)?;
+                Ok(NixExpr::CompoundValue(CompoundValue::Attrset(attrset)))
+            }
             Token::CurlyClose => {
                 if let Token::Colon = self.expect_peek()? {
                     // this is actually a lambda with an empty args list
@@ -156,48 +194,21 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                         },
                         body: Box::new(body),
                     };
-                    return Ok(NixExpr::Code(Code::Lambda(lambda)));
+                    Ok(NixExpr::Code(Code::Lambda(lambda)))
+                } else {
+                    // empty attrset
+                    Ok(NixExpr::CompoundValue(CompoundValue::Attrset(
+                        Attrset::empty(),
+                    )))
                 }
-                // empty attrset
-                return Ok(NixExpr::CompoundValue(CompoundValue::Attrset(
-                    Attrset::empty(),
-                )));
             }
             Token::KwInherit => {
                 // this is actually an attribute set starting with an inherit kw.
                 let attrset = self.parse_attrset_inherit()?;
-                return Ok(NixExpr::CompoundValue(CompoundValue::Attrset(attrset)));
+                Ok(NixExpr::CompoundValue(CompoundValue::Attrset(attrset)))
             }
             _ => unexpected(t)?,
-        };
-
-        let t = self.expect_next()?;
-        let res = match t.token {
-            Token::Dot => {
-                let attrset = self.parse_attrset_multipath(first_ident)?;
-                NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
-            }
-            Token::Eq => {
-                // this is a true attrset
-                let attrset = self.parse_attrset(first_ident)?;
-                NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
-            }
-            Token::QuestionMark => {
-                // this is a set of function args, the first one has a default arg
-                let default = self.parse_expr()?;
-                self.expect(Token::Comma)?;
-                let lambda = self.parse_attrset_lambda(first_ident, Some(default))?;
-                NixExpr::Code(Code::Lambda(lambda))
-            }
-            Token::Comma => {
-                // this is a set of function args, no default
-                let lambda = self.parse_attrset_lambda(first_ident, None)?;
-                NixExpr::Code(Code::Lambda(lambda))
-            }
-            _ => unexpected(t)?,
-        };
-
-        Ok(res)
+        }
     }
 }
 

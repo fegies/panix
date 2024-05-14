@@ -4,9 +4,9 @@ use super::*;
 
 impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse an attribute set.
-    /// Assumes the initial opening brace and equality sign have been consumed
-    pub fn parse_attrset(&mut self, initial_ident: &'t str) -> ParseResult<Attrset<'t>> {
-        self.parse_attrset_inner(vec![NixString::Literal(initial_ident)], HashSet::new())
+    /// Assumes the initial opening brace, first identifier and equality sign have been consumed
+    pub fn parse_attrset(&mut self, initial_ident: NixString<'t>) -> ParseResult<Attrset<'t>> {
+        self.parse_attrset_inner(vec![initial_ident], HashSet::new())
     }
 
     /// parse an attribute set.
