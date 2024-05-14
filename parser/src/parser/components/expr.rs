@@ -163,6 +163,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     Attrset::empty(),
                 )));
             }
+            Token::KwInherit => {
+                // this is actually an attribute set starting with an inherit kw.
+                let attrset = self.parse_attrset_inherit()?;
+                return Ok(NixExpr::CompoundValue(CompoundValue::Attrset(attrset)));
+            }
             _ => unexpected(t)?,
         };
 

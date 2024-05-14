@@ -6,7 +6,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse an attribute set.
     /// Assumes the initial opening brace and equality sign have been consumed
     pub fn parse_attrset(&mut self, initial_ident: &'t str) -> ParseResult<Attrset<'t>> {
-        self.parse_attrset_inner(vec![NixString::Literal(initial_ident)])
+        self.parse_attrset_inner(vec![NixString::Literal(initial_ident)], HashSet::new())
     }
 
     /// parse an attribute set.
@@ -14,13 +14,15 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     pub fn parse_attrset_multipath(&mut self, initial_ident: &'t str) -> ParseResult<Attrset<'t>> {
         let mut pieces = vec![NixString::Literal(initial_ident)];
         self.parse_attrset_path(&mut pieces)?;
-        self.parse_attrset_inner(pieces)
+        self.parse_attrset_inner(pieces, HashSet::new())
     }
 
     /// parse an attribute set.
     /// Assumes the initial opening brace and an inherit keyword have been consumed.
     pub fn parse_attrset_inherit(&mut self) -> ParseResult<Attrset<'t>> {
-        todo!()
+        let mut inherit_keys = HashSet::new();
+        self.parse_inherit(&mut inherit_keys)?;
+        self.parse_attrset_inner(Vec::new(), inherit_keys)
     }
 
     /// parse an attribute set.
@@ -89,14 +91,16 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     fn parse_attrset_inner(
         &mut self,
         mut ident_buf: Vec<NixString<'t>>,
+        mut inherit_keys: HashSet<&'t str>,
     ) -> ParseResult<Attrset<'t>> {
-        let initial_value = self.parse_expr()?;
-        self.expect(Token::Semicolon)?;
-
         let mut attrs = Vec::new();
-        let mut inherit_keys = HashSet::new();
 
-        attrs.push((convert_to_attrkey(&mut ident_buf), initial_value));
+        if !ident_buf.is_empty() {
+            let initial_value = self.parse_expr()?;
+            self.expect(Token::Semicolon)?;
+
+            attrs.push((convert_to_attrkey(&mut ident_buf), initial_value));
+        }
 
         loop {
             let peeked = self.expect_peek()?;
