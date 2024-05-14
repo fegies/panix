@@ -75,6 +75,10 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                         // attrset refs are not full expressions. They may only be strings or idents
                         name: self.parse_attrset_ref()?,
                     })),
+                    Token::QuestionMark => NixExpr::Code(Code::Op(Op::HasAttr {
+                        left: Box::new(lhs),
+                        path: self.parse_hasattr_path()?,
+                    })),
                     Token::Whitespace => NixExpr::Code(Code::Op(Op::Call {
                         function: Box::new(lhs),
                         arg: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
@@ -110,6 +114,23 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             Token::Ident(ident) => Ok(NixString::Literal(ident)),
             Token::StringBegin => self.parse_simple_string(),
             _ => unexpected(t),
+        }
+    }
+
+    fn parse_hasattr_path(&mut self) -> ParseResult<AttrsetKey<'t>> {
+        let first = self.parse_attrset_ref()?;
+
+        if let Some(Token::Dot) = self.peek() {
+            self.expect_next()?;
+            let second = self.parse_attrset_ref()?;
+            let mut segments = vec![first, second];
+            while let Some(Token::Dot) = self.peek() {
+                self.expect_next()?;
+                segments.push(self.parse_attrset_ref()?);
+            }
+            Ok(AttrsetKey::Multi(segments))
+        } else {
+            Ok(AttrsetKey::Single(first))
         }
     }
 

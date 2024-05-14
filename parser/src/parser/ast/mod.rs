@@ -111,6 +111,10 @@ pub enum Op<'a> {
         right: Box<NixExpr<'a>>,
         opcode: BinopOpcode,
     },
+    HasAttr {
+        left: Box<NixExpr<'a>>,
+        path: AttrsetKey<'a>,
+    },
 }
 
 #[derive(Debug)]
