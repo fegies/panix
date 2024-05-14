@@ -28,7 +28,10 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse an attribute set.
     /// Assumes the initial rec keyword has been consumed.
     pub fn parse_attrset_rec(&mut self) -> ParseResult<Attrset<'t>> {
-        todo!()
+        self.expect(Token::CurlyOpen)?;
+        let mut res = self.parse_attrset_inner(Vec::new(), HashSet::new())?;
+        res.is_recursive = true;
+        Ok(res)
     }
 
     /// fill the provided buffer with pieces of the attribute path.
