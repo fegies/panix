@@ -83,11 +83,17 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                         function: Box::new(lhs),
                         arg: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
                     })),
-                    t @ (Token::Plus | Token::DoublePlus | Token::DoubleSlash) => {
+                    t @ (Token::Plus
+                    | Token::DoublePlus
+                    | Token::DoubleSlash
+                    | Token::DoubleEq
+                    | Token::Ne) => {
                         let opcode = match t {
                             Token::Plus => BinopOpcode::Add,
                             Token::DoublePlus => BinopOpcode::ListConcat,
                             Token::DoubleSlash => BinopOpcode::AttrsetMerge,
+                            Token::Ne => BinopOpcode::NotEqual,
+                            Token::DoubleEq => BinopOpcode::Equals,
                             _ => unreachable!(),
                         };
                         let left = Box::new(lhs);

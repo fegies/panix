@@ -362,6 +362,10 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     self.push_pos(Token::StringContent("\\"), pos).await;
                     content = &content[1..];
                 }
+                Some(b'$') => {
+                    self.push_pos(Token::StringContent("$"), pos).await;
+                    content = &content[1..];
+                }
                 Some(c) => {
                     return Err(LexError::InvalidEscapeSequence(*c));
                 }

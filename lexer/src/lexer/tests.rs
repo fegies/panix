@@ -169,3 +169,25 @@ fn path_with_doubledot() {
         ],
     )
 }
+
+#[test]
+fn string_with_escaped_dollar() {
+    let str = r#"
+    "\${${name}}"
+    "#;
+    assert_lex(
+        str,
+        &[
+            Token::Whitespace,
+            Token::StringBegin,
+            Token::StringContent("$"),
+            Token::StringContent("{"),
+            Token::BeginInterpol,
+            Token::Ident("name"),
+            Token::EndInterpol,
+            Token::StringContent("}"),
+            Token::StringEnd,
+            Token::Whitespace,
+        ],
+    );
+}

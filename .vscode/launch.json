@@ -9,7 +9,7 @@
             "request": "custom",
             "name": "rr replay",
             "targetCreateCommands": [
-                "target create ${workspaceFolder}/target/debug/panix"
+                "target create /home/felix/.local/share/rr/panix-3/mmap_clone_5_panix"
             ],
             "processCreateCommands": [
                 "gdb-remote 127.0.0.1:13377",
