@@ -3,6 +3,8 @@ use std::{
     fmt::Write,
 };
 
+pub mod impls;
+
 pub enum NixString<'a> {
     Literal(&'a str),
     Composite(Vec<&'a str>),
@@ -16,27 +18,6 @@ pub enum InterpolationEntry<'a> {
     Expression(NixExpr<'a>),
 }
 
-impl core::fmt::Debug for NixString<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Literal(arg0) => arg0.fmt(f),
-            Self::Composite(arg0) => {
-                f.write_char('"')?;
-                for s in arg0 {
-                    f.write_str(s)?;
-                }
-                f.write_char('"')?;
-                Ok(())
-            }
-            Self::Interpolated(vals) => f
-                .debug_struct("Interpolation")
-                .field("entries", vals)
-                .finish(),
-            Self::Empty => "".fmt(f),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum BasicValue<'a> {
     String(NixString<'a>),
@@ -47,18 +28,28 @@ pub enum BasicValue<'a> {
     Path(NixString<'a>),
 }
 
+/// This is the key to an attribute set.
+#[derive(Debug)]
+pub enum AttrsetKey<'a> {
+    /// just a single-level item
+    Single(NixString<'a>),
+    /// a multi-level entry.
+    /// the parsed representation of the nested attrset shorthand.
+    Multi(Vec<NixString<'a>>),
+}
+
 #[derive(Debug)]
 pub struct Attrset<'a> {
     pub is_recursive: bool,
-    pub attrs: HashMap<&'a str, NixExpr<'a>>,
     pub inherit_keys: HashSet<&'a str>,
+    pub attrs: Vec<(AttrsetKey<'a>, NixExpr<'a>)>,
 }
 impl<'t> Attrset<'t> {
     pub(crate) fn empty() -> Attrset<'t> {
         Self {
             is_recursive: false,
-            attrs: HashMap::new(),
             inherit_keys: HashSet::new(),
+            attrs: Vec::new(),
         }
     }
 }
