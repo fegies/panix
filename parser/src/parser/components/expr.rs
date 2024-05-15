@@ -69,45 +69,51 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     }
                 }
 
-                lhs = match token.token {
-                    Token::Dot => NixExpr::Code(Code::Op(Op::AttrRef {
-                        left: Box::new(lhs),
-                        // attrset refs are not full expressions. They may only be strings or idents
-                        name: self.parse_attrset_ref()?,
-                    })),
-                    Token::QuestionMark => NixExpr::Code(Code::Op(Op::HasAttr {
-                        left: Box::new(lhs),
-                        path: self.parse_hasattr_path()?,
-                    })),
-                    Token::Whitespace => NixExpr::Code(Code::Op(Op::Call {
-                        function: Box::new(lhs),
-                        arg: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
-                    })),
-                    t @ (Token::Plus
-                    | Token::DoublePlus
-                    | Token::DoubleSlash
-                    | Token::DoubleEq
-                    | Token::And
-                    | Token::Ne) => {
-                        let opcode = match t {
-                            Token::Plus => BinopOpcode::Add,
-                            Token::DoublePlus => BinopOpcode::ListConcat,
-                            Token::DoubleSlash => BinopOpcode::AttrsetMerge,
-                            Token::Ne => BinopOpcode::NotEqual,
-                            Token::DoubleEq => BinopOpcode::Equals,
-                            Token::And => BinopOpcode::And,
-                            _ => unreachable!(),
-                        };
-                        let left = Box::new(lhs);
-                        let right = Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?);
-                        NixExpr::Code(Code::Op(Op::Binop {
-                            left,
-                            right,
-                            opcode,
-                        }))
+                let opcode = match token.token {
+                    Token::Plus => Some(BinopOpcode::Add),
+                    Token::Minus => Some(BinopOpcode::Subtract),
+                    Token::Star => Some(BinopOpcode::Multiply),
+                    Token::Slash => Some(BinopOpcode::Divide),
+                    Token::DoublePlus => Some(BinopOpcode::ListConcat),
+                    Token::DoubleSlash => Some(BinopOpcode::AttrsetMerge),
+                    Token::Ne => Some(BinopOpcode::NotEqual),
+                    Token::DoubleEq => Some(BinopOpcode::Equals),
+                    Token::Or => Some(BinopOpcode::LogicalOr),
+                    Token::And => Some(BinopOpcode::LogicalAnd),
+                    Token::Le => Some(BinopOpcode::LessThanOrEqual),
+                    Token::Lt => Some(BinopOpcode::LessThanStrict),
+                    Token::Ge => Some(BinopOpcode::GreaterOrRequal),
+                    Token::Gt => Some(BinopOpcode::GreaterThanStrict),
+                    Token::Implication => Some(BinopOpcode::LogicalImplication),
+                    _ => None,
+                };
+
+                lhs = if let Some(opcode) = opcode {
+                    let left = Box::new(lhs);
+                    let right = Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?);
+                    NixExpr::Code(Code::Op(Op::Binop {
+                        left,
+                        right,
+                        opcode,
+                    }))
+                } else {
+                    match token.token {
+                        Token::Dot => NixExpr::Code(Code::Op(Op::AttrRef {
+                            left: Box::new(lhs),
+                            // attrset refs are not full expressions. They may only be strings or idents
+                            name: self.parse_attrset_ref()?,
+                        })),
+                        Token::QuestionMark => NixExpr::Code(Code::Op(Op::HasAttr {
+                            left: Box::new(lhs),
+                            path: self.parse_hasattr_path()?,
+                        })),
+                        Token::Whitespace => NixExpr::Code(Code::Op(Op::Call {
+                            function: Box::new(lhs),
+                            arg: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
+                        })),
+                        t => todo!("{:?}", t),
                     }
-                    t => todo!("{:?}", t),
-                }
+                };
             } else {
                 break;
             }
@@ -178,6 +184,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 };
 
                 Ok(res)
+            }
+            Token::TripleDot => {
+                // this must be a lambda, starting with a rest pattern.
+                let lambda = self.parse_attrset_lambda_discard()?;
+                Ok(NixExpr::Code(Code::Lambda(lambda)))
             }
             Token::StringBegin => {
                 // only attribute sets may have string keys.

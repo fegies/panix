@@ -8,9 +8,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     fn parse_destructuring_args(
         &mut self,
         initial: Option<(&'t str, Option<NixExpr<'t>>)>,
+        mut includes_rest_pattern: bool,
     ) -> ParseResult<LambdaAttrsetArgs<'t>> {
-        let mut includes_rest_pattern = false;
-        let mut first = true;
+        let mut first = !includes_rest_pattern;
         let mut bindings = HashMap::new();
 
         if let Some((ident, val)) = initial {
@@ -59,7 +59,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         match t.token {
             Token::At => {
                 self.expect(Token::CurlyOpen)?;
-                let args = self.parse_destructuring_args(None)?;
+                let args = self.parse_destructuring_args(None, false)?;
                 self.expect(Token::Colon)?;
                 let body = self.parse_expr()?;
                 Ok(Lambda {
@@ -81,12 +81,27 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         }
     }
 
+    /// parses a lambda with attrset args.
+    /// assumes an opening curly and a discard pattern have already been consumed.
+    pub fn parse_attrset_lambda_discard(&mut self) -> ParseResult<Lambda<'t>> {
+        let args = self.parse_destructuring_args(None, true)?;
+        self.expect(Token::Colon)?;
+        let body = self.parse_expr()?;
+        Ok(Lambda {
+            args: LambdaArgs::AttrsetBinding {
+                total_name: None,
+                args,
+            },
+            body: Box::new(body),
+        })
+    }
+
     pub fn parse_attrset_lambda(
         &mut self,
         initial_ident: &'t str,
         initial_value: Option<NixExpr<'t>>,
     ) -> ParseResult<Lambda<'t>> {
-        let args = self.parse_destructuring_args(Some((initial_ident, initial_value)))?;
+        let args = self.parse_destructuring_args(Some((initial_ident, initial_value)), false)?;
         self.expect(Token::Colon)?;
         let body = self.parse_expr()?;
         Ok(Lambda {

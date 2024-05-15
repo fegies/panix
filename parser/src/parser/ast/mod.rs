@@ -96,7 +96,16 @@ pub enum BinopOpcode {
     AttrsetMerge,
     Equals,
     NotEqual,
-    And,
+    Subtract,
+    Multiply,
+    Divide,
+    LogicalOr,
+    LogicalAnd,
+    LessThanOrEqual,
+    LessThanStrict,
+    GreaterOrRequal,
+    GreaterThanStrict,
+    LogicalImplication,
 }
 
 #[derive(Debug)]
