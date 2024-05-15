@@ -213,3 +213,18 @@ fn multiline_escaped_newline() {
         ],
     )
 }
+
+#[test]
+fn unquoted_iterpolation() {
+    let str = "${foo}";
+    assert_lex(
+        &str,
+        &[
+            Token::StringBegin,
+            Token::BeginInterpol,
+            Token::Ident("foo"),
+            Token::EndInterpol,
+            Token::StringEnd,
+        ],
+    )
+}

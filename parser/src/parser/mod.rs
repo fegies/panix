@@ -53,7 +53,10 @@ fn parse_nix_inner(input: &[u8]) -> ParseResult<NixExpr> {
     match res {
         Ok(Ok(e)) => Ok(e),
         Err((lex, Ok(_))) => Err(lex.into()),
-        Err((_, Err(e))) => Err(e),
+        Err((lex, Err(e))) => {
+            println!("error while lexing: {lex:?}");
+            Err(e)
+        }
         Ok(Err(e)) => Err(e),
     }
 }

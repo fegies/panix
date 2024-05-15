@@ -57,7 +57,7 @@
                 }
             },
             "args": [
-                "/home/felix/nixos-config/src/modules/wireguard/topology.nix"
+                "/home/felix/nixos-config/src/modules/unlock/usb-unlock.nix"
             ],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": [

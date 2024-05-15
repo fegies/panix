@@ -17,6 +17,7 @@ enum BraceStackEntry {
     SimpleStringInterpolation,
     MultilineStringInterpolation,
     PathInterpolation,
+    UnquotedInterpolation,
 }
 
 struct Lexer<'input, 'matcher> {
@@ -135,6 +136,10 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                             self.push_pos(Token::EndInterpol, pos).await;
                             self.resume_lex_path().await?;
                         }
+                        BraceStackEntry::UnquotedInterpolation => {
+                            self.push_pos(Token::EndInterpol, pos).await;
+                            self.push_pos(Token::StringEnd, pos).await;
+                        }
                     }
                 }
                 b':' => single!(Token::Colon),
@@ -206,6 +211,12 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     .is_some() => {}
                 b'\'' if self.input.get(1) == Some(b'\'') => {
                     self.lex_indented_string().await?;
+                }
+                b'$' if self.input.get(1) == Some(b'{') => {
+                    self.push(Token::StringBegin).await;
+                    self.push(Token::BeginInterpol).await;
+                    self.push_brace(BraceStackEntry::UnquotedInterpolation)?;
+                    self.input.consume(2);
                 }
                 b'0'..=b'9' => {
                     self.lex_number().await?;
