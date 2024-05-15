@@ -87,6 +87,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     | Token::DoublePlus
                     | Token::DoubleSlash
                     | Token::DoubleEq
+                    | Token::And
                     | Token::Ne) => {
                         let opcode = match t {
                             Token::Plus => BinopOpcode::Add,
@@ -94,6 +95,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                             Token::DoubleSlash => BinopOpcode::AttrsetMerge,
                             Token::Ne => BinopOpcode::NotEqual,
                             Token::DoubleEq => BinopOpcode::Equals,
+                            Token::And => BinopOpcode::And,
                             _ => unreachable!(),
                         };
                         let left = Box::new(lhs);
@@ -247,7 +249,7 @@ fn infix_binding_power(token: &Token<'_>) -> Option<(u8, u8)> {
         Token::Or => (3, 4),
         Token::And => (5, 6),
         Token::Ne => (7, 8),
-        Token::Eq => (9, 10),
+        Token::DoubleEq => (9, 10),
         Token::Ge => (11, 12),
         Token::Gt => (11, 12),
         Token::Le => (11, 12),

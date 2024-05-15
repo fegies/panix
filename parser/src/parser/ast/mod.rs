@@ -96,6 +96,7 @@ pub enum BinopOpcode {
     AttrsetMerge,
     Equals,
     NotEqual,
+    And,
 }
 
 #[derive(Debug)]
