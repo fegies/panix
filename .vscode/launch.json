@@ -57,7 +57,7 @@
                 }
             },
             "args": [
-                "/home/felix/nixos-config/src/util/acme.nix"
+                "/home/felix/nixos-config/home-manager/vim.nix"
             ],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": [
