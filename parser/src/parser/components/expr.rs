@@ -160,7 +160,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 let t = self.expect_next()?;
                 let res = match t.token {
                     Token::Dot => {
-                        let attrset = self.parse_attrset_multipath(first_ident)?;
+                        let attrset =
+                            self.parse_attrset_multipath(NixString::Literal(first_ident))?;
                         NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
                     }
                     Token::Eq => {
@@ -194,8 +195,12 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 // only attribute sets may have string keys.
                 // so we know now it must be one.
                 let initial_ident = self.parse_simple_string()?;
-                self.expect(Token::Eq)?;
-                let attrset = self.parse_attrset(initial_ident)?;
+                let t = self.expect_next()?;
+                let attrset = match t.token {
+                    Token::Eq => self.parse_attrset(initial_ident)?,
+                    Token::Dot => self.parse_attrset_multipath(initial_ident)?,
+                    _ => unexpected(t)?,
+                };
                 Ok(NixExpr::CompoundValue(CompoundValue::Attrset(attrset)))
             }
             Token::CurlyClose => {

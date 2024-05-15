@@ -11,8 +11,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
     /// parse an attribute set.
     /// Assumes the initial opening brace, and the first ident including a dot have been consumed.
-    pub fn parse_attrset_multipath(&mut self, initial_ident: &'t str) -> ParseResult<Attrset<'t>> {
-        let mut pieces = vec![NixString::Literal(initial_ident)];
+    pub fn parse_attrset_multipath(
+        &mut self,
+        initial_ident: NixString<'t>,
+    ) -> ParseResult<Attrset<'t>> {
+        let mut pieces = vec![initial_ident];
         self.parse_attrset_path(&mut pieces)?;
         self.parse_attrset_inner(pieces, HashSet::new())
     }
