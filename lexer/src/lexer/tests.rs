@@ -191,3 +191,25 @@ fn string_with_escaped_dollar() {
         ],
     );
 }
+
+#[test]
+fn multiline_escaped_newline() {
+    let str = r#"
+        ''
+        foo \
+        bar
+        ''
+    "#;
+    assert_lex(
+        str,
+        &[
+            Token::Whitespace,
+            Token::IndentedStringBegin,
+            Token::StringContent("        foo \\\n"),
+            Token::StringContent("        bar\n"),
+            Token::StringContent("        "),
+            Token::StringEnd,
+            Token::Whitespace,
+        ],
+    )
+}

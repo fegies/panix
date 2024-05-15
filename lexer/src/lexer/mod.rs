@@ -338,43 +338,47 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         mut content: &'a [u8],
         pos: SourcePosition,
     ) -> Result<(), LexError> {
-        while let Some(backslash_pos) = memchr::memchr(b'\\', content) {
-            let unescaped_part = &content[..backslash_pos];
-            if unescaped_part.len() > 0 {
-                self.push_pos(
-                    Token::StringContent(Self::convert_str(unescaped_part)?),
-                    pos,
-                )
-                .await;
+        fn get_replacement_value(char: &u8) -> Option<&'static str> {
+            let res = match char {
+                b'n' => "\n",
+                b'r' => "\r",
+                b'\\' => "\\",
+                b'$' => "$",
+                _ => return None,
+            };
+            Some(res)
+        }
+
+        'outer: loop {
+            for backslash_pos in memchr::memchr_iter(b'\\', content) {
+                if let Some(replacement_value) = content
+                    .get(backslash_pos + 1)
+                    .and_then(get_replacement_value)
+                {
+                    let unescaped_part = &content[..backslash_pos];
+                    if unescaped_part.len() > 0 {
+                        self.push_pos(
+                            Token::StringContent(Self::convert_str(unescaped_part)?),
+                            pos,
+                        )
+                        .await;
+                    }
+
+                    // skip the leading part, including the backslash and replacement char
+                    content = &content[backslash_pos + 2..];
+                    self.push_pos(Token::StringContent(replacement_value), pos)
+                        .await;
+
+                    continue 'outer;
+                }
             }
-            // skip the leading part, including the backslash.
-            content = &content[backslash_pos + 1..];
-            match content.get(0) {
-                Some(b'n') => {
-                    self.push_pos(Token::StringContent("\n"), pos).await;
-                    content = &content[1..];
-                }
-                Some(b'r') => {
-                    self.push_pos(Token::StringContent("\r"), pos).await;
-                    content = &content[1..];
-                }
-                Some(b'\\') => {
-                    self.push_pos(Token::StringContent("\\"), pos).await;
-                    content = &content[1..];
-                }
-                Some(b'$') => {
-                    self.push_pos(Token::StringContent("$"), pos).await;
-                    content = &content[1..];
-                }
-                Some(c) => {
-                    return Err(LexError::InvalidEscapeSequence(*c));
-                }
-                None => {}
-            }
+            break;
         }
 
         let content = Self::convert_str(content)?;
-        self.push(Token::StringContent(content)).await;
+        if !content.is_empty() {
+            self.push(Token::StringContent(content)).await;
+        }
         Ok(())
     }
 
