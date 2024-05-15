@@ -19,6 +19,7 @@ pub fn parse_complete<'t>(source: impl TokenSource<'t>) -> ParseResult<NixExpr<'
     let mut parser = Parser { source };
     let res = parser.parse_expr()?;
     parser.expect(Token::EOF)?;
+    assert!(parser.next().is_none());
     Ok(res)
 }
 

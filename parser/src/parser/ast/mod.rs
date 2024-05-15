@@ -109,6 +109,12 @@ pub enum BinopOpcode {
 }
 
 #[derive(Debug)]
+pub enum MonopOpcode {
+    NumericMinus,
+    BinaryNot,
+}
+
+#[derive(Debug)]
 pub enum Op<'a> {
     AttrRef {
         left: Box<NixExpr<'a>>,
@@ -126,6 +132,10 @@ pub enum Op<'a> {
     HasAttr {
         left: Box<NixExpr<'a>>,
         path: AttrsetKey<'a>,
+    },
+    Monop {
+        opcode: MonopOpcode,
+        body: Box<NixExpr<'a>>,
     },
 }
 

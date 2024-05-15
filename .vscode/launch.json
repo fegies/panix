@@ -57,7 +57,7 @@
                 }
             },
             "args": [
-                "/home/felix/nixos-config/home-manager/vim.nix"
+                "/home/felix/nixos-config/src/modules/wireguard/topology.nix"
             ],
             "cwd": "${workspaceFolder}",
             "sourceLanguages": [

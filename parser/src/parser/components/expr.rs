@@ -29,7 +29,6 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             Token::Integer(i) => NixExpr::BasicValue(BasicValue::Int(i)),
             Token::CurlyOpen => self.parse_attrset_or_destructuring_lambda()?,
             Token::SquareOpen => NixExpr::CompoundValue(CompoundValue::List(self.parse_list()?)),
-            Token::Minus => todo!(),
             Token::RoundOpen => {
                 let expr = self.parse_expr()?;
                 self.expect(Token::RoundClose)?;
@@ -48,7 +47,18 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 NixExpr::BasicValue(BasicValue::String(self.parse_multiline_string()?))
             }
             Token::PathBegin => NixExpr::BasicValue(BasicValue::Path(self.parse_path()?)),
-            Token::Not => todo!(),
+            Token::Not | Token::Minus => {
+                let (r_bp, opcode) = match t.token {
+                    Token::Not => (RIGHT_BINDING_POWER_BOOL_NOT, MonopOpcode::BinaryNot),
+                    Token::Minus => (RIGHT_BINDING_POWER_UNARY_MINUS, MonopOpcode::NumericMinus),
+                    _ => unreachable!(),
+                };
+                let body = self.parse_with_bindingpower(r_bp, allow_spaces)?;
+                NixExpr::Code(Code::Op(Op::Monop {
+                    opcode,
+                    body: Box::new(body),
+                }))
+            }
             _ => unexpected(t)?,
         };
 
@@ -256,6 +266,8 @@ fn could_start_expression(token: &Token) -> bool {
     )
 }
 
+const RIGHT_BINDING_POWER_BOOL_NOT: u8 = 15;
+const RIGHT_BINDING_POWER_UNARY_MINUS: u8 = 26;
 fn infix_binding_power(token: &Token<'_>) -> Option<(u8, u8)> {
     // the binding power table.
     // higher-precedence operators have higher binding powers
