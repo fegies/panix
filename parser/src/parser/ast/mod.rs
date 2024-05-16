@@ -126,6 +126,7 @@ pub enum Op<'a> {
     AttrRef {
         left: Box<NixExpr<'a>>,
         name: NixString<'a>,
+        default: Option<Box<NixExpr<'a>>>,
     },
     Call {
         function: Box<NixExpr<'a>>,

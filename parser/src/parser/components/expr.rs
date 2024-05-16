@@ -116,11 +116,24 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     }))
                 } else {
                     match token.token {
-                        Token::Dot => NixExprContent::Code(Code::Op(Op::AttrRef {
-                            left: Box::new(lhs),
+                        Token::Dot => {
+                            let left = Box::new(lhs);
                             // attrset refs are not full expressions. They may only be strings or idents
-                            name: self.parse_attrset_ref()?,
-                        })),
+                            let name = self.parse_attrset_ref()?;
+                            let default = if let Some(Token::Ident("or")) = self.peek() {
+                                // skip or keyword
+                                self.expect_next()?;
+                                Some(Box::new(self.parse_expr()?))
+                            } else {
+                                None
+                            };
+
+                            NixExprContent::Code(Code::Op(Op::AttrRef {
+                                left,
+                                name,
+                                default,
+                            }))
+                        }
                         Token::QuestionMark => NixExprContent::Code(Code::Op(Op::HasAttr {
                             left: Box::new(lhs),
                             path: self.parse_hasattr_path()?,
