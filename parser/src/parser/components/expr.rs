@@ -16,37 +16,41 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         allow_spaces: bool,
     ) -> ParseResult<NixExpr<'t>> {
         let t = self.expect_next()?;
-        let mut lhs = match t.token {
+        let mut pos = t.position;
+        let lhs = match t.token {
             Token::Ident(ident) => {
                 if matches!(self.expect_peek()?, Token::At | Token::Colon) {
-                    NixExpr::Code(Code::Lambda(self.parse_lambda(ident)?))
+                    NixExprContent::Code(Code::Lambda(self.parse_lambda(ident)?))
                 } else {
-                    NixExpr::Code(Code::ValueReference { ident })
+                    NixExprContent::Code(Code::ValueReference { ident })
                 }
             }
-            Token::KwIf => NixExpr::Code(Code::IfExpr(self.parse_if()?)),
-            Token::Float(f) => NixExpr::BasicValue(BasicValue::Float(f)),
-            Token::Integer(i) => NixExpr::BasicValue(BasicValue::Int(i)),
+            Token::KwIf => NixExprContent::Code(Code::IfExpr(self.parse_if()?)),
+            Token::Float(f) => NixExprContent::BasicValue(BasicValue::Float(f)),
+            Token::Integer(i) => NixExprContent::BasicValue(BasicValue::Int(i)),
             Token::CurlyOpen => self.parse_attrset_or_destructuring_lambda()?,
-            Token::SquareOpen => NixExpr::CompoundValue(CompoundValue::List(self.parse_list()?)),
+            Token::SquareOpen => {
+                NixExprContent::CompoundValue(CompoundValue::List(self.parse_list()?))
+            }
             Token::RoundOpen => {
                 let expr = self.parse_expr()?;
                 self.expect(Token::RoundClose)?;
-                expr
+                pos = expr.position;
+                expr.content
             }
-            Token::KwLet => NixExpr::Code(Code::LetInExpr(self.parse_let()?)),
-            Token::KwWith => NixExpr::Code(Code::WithExpr(self.parse_with_expr()?)),
+            Token::KwLet => NixExprContent::Code(Code::LetInExpr(self.parse_let()?)),
+            Token::KwWith => NixExprContent::Code(Code::WithExpr(self.parse_with_expr()?)),
             Token::KwRec => {
-                NixExpr::CompoundValue(CompoundValue::Attrset(self.parse_attrset_rec()?))
+                NixExprContent::CompoundValue(CompoundValue::Attrset(self.parse_attrset_rec()?))
             }
-            Token::KwNull => NixExpr::BasicValue(BasicValue::Null),
+            Token::KwNull => NixExprContent::BasicValue(BasicValue::Null),
             Token::StringBegin => {
-                NixExpr::BasicValue(BasicValue::String(self.parse_simple_string()?))
+                NixExprContent::BasicValue(BasicValue::String(self.parse_simple_string()?))
             }
             Token::IndentedStringBegin => {
-                NixExpr::BasicValue(BasicValue::String(self.parse_multiline_string()?))
+                NixExprContent::BasicValue(BasicValue::String(self.parse_multiline_string()?))
             }
-            Token::PathBegin => NixExpr::BasicValue(BasicValue::Path(self.parse_path()?)),
+            Token::PathBegin => NixExprContent::BasicValue(BasicValue::Path(self.parse_path()?)),
             Token::Not | Token::Minus => {
                 let (r_bp, opcode) = match t.token {
                     Token::Not => (RIGHT_BINDING_POWER_BOOL_NOT, MonopOpcode::BinaryNot),
@@ -54,12 +58,16 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     _ => unreachable!(),
                 };
                 let body = self.parse_with_bindingpower(r_bp, allow_spaces)?;
-                NixExpr::Code(Code::Op(Op::Monop {
+                NixExprContent::Code(Code::Op(Op::Monop {
                     opcode,
                     body: Box::new(body),
                 }))
             }
             _ => unexpected(t)?,
+        };
+        let mut lhs = NixExpr {
+            position: pos,
+            content: lhs,
         };
 
         loop {
@@ -98,32 +106,36 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     _ => None,
                 };
 
-                lhs = if let Some(opcode) = opcode {
+                let content = if let Some(opcode) = opcode {
                     let left = Box::new(lhs);
                     let right = Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?);
-                    NixExpr::Code(Code::Op(Op::Binop {
+                    NixExprContent::Code(Code::Op(Op::Binop {
                         left,
                         right,
                         opcode,
                     }))
                 } else {
                     match token.token {
-                        Token::Dot => NixExpr::Code(Code::Op(Op::AttrRef {
+                        Token::Dot => NixExprContent::Code(Code::Op(Op::AttrRef {
                             left: Box::new(lhs),
                             // attrset refs are not full expressions. They may only be strings or idents
                             name: self.parse_attrset_ref()?,
                         })),
-                        Token::QuestionMark => NixExpr::Code(Code::Op(Op::HasAttr {
+                        Token::QuestionMark => NixExprContent::Code(Code::Op(Op::HasAttr {
                             left: Box::new(lhs),
                             path: self.parse_hasattr_path()?,
                         })),
-                        Token::Whitespace => NixExpr::Code(Code::Op(Op::Call {
+                        Token::Whitespace => NixExprContent::Code(Code::Op(Op::Call {
                             function: Box::new(lhs),
                             arg: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
                         })),
                         t => todo!("{:?}", t),
                     }
                 };
+                lhs = NixExpr {
+                    content,
+                    position: token.position,
+                }
             } else {
                 break;
             }
@@ -161,7 +173,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse either a true attrset or a lambda with destructuring args
     /// without a total binding
     /// expects that the initial opening curly has already been consumed
-    fn parse_attrset_or_destructuring_lambda(&mut self) -> ParseResult<NixExpr<'t>> {
+    fn parse_attrset_or_destructuring_lambda(&mut self) -> ParseResult<NixExprContent<'t>> {
         let t = self.expect_next()?;
         match t.token {
             Token::Ident(first_ident) => {
@@ -174,25 +186,25 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                             first_ident,
                             t.position,
                         ))?;
-                        NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
+                        NixExprContent::CompoundValue(CompoundValue::Attrset(attrset))
                     }
                     Token::Eq => {
                         // this is a true attrset
                         let attrset =
                             self.parse_attrset(NixString::from_literal(first_ident, t.position))?;
-                        NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
+                        NixExprContent::CompoundValue(CompoundValue::Attrset(attrset))
                     }
                     Token::QuestionMark => {
                         // this is a set of function args, the first one has a default arg
                         let default = self.parse_expr()?;
                         self.expect(Token::Comma)?;
                         let lambda = self.parse_attrset_lambda(first_ident, Some(default))?;
-                        NixExpr::Code(Code::Lambda(lambda))
+                        NixExprContent::Code(Code::Lambda(lambda))
                     }
                     Token::Comma => {
                         // this is a set of function args, no default
                         let lambda = self.parse_attrset_lambda(first_ident, None)?;
-                        NixExpr::Code(Code::Lambda(lambda))
+                        NixExprContent::Code(Code::Lambda(lambda))
                     }
                     _ => unexpected(t)?,
                 };
@@ -202,7 +214,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             Token::TripleDot => {
                 // this must be a lambda, starting with a rest pattern.
                 let lambda = self.parse_attrset_lambda_discard()?;
-                Ok(NixExpr::Code(Code::Lambda(lambda)))
+                Ok(NixExprContent::Code(Code::Lambda(lambda)))
             }
             Token::StringBegin => {
                 // only attribute sets may have string keys.
@@ -214,7 +226,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     Token::Dot => self.parse_attrset_multipath(initial_ident)?,
                     _ => unexpected(t)?,
                 };
-                Ok(NixExpr::CompoundValue(CompoundValue::Attrset(attrset)))
+                Ok(NixExprContent::CompoundValue(CompoundValue::Attrset(
+                    attrset,
+                )))
             }
             Token::CurlyClose => {
                 if let Token::Colon = self.expect_peek()? {
@@ -231,10 +245,10 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                         },
                         body: Box::new(body),
                     };
-                    Ok(NixExpr::Code(Code::Lambda(lambda)))
+                    Ok(NixExprContent::Code(Code::Lambda(lambda)))
                 } else {
                     // empty attrset
-                    Ok(NixExpr::CompoundValue(CompoundValue::Attrset(
+                    Ok(NixExprContent::CompoundValue(CompoundValue::Attrset(
                         Attrset::empty(),
                     )))
                 }
@@ -242,7 +256,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             Token::KwInherit => {
                 // this is actually an attribute set starting with an inherit kw.
                 let attrset = self.parse_attrset_inherit()?;
-                Ok(NixExpr::CompoundValue(CompoundValue::Attrset(attrset)))
+                Ok(NixExprContent::CompoundValue(CompoundValue::Attrset(
+                    attrset,
+                )))
             }
             _ => unexpected(t)?,
         }

@@ -158,10 +158,16 @@ pub enum Code<'a> {
 }
 
 #[derive(Debug)]
-pub enum NixExpr<'a> {
+pub enum NixExprContent<'a> {
     BasicValue(BasicValue<'a>),
     CompoundValue(CompoundValue<'a>),
     Code(Code<'a>),
+}
+
+#[derive(Debug)]
+pub struct NixExpr<'a> {
+    pub position: SourcePosition,
+    pub content: NixExprContent<'a>,
 }
 
 #[derive(Debug)]
