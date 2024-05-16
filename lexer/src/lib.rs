@@ -65,8 +65,7 @@ impl Eq for Token<'_> {}
 #[derive(Clone, Copy, Debug)]
 pub struct SourcePosition {
     pub line: u32,
-    pub column: u16,
-    pub file_id: u16,
+    pub column: u32,
 }
 
 #[derive(Debug)]

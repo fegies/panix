@@ -551,7 +551,7 @@ pub fn run<'a, TRes>(
     let adapter = ImpedanceMatcher::new();
 
     let future = Lexer {
-        input: LexerInput::new(input, 0),
+        input: LexerInput::new(input),
         matcher: &adapter,
         brace_stack: Stack::new(),
         last_was_whitespace: false,

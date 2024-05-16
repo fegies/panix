@@ -8,14 +8,14 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         initial_part: NixString<'t>,
         end_token: Token<'static>,
     ) -> ParseResult<NixString<'t>> {
-        let mut parts = match initial_part {
-            NixString::Literal(lit) => vec![InterpolationEntry::LiteralPiece(lit)],
-            NixString::Composite(p) => p
+        let mut parts = match initial_part.content {
+            NixStringContent::Literal(lit) => vec![InterpolationEntry::LiteralPiece(lit)],
+            NixStringContent::Composite(p) => p
                 .into_iter()
                 .map(InterpolationEntry::LiteralPiece)
                 .collect(),
-            NixString::Interpolated(p) => p,
-            NixString::Empty => Vec::new(),
+            NixStringContent::Interpolated(p) => p,
+            NixStringContent::Empty => Vec::new(),
         };
 
         let expression = self.parse_expr()?;
@@ -33,7 +33,10 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     self.expect(Token::EndInterpol)?;
                 }
                 t if t == end_token => {
-                    return Ok(NixString::Interpolated(parts));
+                    return Ok(NixString {
+                        position: initial_part.position,
+                        content: NixStringContent::Interpolated(parts),
+                    });
                 }
                 _ => return unexpected(t),
             }
@@ -45,19 +48,34 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         let initial_content = match t.token {
             Token::StringContent(cont) => cont,
             Token::BeginInterpol => {
-                return self.parse_interpolated_string(NixString::Empty, end_token);
+                return self.parse_interpolated_string(
+                    NixString {
+                        position: t.position,
+                        content: NixStringContent::Empty,
+                    },
+                    end_token,
+                );
             }
-            t if t == end_token => return Ok(NixString::Empty),
+            tok if tok == end_token => {
+                return Ok(NixString {
+                    position: t.position,
+                    content: NixStringContent::Empty,
+                })
+            }
             _ => return unexpected(t),
         };
         let t = self.expect_next()?;
         let next_part = match t.token {
             Token::StringContent(cont) => cont,
             Token::BeginInterpol => {
-                return self
-                    .parse_interpolated_string(NixString::Literal(initial_content), end_token);
+                return self.parse_interpolated_string(
+                    NixString::from_literal(initial_content, t.position),
+                    end_token,
+                );
             }
-            t if t == end_token => return Ok(NixString::Literal(initial_content)),
+            tok if tok == end_token => {
+                return Ok(NixString::from_literal(initial_content, t.position))
+            }
             _ => return unexpected(t),
         };
         let mut parts = vec![initial_content, next_part];
@@ -69,9 +87,20 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     parts.push(cont);
                 }
                 Token::BeginInterpol => {
-                    return self.parse_interpolated_string(NixString::Composite(parts), end_token);
+                    return self.parse_interpolated_string(
+                        NixString {
+                            position: t.position,
+                            content: NixStringContent::Composite(parts),
+                        },
+                        end_token,
+                    );
                 }
-                t if t == end_token => return Ok(NixString::Composite(parts)),
+                tok if tok == end_token => {
+                    return Ok(NixString {
+                        position: t.position,
+                        content: NixStringContent::Composite(parts),
+                    })
+                }
                 _ => return unexpected(t),
             }
         }
@@ -120,12 +149,12 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             .unwrap_or(0)
         }
 
-        match &mut str {
-            NixString::Literal(lit) => {
+        match &mut str.content {
+            NixStringContent::Literal(lit) => {
                 let leading_spaces = count_spaces(lit);
                 *lit = &lit[leading_spaces..];
             }
-            NixString::Composite(comp) => {
+            NixStringContent::Composite(comp) => {
                 let spaces = min_spaces(comp.iter().cloned());
                 if spaces == 0 {
                     return Ok(str);
@@ -139,7 +168,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     trimmable = ends_with_space(s);
                 }
             }
-            NixString::Interpolated(int) => {
+            NixStringContent::Interpolated(int) => {
                 let spaces = min_spaces(int.iter().map(|e| match e {
                     InterpolationEntry::LiteralPiece(l) => *l,
                     InterpolationEntry::Expression(_) => "",
@@ -163,7 +192,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     }
                 }
             }
-            NixString::Empty => {}
+            NixStringContent::Empty => {}
         }
 
         Ok(str)

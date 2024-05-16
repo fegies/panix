@@ -135,7 +135,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     fn parse_attrset_ref(&mut self) -> ParseResult<NixString<'t>> {
         let t = self.expect_next()?;
         match t.token {
-            Token::Ident(ident) => Ok(NixString::Literal(ident)),
+            Token::Ident(ident) => Ok(NixString::from_literal(ident, t.position)),
             Token::StringBegin => self.parse_simple_string(),
             _ => unexpected(t),
         }
@@ -170,13 +170,16 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 let t = self.expect_next()?;
                 let res = match t.token {
                     Token::Dot => {
-                        let attrset =
-                            self.parse_attrset_multipath(NixString::Literal(first_ident))?;
+                        let attrset = self.parse_attrset_multipath(NixString::from_literal(
+                            first_ident,
+                            t.position,
+                        ))?;
                         NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
                     }
                     Token::Eq => {
                         // this is a true attrset
-                        let attrset = self.parse_attrset(NixString::Literal(first_ident))?;
+                        let attrset =
+                            self.parse_attrset(NixString::from_literal(first_ident, t.position))?;
                         NixExpr::CompoundValue(CompoundValue::Attrset(attrset))
                     }
                     Token::QuestionMark => {

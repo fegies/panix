@@ -3,9 +3,16 @@ use std::{
     fmt::Write,
 };
 
+pub use lexer::SourcePosition;
+
 pub mod impls;
 
-pub enum NixString<'a> {
+pub struct NixString<'a> {
+    pub position: SourcePosition,
+    pub content: NixStringContent<'a>,
+}
+
+pub enum NixStringContent<'a> {
     Literal(&'a str),
     Composite(Vec<&'a str>),
     Interpolated(Vec<InterpolationEntry<'a>>),

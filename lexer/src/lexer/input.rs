@@ -7,14 +7,10 @@ pub struct LexerInput<'input> {
 }
 
 impl<'input> LexerInput<'input> {
-    pub fn new(slice: &'input [u8], file_id: u16) -> Self {
+    pub fn new(slice: &'input [u8]) -> Self {
         Self {
             slice,
-            current_position: SourcePosition {
-                line: 1,
-                column: 1,
-                file_id,
-            },
+            current_position: SourcePosition { line: 1, column: 1 },
             offset: 0,
         }
     }
@@ -31,11 +27,11 @@ impl<'input> LexerInput<'input> {
             Some((num_newlines, last_idx)) => {
                 let num_newlines = num_newlines as u32 + 1;
                 self.current_position.line += num_newlines;
-                self.current_position.column = (part.len() - last_idx) as u16;
+                self.current_position.column = (part.len() - last_idx) as u32;
             }
             None => {
                 // no newline.
-                self.current_position.column += count as u16;
+                self.current_position.column += count as u32;
             }
         }
 
