@@ -13,9 +13,6 @@ struct Referencing {
     no_pointer: u16,
 }
 
-#[derive(Trace)]
-struct ReferencingTup(u16, GcPointer<Referencing>);
-
 // #[derive(Trace)]
 // enum AllocEnum {
 //     A(usize),
