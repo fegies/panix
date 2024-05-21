@@ -1,8 +1,9 @@
-use lexer::{LexError, TokenWithPosition};
+use lexer::TokenWithPosition;
 
 use self::{ast::NixExpr, components::parse_complete, util::multipeek::Multipeek};
 
-pub mod ast;
+use super::*;
+
 mod components;
 mod util;
 
@@ -29,21 +30,6 @@ where
     }
 }
 
-pub type ParseResult<T> = Result<T, ParseError>;
-
-#[derive(Debug)]
-pub enum ParseError {
-    UnexpectedToken(String),
-    UnexpectedEof,
-    LexerError(LexError),
-    AttributePathConflict(String),
-}
-impl From<LexError> for ParseError {
-    fn from(value: LexError) -> Self {
-        Self::LexerError(value)
-    }
-}
-
 fn parse_nix_inner(input: &[u8]) -> ParseResult<NixExpr> {
     let res = lexer::run(input, |tokens| {
         let source = Multipeek::new(tokens);
@@ -62,10 +48,6 @@ fn parse_nix_inner(input: &[u8]) -> ParseResult<NixExpr> {
 }
 
 // this is just a convenient point to cut off the stack trace.
-fn parser_entrypoint(input: &[u8]) -> ParseResult<NixExpr> {
+pub fn parser_entrypoint(input: &[u8]) -> ParseResult<NixExpr> {
     parse_nix_inner(input)
-}
-
-pub fn parse_nix(input: &[u8]) -> ParseResult<NixExpr> {
-    parser_entrypoint(input)
 }

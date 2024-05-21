@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Parser;
-use parser::parser::ParseError;
+use parser::ParseError;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -21,7 +21,7 @@ fn process_file(file: &Path) {
     file.read_to_end(&mut buf).unwrap();
 
     let mut ok = false;
-    match parser::parser::parse_nix(&buf) {
+    match parser::parse_nix(&buf) {
         Ok(res) => {
             println!("{res:#?}");
             ok = true;
