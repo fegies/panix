@@ -1,6 +1,8 @@
+use proc_macro2::Span;
 use quote::{quote, quote_spanned, ToTokens};
 use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput, Field, Variant};
 
+/// derive the content of the trace trait
 #[proc_macro_derive(Trace)]
 pub fn derive_tracable(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -36,12 +38,32 @@ fn generate_field_access(
 
 fn generate_variant_access(variant: &Variant) -> proc_macro2::TokenStream {
     let ident = &variant.ident;
-    let mut_t = quote!(&mut);
 
-    if variant.fields.len() == 0 {
-        quote!(Self::#ident => {})
-    } else {
-        todo!()
+    let idents = variant
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(idx, f)| {
+            f.ident
+                .clone()
+                .unwrap_or_else(|| syn::Ident::new(&format!("f{idx}"), Span::call_site()))
+        })
+        .collect::<Vec<_>>();
+
+    let statements = idents.iter().map(|ident| quote!(#ident.trace(trace_fn);));
+
+    let body = quote!({
+        #(#statements)*
+    });
+
+    match variant.fields {
+        syn::Fields::Named(_) => {
+            quote!(Self::#ident{#(#idents,)*} => #body)
+        }
+        syn::Fields::Unnamed(_) => {
+            quote!(Self::#ident(#(#idents,)*) => #body)
+        }
+        syn::Fields::Unit => quote!(Self::#ident => {}),
     }
 }
 
