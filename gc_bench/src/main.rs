@@ -13,11 +13,8 @@ struct Referencing {
     no_pointer: u16,
 }
 
-// #[derive(Trace)]
-// enum AllocEnum {
-//     A(usize),
-//     B { f: usize },
-// }
+#[derive(Trace)]
+struct ReferencingTup(u16, GcPointer<Referencing>);
 
 fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
     println!("initialized");
@@ -62,4 +59,16 @@ fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
 
 fn main() {
     gc::with_gc(|gc| perform_work(gc)).unwrap().unwrap();
+}
+
+#[derive(Trace)]
+enum AllocEnum {
+    A(usize, i32),
+    B { f: usize },
+}
+
+#[derive(Trace)]
+enum AllocEnumSimple {
+    VarA,
+    VarB,
 }

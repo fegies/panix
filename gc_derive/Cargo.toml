@@ -10,6 +10,6 @@ proc-macro = true
 
 [dependencies]
 gc.workspace = true
-syn = "2"
+syn = {version = "2"}
 quote = "1"
 proc-macro2 = "1"
