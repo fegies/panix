@@ -11,14 +11,17 @@ members = [
     "gc",
     "gc_derive",
     "lexer_impedance_matcher",
-    "gc_bench",
+    "gc_bench", "interpreter",
 ]
 
 [workspace.dependencies]
 parser = {path = "./parser"}
 identpool = {path = "./identpool"}
 lexer = {path = "./lexer" }
+interpreter = {path = "./interpreter"}
 gc = {path = "./gc"}
 gc_derive = {path = "./gc_derive"}
 lexer_impedance_matcher = {path = "./lexer_impedance_matcher"}
+
 memchr = "2.6.4"
+thiserror = "1"

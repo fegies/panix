@@ -1,24 +1,22 @@
 pub mod ast;
 pub mod parser;
 
-use lexer::LexError;
 use parser::parser_entrypoint;
 
+pub use lexer::LexError;
 pub type ParseResult<T> = Result<T, ParseError>;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ParseError {
+    #[error("Found an unexpected token: `{0}`")]
     UnexpectedToken(String),
+    #[error("File ended unexpectedly")]
     UnexpectedEof,
-    LexerError(LexError),
+    #[error("Error while lexing")]
+    LexerError(#[from] LexError),
+    #[error("Found conflicting attributes: {0}")]
     AttributePathConflict(String),
 }
-impl From<LexError> for ParseError {
-    fn from(value: LexError) -> Self {
-        Self::LexerError(value)
-    }
-}
-
 pub fn parse_nix(input: &[u8]) -> ParseResult<ast::NixExpr> {
     parser_entrypoint(input)
 }

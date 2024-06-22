@@ -9,6 +9,7 @@ pub mod specialized_types;
 use std::{
     alloc::Layout,
     collections::VecDeque,
+    error,
     rc::Rc,
     sync::{Arc, Mutex},
 };
@@ -21,6 +22,8 @@ use pointer::{inspect_roots, RawHeapGcPointer};
 
 pub use object::{Trace, TraceCallback};
 pub use pointer::{GcPointer, RawGcPointer};
+use specialized_types::{array::Array, string::SimpleGcString};
+use thiserror::Error;
 
 use crate::heap_page::promote_object;
 
@@ -33,6 +36,8 @@ mod init;
 pub struct GcHandle {
     alloc_pages: AllocationPages,
 }
+
+pub type GcString = GcPointer<SimpleGcString>;
 
 const HEAP_LAYOUT: Layout = unsafe { Layout::from_size_align_unchecked(1 << 32, 1 << 32) };
 
@@ -61,9 +66,11 @@ impl Ord for Generation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum GcError {
+    #[error("Ran out of free pages when allocating")]
     OutOfPages,
+    #[error("The requested object is too big")]
     ObjectBiggerThanPage,
 }
 pub type GcResult<T> = Result<T, GcError>;
@@ -241,6 +248,43 @@ impl GcHandle {
                 self.alloc_pages.pages[0]
                     .try_alloc(value)
                     .map_err(|_| GcError::ObjectBiggerThanPage)?
+            }
+        };
+        Ok(heap_ptr.root())
+    }
+
+    /// Allocates an array on the heap, then filles it by cloning the
+    /// contents of the passed slice.
+    pub fn alloc_slice<TData: HeapObject + Clone + 'static>(
+        &mut self,
+        data: &[TData],
+    ) -> GcResult<GcPointer<Array<TData>>> {
+        let heap_ptr = match self.alloc_pages.pages[0].try_alloc_slice(data) {
+            Some(ptr) => ptr,
+            None => {
+                self.clear_nursery()?;
+                self.alloc_pages.pages[0]
+                    .try_alloc_slice(data)
+                    .ok_or(GcError::ObjectBiggerThanPage)?
+            }
+        };
+        Ok(heap_ptr.root())
+    }
+    /// Allocate an array of the same length as the passed vector, then moves
+    /// the vector entries into the array.
+    /// On success the vector is empty.
+    /// On error, the vector will not be modified.
+    pub fn alloc_vec<TData: HeapObject + 'static>(
+        &mut self,
+        data: &mut Vec<TData>,
+    ) -> GcResult<GcPointer<Array<TData>>> {
+        let heap_ptr = match self.alloc_pages.pages[0].try_alloc_vec(data) {
+            Some(ptr) => ptr,
+            None => {
+                self.clear_nursery()?;
+                self.alloc_pages.pages[0]
+                    .try_alloc_vec(data)
+                    .ok_or(GcError::ObjectBiggerThanPage)?
             }
         };
         Ok(heap_ptr.root())

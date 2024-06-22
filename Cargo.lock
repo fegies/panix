@@ -105,6 +105,9 @@ checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 [[package]]
 name = "gc"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "gc_bench"
@@ -138,11 +141,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "interpreter"
+version = "0.1.0"
+dependencies = [
+ "gc",
+ "gc_derive",
+ "parser",
+ "thiserror",
+]
+
+[[package]]
 name = "lexer"
 version = "0.1.0"
 dependencies = [
  "lexer_impedance_matcher",
  "memchr",
+ "thiserror",
 ]
 
 [[package]]
@@ -161,8 +175,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "gc",
- "lexer",
- "parser",
+ "interpreter",
 ]
 
 [[package]]
@@ -170,6 +183,7 @@ name = "parser"
 version = "0.1.0"
 dependencies = [
  "lexer",
+ "thiserror",
 ]
 
 [[package]]
@@ -205,6 +219,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "thiserror"
+version = "1.0.55"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e3de26b0965292219b4287ff031fcba86837900fe9cd2b34ea8ad893c0953d2"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.55"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "268026685b2be38d7103e9e507c938a1fcb3d7e6eb15e87870b617bf37b6d581"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

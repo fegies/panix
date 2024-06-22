@@ -8,3 +8,5 @@ edition = "2021"
 [dependencies]
 memchr.workspace = true
 lexer_impedance_matcher.workspace = true
+
+thiserror.workspace = true

@@ -146,3 +146,15 @@ where
         }
     }
 }
+unsafe impl<T, E> Trace for Result<T, E>
+where
+    T: Trace,
+    E: Trace,
+{
+    fn trace(&mut self, trace_fn: TraceCallback) {
+        match self {
+            Ok(s) => s.trace(trace_fn),
+            Err(e) => e.trace(trace_fn),
+        }
+    }
+}

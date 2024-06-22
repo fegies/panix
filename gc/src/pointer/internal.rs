@@ -10,6 +10,15 @@ pub struct GcPointer<TData> {
     data: PhantomData<TData>,
 }
 
+impl<TData> core::fmt::Debug for GcPointer<TData> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GcPointer")
+            .field("type", &core::any::type_name_of_val(self))
+            .field("ptr", &self.ptr)
+            .finish()
+    }
+}
+
 /// representation:
 /// bits 0..30: real pointer data
 /// bit 31:

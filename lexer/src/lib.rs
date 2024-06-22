@@ -1,5 +1,3 @@
-#![cfg_attr(not(test), no_std)]
-
 use core::str::Utf8Error;
 
 mod lexer;
@@ -80,17 +78,27 @@ impl<'a> AsRef<Token<'a>> for TokenWithPosition<'a> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
 pub enum LexError {
+    #[error("Found an unexpected character: `{0:?}`")]
     UnexpectedChar(Option<u8>),
+    #[error("Found an invalid character: `{0}`")]
     InvalidChar(u8),
+    #[error("Found an invalid escape sequence entry: `{0}`")]
     InvalidEscapeSequence(u8),
+    #[error("Found an unclosed string")]
     UnclosedString,
-    InvalidString(Utf8Error),
+    #[error("Found an invalid string: ")]
+    InvalidString(#[from] Utf8Error),
+    #[error("Found an unmatched closing brace")]
     UnmatchedCloseBrace,
+    #[error("Lexer could not complete")]
     NotRunToCompletion,
+    #[error("Exceeded maximum brace recursion")]
     NestedTooDeep,
+    #[error("Found an invalid float")]
     InvalidFloat,
+    #[error("Found an invalid int")]
     InvalidInt,
 }
 

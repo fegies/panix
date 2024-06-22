@@ -7,7 +7,7 @@ use std::{
 };
 
 use clap::Parser;
-use parser::ParseError;
+use gc::with_gc;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -16,24 +16,13 @@ struct Args {
 
 fn process_file(file: &Path) {
     println!("parsing: {file:?}");
-    let mut file = File::open(file).unwrap();
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf).unwrap();
 
-    let mut ok = false;
-    match parser::parse_nix(&buf) {
-        Ok(res) => {
-            println!("{res:#?}");
-            ok = true;
-        }
-        Err(ParseError::UnexpectedToken(t)) => {
-            println!("unexpected token: {t}");
-        }
-        Err(e) => {
-            println!("{e:?}")
-        }
-    }
-    assert!(ok);
+    with_gc(|handle| {
+        let res = interpreter::compile_file(handle, file);
+        println!("{res:?}");
+    })
+    .unwrap();
+
     // let res = lexer::run(&buf, |it| it.collect::<Vec<_>>());
 
     // let tokens = lexer::lex_input(buf.as_ref()).unwrap();

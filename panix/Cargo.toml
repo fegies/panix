@@ -8,7 +8,6 @@ edition = "2021"
 default-run = "panix"
 
 [dependencies]
-lexer.workspace = true
-parser.workspace = true
+interpreter.workspace = true
 gc.workspace = true
 clap = { version = "4.4.11", features = ["derive"] }
