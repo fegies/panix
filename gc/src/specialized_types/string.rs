@@ -36,6 +36,12 @@ impl AsRef<str> for SimpleGcString {
     }
 }
 
+impl core::hash::Hash for SimpleGcString {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_ref().hash(state)
+    }
+}
+
 impl Page {
     fn try_alloc_string(&self, str: &str) -> Option<HeapGcPointer<SimpleGcString>> {
         let len = str.len();

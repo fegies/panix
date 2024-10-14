@@ -1,54 +1,15 @@
-use gc::{
-    specialized_types::{array::Array, string::SimpleGcString},
-    GcPointer, Trace,
-};
+use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
 
-#[derive(Debug)]
-pub enum NixString {
-    Simple(GcPointer<SimpleGcString>),
-}
-
-#[derive(Debug)]
-pub enum NixValue {
-    String(NixString),
-    Bool(bool),
-    Null,
-    Int(i64),
-    Float(f64),
-    Path(NixString),
-    Attrset(Attrset),
-    Function(Function),
-}
-
-#[derive(Debug)]
-pub struct Attrset {
-    pub keys: GcPointer<Array<NixString>>,
-    pub values: GcPointer<Array<Thunk>>,
-}
-
-#[derive(Debug)]
-pub struct Function {
-    pub args: FunctionArgs,
-    pub body: Thunk,
-}
-
-#[derive(Debug)]
-pub struct AttrsetFunctionArg {
-    pub name: GcPointer<NixString>,
-    pub default: Option<Thunk>,
-}
-#[derive(Debug)]
-pub enum FunctionArgs {
-    Single,
-    AttrsetArgs {
-        entries: GcPointer<Array<AttrsetFunctionArg>>,
-        others_allowed: bool,
-    },
-}
+use super::value::Thunk;
 
 #[derive(Debug, Trace)]
-struct ContextReference(u32);
+pub struct ContextReference(u32);
+
+#[derive(Debug, Trace)]
+pub struct ExecutionContext {
+    pub entries: GcPointer<Array<Thunk>>,
+}
 
 #[derive(Debug, Trace)]
 pub enum VmOp {
@@ -101,23 +62,6 @@ pub enum VmOp {
     NumericNegate,
     //// pops a value from the stack, performs binary not and pushes the result
     BinaryNot,
-}
-
-#[derive(Debug, Trace)]
-pub struct ExecutionContext {
-    pub entries: GcPointer<Array<Thunk>>,
-}
-
-pub struct List {
-    pub entries: GcPointer<Array<Thunk>>,
-}
-
-#[derive(Debug, Trace)]
-pub enum Thunk {
-    Blackhole,
-    Value(GcPointer<NixValue>),
-    Deferred {
-        context: ExecutionContext,
-        code: GcPointer<Array<VmOp>>,
-    },
+    //// pops two values from the stack, applies the top to the bottom and pushes the result
+    Call,
 }

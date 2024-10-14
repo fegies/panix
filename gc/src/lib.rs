@@ -9,7 +9,6 @@ pub mod specialized_types;
 use std::{
     alloc::Layout,
     collections::VecDeque,
-    error,
     rc::Rc,
     sync::{Arc, Mutex},
 };

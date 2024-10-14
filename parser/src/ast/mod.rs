@@ -150,7 +150,6 @@ pub enum Op<'a> {
 #[derive(Debug)]
 pub enum Code<'a> {
     LetInExpr(LetInExpr<'a>),
-    RecAttrset,
     ValueReference { ident: &'a str },
     WithExpr(WithExpr<'a>),
     Lambda(Lambda<'a>),

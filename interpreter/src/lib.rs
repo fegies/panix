@@ -1,4 +1,6 @@
 mod compiler;
+pub mod util;
+mod vm;
 
 use std::{
     fs::File,
@@ -9,8 +11,7 @@ use std::{
 use compiler::CompileError;
 use gc::GcHandle;
 use parser::ParseError;
-
-use crate::compiler::Compiler;
+use vm::value::Thunk;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InterpreterError {
@@ -22,11 +23,11 @@ pub enum InterpreterError {
     CompileError(#[from] CompileError),
 }
 
-pub fn compile_file(gc_handle: &mut GcHandle, file: &Path) -> Result<(), InterpreterError> {
+pub fn compile_file(gc_handle: &mut GcHandle, file: &Path) -> Result<Thunk, InterpreterError> {
     let mut content = Vec::new();
     File::open(file)?.read_to_end(&mut content)?;
     let expr = parser::parse_nix(&content)?;
-    let res = Compiler::new(gc_handle).translate_expression(expr)?;
+    let res = compiler::translate_expression(gc_handle, expr)?;
     println!("{res:#?}");
-    Ok(())
+    Ok(res)
 }
