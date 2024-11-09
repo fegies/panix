@@ -38,12 +38,13 @@ impl<T: Sized> Array<T> {
     fn get_alignment() -> usize {
         core::mem::align_of::<Array<T>>().max(core::mem::align_of::<T>())
     }
-    fn get_size_for_len(len: usize) -> usize {
+    const fn get_size_for_len(len: usize) -> usize {
         core::mem::size_of::<Self>() + Self::get_header_padding() + len * core::mem::size_of::<T>()
     }
 
-    fn get_header_padding() -> usize {
-        core::mem::align_of::<T>().saturating_sub(core::mem::size_of::<T>())
+    const fn get_header_padding() -> usize {
+        assert!(core::mem::size_of::<T>() >= core::mem::align_of::<T>());
+        core::mem::align_of::<T>().saturating_sub(core::mem::size_of::<Array<T>>())
     }
 
     fn get_data_ptr(&self) -> *const T {

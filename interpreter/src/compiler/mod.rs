@@ -131,7 +131,9 @@ impl<'compiler, 'gc, 'bufferpool> CompilationScope<'compiler, 'bufferpool, 'gc> 
                 let key = match k {
                     parser::ast::AttrsetKey::Single(s) => self.compiler.alloc_string(s)?,
                     parser::ast::AttrsetKey::Multi(_) => {
-                        panic!("Multipath attrsets should have been removed by a normalize pass")
+                        unreachable!(
+                            "Multipath attrsets should have been removed by a normalize pass"
+                        )
                     }
                 };
                 key_buffer.push(key);
