@@ -9,13 +9,15 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         end_token: Token<'static>,
     ) -> ParseResult<NixString<'t>> {
         let mut parts = match initial_part.content {
-            NixStringContent::Literal(lit) => vec![InterpolationEntry::LiteralPiece(lit)],
-            NixStringContent::Composite(p) => p
+            NixStringContent::Known(KnownNixStringContent::Empty) => Vec::new(),
+            NixStringContent::Known(KnownNixStringContent::Literal(lit)) => {
+                vec![InterpolationEntry::LiteralPiece(lit)]
+            }
+            NixStringContent::Known(KnownNixStringContent::Composite(p)) => p
                 .into_iter()
                 .map(InterpolationEntry::LiteralPiece)
                 .collect(),
             NixStringContent::Interpolated(p) => p,
-            NixStringContent::Empty => Vec::new(),
         };
 
         let expression = self.parse_expr()?;
@@ -51,7 +53,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 return self.parse_interpolated_string(
                     NixString {
                         position: t.position,
-                        content: NixStringContent::Empty,
+                        content: NixStringContent::Known(KnownNixStringContent::Empty),
                     },
                     end_token,
                 );
@@ -59,7 +61,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             tok if tok == end_token => {
                 return Ok(NixString {
                     position: t.position,
-                    content: NixStringContent::Empty,
+                    content: NixStringContent::Known(KnownNixStringContent::Empty),
                 })
             }
             _ => return unexpected(t),
@@ -90,7 +92,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     return self.parse_interpolated_string(
                         NixString {
                             position: t.position,
-                            content: NixStringContent::Composite(parts),
+                            content: NixStringContent::Known(KnownNixStringContent::Composite(
+                                parts,
+                            )),
                         },
                         end_token,
                     );
@@ -98,7 +102,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 tok if tok == end_token => {
                     return Ok(NixString {
                         position: t.position,
-                        content: NixStringContent::Composite(parts),
+                        content: NixStringContent::Known(KnownNixStringContent::Composite(parts)),
                     })
                 }
                 _ => return unexpected(t),
@@ -150,11 +154,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         }
 
         match &mut str.content {
-            NixStringContent::Literal(lit) => {
+            NixStringContent::Known(KnownNixStringContent::Literal(lit)) => {
                 let leading_spaces = count_spaces(lit);
                 *lit = &lit[leading_spaces..];
             }
-            NixStringContent::Composite(comp) => {
+            NixStringContent::Known(KnownNixStringContent::Composite(comp)) => {
                 let spaces = min_spaces(comp.iter().cloned());
                 if spaces == 0 {
                     return Ok(str);
@@ -192,7 +196,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     }
                 }
             }
-            NixStringContent::Empty => {}
+            NixStringContent::Known(KnownNixStringContent::Empty) => {}
         }
 
         Ok(str)

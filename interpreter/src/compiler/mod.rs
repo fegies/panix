@@ -49,14 +49,16 @@ struct CompilationScope<'compiler, 'bufferpool, 'gc> {
 impl<'gc> Compiler<'gc, '_> {
     fn alloc_string(&mut self, str: NixString<'_>) -> Result<value::NixString, CompileError> {
         let res = match str.content {
-            parser::ast::NixStringContent::Literal(literal) => {
-                value::NixString::Simple(self.gc_handle.alloc_string(literal)?)
-            }
-            parser::ast::NixStringContent::Empty => {
-                value::NixString::Simple(self.gc_handle.alloc_string("")?)
-            }
-            parser::ast::NixStringContent::Composite(_) => todo!(),
             parser::ast::NixStringContent::Interpolated(_) => todo!(),
+            parser::ast::NixStringContent::Known(known_entry) => match known_entry {
+                parser::ast::KnownNixStringContent::Literal(literal) => {
+                    value::NixString::Simple(self.gc_handle.alloc_string(literal)?)
+                }
+                parser::ast::KnownNixStringContent::Composite(_) => todo!(),
+                parser::ast::KnownNixStringContent::Empty => {
+                    value::NixString::Simple(self.gc_handle.alloc_string("")?)
+                }
+            },
         };
         Ok(res)
     }
@@ -128,7 +130,9 @@ impl<'compiler, 'gc, 'bufferpool> CompilationScope<'compiler, 'bufferpool, 'gc> 
             for (k, v) in attrset.attrs {
                 let key = match k {
                     parser::ast::AttrsetKey::Single(s) => self.compiler.alloc_string(s)?,
-                    parser::ast::AttrsetKey::Multi(_) => todo!(),
+                    parser::ast::AttrsetKey::Multi(_) => {
+                        panic!("Multipath attrsets should have been removed by a normalize pass")
+                    }
                 };
                 key_buffer.push(key);
                 let value = self.translate_expression(v)?;

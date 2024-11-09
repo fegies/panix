@@ -13,9 +13,14 @@ pub struct NixString<'a> {
 }
 
 pub enum NixStringContent<'a> {
+    Known(KnownNixStringContent<'a>),
+    Interpolated(Vec<InterpolationEntry<'a>>),
+}
+
+#[derive(Clone)]
+pub enum KnownNixStringContent<'a> {
     Literal(&'a str),
     Composite(Vec<&'a str>),
-    Interpolated(Vec<InterpolationEntry<'a>>),
     Empty,
 }
 
