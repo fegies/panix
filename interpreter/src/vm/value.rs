@@ -11,7 +11,7 @@ pub enum Thunk {
     /// A special kind of null value that is not representable in the nix language
     /// and is mainly useful to detect infinite recursions.
     Blackhole,
-    Value(NixValue),
+    Value(GcPointer<NixValue>),
     Deferred {
         context: ExecutionContext,
         code: GcPointer<Array<VmOp>>,
@@ -20,8 +20,16 @@ pub enum Thunk {
 
 #[derive(Debug, Trace)]
 pub enum NixString {
+    Empty,
     Simple(GcPointer<SimpleGcString>),
-    Deferred(GcPointer<Thunk>),
+}
+
+impl PartialEq for NixString {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Trace)]
@@ -41,6 +49,13 @@ pub enum NixValue {
 pub struct Attrset {
     pub keys: GcPointer<Array<NixString>>,
     pub values: GcPointer<Array<Thunk>>,
+}
+impl PartialEq for Attrset {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Trace)]

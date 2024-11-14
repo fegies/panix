@@ -1,9 +1,9 @@
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
 
-use super::value::Thunk;
+use super::value::{NixValue, Thunk};
 
-#[derive(Debug, Trace)]
+#[derive(Debug, Trace, Clone, Copy)]
 pub struct ContextReference(u32);
 
 #[derive(Debug, Trace)]
@@ -11,12 +11,8 @@ pub struct ExecutionContext {
     pub entries: GcPointer<Array<Thunk>>,
 }
 
-#[derive(Debug, Trace)]
+#[derive(Debug, Trace, Clone)]
 pub enum VmOp {
-    /// Duplicate the value at the specified position on the stack and pushes
-    /// it to the stack top.
-    Dup(u32),
-
     /// Allocates a list.
     /// pops count items from the stack and moves them into the list
     /// before pushing the list on the stack.
@@ -30,7 +26,7 @@ pub enum VmOp {
     LoadContext(ContextReference),
 
     /// pushes the provided immediate value on the stack.
-    PushImmediate(GcPointer<Thunk>),
+    PushImmediate(GcPointer<NixValue>),
 
     /// pops two values from the stack, adds them and pushes the result
     Add,
@@ -55,13 +51,19 @@ pub enum VmOp {
     /// if it evaluates falsy, the next instruction is executed.
     SkipConditional(u32),
 
-    //// pops n lists from the stack, concatenates them and pushes the result
+    /// pops n lists from the stack, concatenates them and pushes the result
     ConcatLists(u32),
 
-    //// pops a value from the stack, multiplies it with -1 and pushes the result
+    /// pops a value from the stack, multiplies it with -1 and pushes the result
     NumericNegate,
-    //// pops a value from the stack, performs binary not and pushes the result
+    /// pops a value from the stack, performs binary not and pushes the result
     BinaryNot,
-    //// pops two values from the stack, applies the top to the bottom and pushes the result
+    /// pops two values from the stack, applies the top to the bottom and pushes the result
     Call,
+
+    /// pops a string from the stack, converts it to a apth and pushes the result
+    CastToPath,
+
+    /// pops two values from the stack, compares an equality check and pushes the result
+    Equals,
 }

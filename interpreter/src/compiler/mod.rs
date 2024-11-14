@@ -1,9 +1,12 @@
 use gc::{GcError, GcHandle, GcPointer};
-use parser::ast::{Attrset, BasicValue, List, NixExpr, NixString};
+use parser::ast::{Attrset, BasicValue, KnownNixStringContent, Lambda, List, NixExpr, NixString};
 
 use crate::{
     util::BufferPool,
-    vm::value::{self, NixValue, Thunk},
+    vm::{
+        opcodes::{ExecutionContext, VmOp},
+        value::{self, NixValue, Thunk},
+    },
 };
 
 mod normalize;
@@ -21,141 +24,162 @@ pub fn translate_expression(
     mut expr: NixExpr<'_>,
 ) -> Result<Thunk, CompileError> {
     normalize::normalize_ast(&mut expr);
-    let key_buffer = Default::default();
-    let value_buffer = Default::default();
+    let mut key_buffer = Default::default();
+    let mut value_buffer = Default::default();
     let mut compiler = Compiler {
         gc_handle,
-        key_buffer: &key_buffer,
-        value_buffer: &value_buffer,
+        key_buffer: &mut key_buffer,
+        value_buffer: &mut value_buffer,
     };
-    let mut root_scope = CompilationScope {
-        compiler: &mut compiler,
-        parent: None,
-    };
-    root_scope.translate_expression(expr)
+
+    let mut opcode_buf = Vec::new();
+    let mut root_scope = LookupScope { parent: None };
+    compiler.translate_to_ops(&mut root_scope, &mut opcode_buf, expr)?;
+
+    Ok(Thunk::Deferred {
+        context: ExecutionContext {
+            entries: gc_handle.alloc_vec(&mut Vec::new())?,
+        },
+        code: gc_handle.alloc_vec(&mut opcode_buf)?,
+    })
 }
 
-struct Compiler<'gc, 'bufferpool> {
+struct LookupScope<'parent> {
+    parent: Option<&'parent LookupScope<'parent>>,
+}
+
+struct Compiler<'gc> {
     gc_handle: &'gc mut GcHandle,
-    key_buffer: &'bufferpool BufferPool<value::NixString>,
-    value_buffer: &'bufferpool BufferPool<Thunk>,
+    key_buffer: &'gc BufferPool<value::NixString>,
+    value_buffer: &'gc BufferPool<Thunk>,
 }
 
-struct CompilationScope<'compiler, 'bufferpool, 'gc> {
-    compiler: &'compiler mut Compiler<'bufferpool, 'gc>,
-    parent: Option<&'compiler mut CompilationScope<'compiler, 'bufferpool, 'gc>>,
-}
-
-impl<'gc> Compiler<'gc, '_> {
-    fn alloc_string(&mut self, str: NixString<'_>) -> Result<value::NixString, CompileError> {
-        let res = match str.content {
-            parser::ast::NixStringContent::Interpolated(_) => todo!(),
-            parser::ast::NixStringContent::Known(known_entry) => match known_entry {
-                parser::ast::KnownNixStringContent::Literal(literal) => {
-                    value::NixString::Simple(self.gc_handle.alloc_string(literal)?)
-                }
-                parser::ast::KnownNixStringContent::Composite(_) => todo!(),
-                parser::ast::KnownNixStringContent::Empty => {
-                    value::NixString::Simple(self.gc_handle.alloc_string("")?)
-                }
-            },
-        };
-        Ok(res)
-    }
-}
-
-impl<'compiler, 'gc, 'bufferpool> CompilationScope<'compiler, 'bufferpool, 'gc> {
-    fn translate_expression(&mut self, expr: NixExpr<'_>) -> Result<Thunk, CompileError> {
-        let res = match expr.content {
-            parser::ast::NixExprContent::BasicValue(v) => {
-                Thunk::Value(self.translate_basic_value(v)?)
+impl<'gc> Compiler<'gc> {
+    fn alloc_string(
+        &mut self,
+        str: KnownNixStringContent<'_>,
+    ) -> Result<value::NixString, CompileError> {
+        let res = match str {
+            KnownNixStringContent::Literal(l) => {
+                value::NixString::Simple(self.gc_handle.alloc_string(l)?)
             }
-            parser::ast::NixExprContent::CompoundValue(v) => {
-                Thunk::Value(self.translate_compound_value(v)?)
-            }
-            parser::ast::NixExprContent::Code(_) => todo!(),
+            KnownNixStringContent::Composite(_) => todo!(),
+            KnownNixStringContent::Empty => value::NixString::Empty,
         };
         Ok(res)
     }
 
-    fn translate_basic_value(&mut self, value: BasicValue<'_>) -> Result<NixValue, CompileError> {
-        let res = match value {
-            BasicValue::Bool(bool) => NixValue::Bool(bool),
+    fn translate_to_ops(
+        &mut self,
+        lookup_scope: &mut LookupScope,
+        target_buffer: &mut Vec<VmOp>,
+        expr: NixExpr,
+    ) -> Result<(), CompileError> {
+        match expr.content {
+            parser::ast::NixExprContent::BasicValue(b) => {
+                self.translate_basic_value(lookup_scope, target_buffer, b)
+            }
+            parser::ast::NixExprContent::CompoundValue(_) => todo!(),
+            parser::ast::NixExprContent::Code(c) => {
+                self.translate_code(lookup_scope, target_buffer, c)
+            }
+        }
+    }
+
+    fn translate_basic_value(
+        &mut self,
+        lookup_scope: &mut LookupScope<'_>,
+        target_buffer: &mut Vec<VmOp>,
+        value: BasicValue<'_>,
+    ) -> Result<(), CompileError> {
+        let value = match value {
+            BasicValue::Bool(b) => NixValue::Bool(b),
             BasicValue::Null => NixValue::Null,
             BasicValue::Int(i) => NixValue::Int(i),
             BasicValue::Float(f) => NixValue::Float(f),
-            BasicValue::String(str) => NixValue::String(self.compiler.alloc_string(str)?),
-            BasicValue::Path(p) => NixValue::Path(self.compiler.alloc_string(p)?),
-        };
-
-        Ok(res)
-    }
-
-    fn translate_compound_value(
-        &mut self,
-        value: parser::ast::CompoundValue<'_>,
-    ) -> Result<NixValue, CompileError> {
-        Ok(match value {
-            parser::ast::CompoundValue::Attrset(attrset) => {
-                NixValue::Attrset(self.translate_attrset(attrset)?)
+            BasicValue::Path(p) => {
+                self.translate_string_value(lookup_scope, target_buffer, p)?;
+                target_buffer.push(VmOp::CastToPath);
+                return Ok(());
             }
-            parser::ast::CompoundValue::List(list) => NixValue::List(self.translate_list(list)?),
-        })
+            BasicValue::String(s) => {
+                return self.translate_string_value(lookup_scope, target_buffer, s);
+            }
+        };
+        target_buffer.push(VmOp::PushImmediate(self.gc_handle.alloc(value)?));
+        Ok(())
     }
 
-    fn resolve_reference(&mut self, reference: &str) -> Result<Thunk, CompileError> {
+    fn translate_string_value(
+        &mut self,
+        lookup_scope: &mut LookupScope<'_>,
+        target_buffer: &mut Vec<VmOp>,
+        s: NixString<'_>,
+    ) -> Result<(), CompileError> {
+        match s.content {
+            parser::ast::NixStringContent::Known(known) => todo!(),
+            parser::ast::NixStringContent::Interpolated(_) => todo!(),
+        }
         todo!()
     }
 
-    fn translate_attrset(&mut self, attrset: Attrset<'_>) -> Result<value::Attrset, CompileError> {
-        let mut key_buffer = self.compiler.key_buffer.get();
-        let key_buffer = key_buffer.as_mut();
-        let mut value_buffer = self.compiler.value_buffer.get();
-        let value_buffer = value_buffer.as_mut();
-
-        // first fill the inherited keys
-        for key in attrset.inherit_keys {
-            let value = self.resolve_reference(key)?;
-            let key = value::NixString::Simple(self.compiler.gc_handle.alloc_string(key)?);
-            key_buffer.push(key);
-            value_buffer.push(value);
+    fn translate_code(
+        &mut self,
+        lookup_scope: &mut LookupScope<'_>,
+        target_buffer: &mut Vec<VmOp>,
+        code: parser::ast::Code<'_>,
+    ) -> Result<(), CompileError> {
+        match code {
+            parser::ast::Code::LetInExpr(_) => todo!(),
+            parser::ast::Code::ValueReference { ident } => todo!(),
+            parser::ast::Code::WithExpr(_) => todo!(),
+            parser::ast::Code::Lambda(_) => todo!(),
+            parser::ast::Code::Op(op) => self.translate_op(lookup_scope, target_buffer, op),
+            parser::ast::Code::IfExpr(_) => todo!(),
         }
-
-        // and now all of the normal keys
-        if attrset.is_recursive {
-            todo!()
-        } else {
-            // since this attrset is _not_ recursive, there is no need to
-            // create a new scope, no matter how the keys look like.
-            for (k, v) in attrset.attrs {
-                let key = match k {
-                    parser::ast::AttrsetKey::Single(s) => self.compiler.alloc_string(s)?,
-                    parser::ast::AttrsetKey::Multi(_) => {
-                        unreachable!(
-                            "Multipath attrsets should have been removed by a normalize pass"
-                        )
-                    }
-                };
-                key_buffer.push(key);
-                let value = self.translate_expression(v)?;
-                value_buffer.push(value);
-            }
-        }
-
-        let keys = self.compiler.gc_handle.alloc_vec(key_buffer)?;
-        let values = self.compiler.gc_handle.alloc_vec(value_buffer)?;
-
-        Ok(value::Attrset { keys, values })
     }
 
-    fn translate_list(&mut self, list: List<'_>) -> Result<value::List, CompileError> {
-        let mut value_buffer = self.compiler.value_buffer.get();
-        let value_buffer = value_buffer.as_mut();
-        for entry in list.entries {
-            value_buffer.push(self.translate_expression(entry)?);
+    fn translate_op(
+        &mut self,
+        lookup_scope: &mut LookupScope,
+        target_buffer: &mut Vec<VmOp>,
+        op: parser::ast::Op<'_>,
+    ) -> Result<(), CompileError> {
+        match op {
+            parser::ast::Op::AttrRef {
+                left,
+                name,
+                default,
+            } => todo!(),
+            parser::ast::Op::Call { function, arg } => todo!(),
+            parser::ast::Op::Binop {
+                left,
+                right,
+                opcode,
+            } => {
+                self.translate_to_ops(lookup_scope, target_buffer, *left)?;
+                self.translate_to_ops(lookup_scope, target_buffer, *right)?;
+                target_buffer.push(match opcode {
+                    parser::ast::BinopOpcode::Add => VmOp::Add,
+                    parser::ast::BinopOpcode::ListConcat => VmOp::ConcatLists(2),
+                    parser::ast::BinopOpcode::AttrsetMerge => todo!(),
+                    parser::ast::BinopOpcode::Equals => VmOp::Equals,
+                    parser::ast::BinopOpcode::NotEqual => todo!(),
+                    parser::ast::BinopOpcode::Subtract => todo!(),
+                    parser::ast::BinopOpcode::Multiply => todo!(),
+                    parser::ast::BinopOpcode::Divide => todo!(),
+                    parser::ast::BinopOpcode::LogicalOr => todo!(),
+                    parser::ast::BinopOpcode::LogicalAnd => todo!(),
+                    parser::ast::BinopOpcode::LessThanOrEqual => todo!(),
+                    parser::ast::BinopOpcode::LessThanStrict => todo!(),
+                    parser::ast::BinopOpcode::GreaterOrRequal => todo!(),
+                    parser::ast::BinopOpcode::GreaterThanStrict => todo!(),
+                    parser::ast::BinopOpcode::LogicalImplication => todo!(),
+                });
+            }
+            parser::ast::Op::HasAttr { left, path } => todo!(),
+            parser::ast::Op::Monop { opcode, body } => todo!(),
         }
-
-        let entries = self.compiler.gc_handle.alloc_vec(value_buffer)?;
-        Ok(value::List { entries })
+        Ok(())
     }
 }
