@@ -159,23 +159,7 @@ impl<'gc> Compiler<'gc> {
             } => {
                 self.translate_to_ops(lookup_scope, target_buffer, *left)?;
                 self.translate_to_ops(lookup_scope, target_buffer, *right)?;
-                target_buffer.push(match opcode {
-                    parser::ast::BinopOpcode::Add => VmOp::Add,
-                    parser::ast::BinopOpcode::ListConcat => VmOp::ConcatLists(2),
-                    parser::ast::BinopOpcode::AttrsetMerge => todo!(),
-                    parser::ast::BinopOpcode::Equals => VmOp::Equals,
-                    parser::ast::BinopOpcode::NotEqual => todo!(),
-                    parser::ast::BinopOpcode::Subtract => todo!(),
-                    parser::ast::BinopOpcode::Multiply => todo!(),
-                    parser::ast::BinopOpcode::Divide => todo!(),
-                    parser::ast::BinopOpcode::LogicalOr => todo!(),
-                    parser::ast::BinopOpcode::LogicalAnd => todo!(),
-                    parser::ast::BinopOpcode::LessThanOrEqual => todo!(),
-                    parser::ast::BinopOpcode::LessThanStrict => todo!(),
-                    parser::ast::BinopOpcode::GreaterOrRequal => todo!(),
-                    parser::ast::BinopOpcode::GreaterThanStrict => todo!(),
-                    parser::ast::BinopOpcode::LogicalImplication => todo!(),
-                });
+                target_buffer.push(VmOp::Binop(opcode));
             }
             parser::ast::Op::HasAttr { left, path } => todo!(),
             parser::ast::Op::Monop { opcode, body } => todo!(),

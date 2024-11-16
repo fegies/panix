@@ -45,8 +45,6 @@ impl<'gc> Evaluator<'gc> {
                         crate::vm::opcodes::VmOp::PushImmediate(imm) => {
                             self.execution_stack.push(imm)
                         }
-                        crate::vm::opcodes::VmOp::Add => todo!(),
-                        crate::vm::opcodes::VmOp::Sub => todo!(),
                         crate::vm::opcodes::VmOp::AllocateThunk {
                             context_length,
                             code,
@@ -58,9 +56,11 @@ impl<'gc> Evaluator<'gc> {
                         crate::vm::opcodes::VmOp::BinaryNot => todo!(),
                         crate::vm::opcodes::VmOp::Call => todo!(),
                         crate::vm::opcodes::VmOp::CastToPath => todo!(),
-                        crate::vm::opcodes::VmOp::Equals => {
+                        crate::vm::opcodes::VmOp::Binop(opcode) => {
                             let right = self.pop()?;
                             let left = self.pop()?;
+                        }
+                        crate::vm::opcodes::VmOp::Equals => {
                             let result = match compare_values(
                                 self.gc_handle.load(&left),
                                 self.gc_handle.load(&right),
@@ -86,6 +86,10 @@ impl<'gc> Evaluator<'gc> {
             .pop()
             .ok_or(EvaluateError::ExecutionStackExhaustedUnexpectedly)
     }
+}
+
+fn execute_binop(l: &NixValue, r: &NixValue, opcode: Opcode) -> Result<NixValue, EvaluateError> {
+    match opcode {}
 }
 
 fn compare_values(l: &NixValue, r: &NixValue) -> Option<Ordering> {

@@ -28,11 +28,8 @@ pub enum VmOp {
     /// pushes the provided immediate value on the stack.
     PushImmediate(GcPointer<NixValue>),
 
-    /// pops two values from the stack, adds them and pushes the result
-    Add,
-
-    /// pops two values from the stack, subs the top from the bottom and pushes the result
-    Sub,
+    /// pops two values from the stack, executes the specified operation and pushes the result
+    Binop(BinopOpcode),
 
     /// pops n values from the stack and assembles them into an execution context.
     /// then combines it with the provided code instructions to generate a thunk.
@@ -64,6 +61,4 @@ pub enum VmOp {
     /// pops a string from the stack, converts it to a apth and pushes the result
     CastToPath,
 
-    /// pops two values from the stack, compares an equality check and pushes the result
-    Equals,
 }
