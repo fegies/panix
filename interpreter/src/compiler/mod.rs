@@ -117,10 +117,14 @@ impl<'gc> Compiler<'gc> {
         s: NixString<'_>,
     ) -> Result<(), CompileError> {
         match s.content {
-            parser::ast::NixStringContent::Known(known) => todo!(),
+            parser::ast::NixStringContent::Known(known) => {
+                let literal = NixValue::String(self.alloc_string(known)?);
+                let op = VmOp::PushImmediate(self.gc_handle.alloc(literal)?);
+                target_buffer.push(op);
+            }
             parser::ast::NixStringContent::Interpolated(_) => todo!(),
         }
-        todo!()
+        Ok(())
     }
 
     fn translate_code(

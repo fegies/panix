@@ -1,6 +1,6 @@
 use gc::{
     specialized_types::{array::Array, string::SimpleGcString},
-    GcPointer,
+    GcHandle, GcPointer,
 };
 use gc_derive::Trace;
 
@@ -22,6 +22,14 @@ pub enum Thunk {
 pub enum NixString {
     Empty,
     Simple(GcPointer<SimpleGcString>),
+}
+impl NixString {
+    pub fn load<'a>(&'a self, gc_handle: &'a GcHandle) -> &'a str {
+        match self {
+            NixString::Empty => "",
+            NixString::Simple(ptr) => gc_handle.load(ptr).as_ref(),
+        }
+    }
 }
 
 impl PartialEq for NixString {

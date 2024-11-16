@@ -1,5 +1,6 @@
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
+use parser::ast::BinopOpcode;
 
 use super::value::{NixValue, Thunk};
 
@@ -60,5 +61,4 @@ pub enum VmOp {
 
     /// pops a string from the stack, converts it to a apth and pushes the result
     CastToPath,
-
 }

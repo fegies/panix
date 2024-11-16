@@ -182,6 +182,8 @@ dependencies = [
 name = "parser"
 version = "0.1.0"
 dependencies = [
+ "gc",
+ "gc_derive",
  "lexer",
  "thiserror",
 ]

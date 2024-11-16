@@ -27,6 +27,8 @@ pub enum EvaluateError {
     ExecutionStackExhaustedUnexpectedly,
     #[error("Error allocating memory")]
     GcError(#[from] GcError),
+    #[error("Type error during evaluation")]
+    TypeError,
 }
 
 #[derive(Debug, thiserror::Error)]

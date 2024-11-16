@@ -59,17 +59,13 @@ impl<'gc> Evaluator<'gc> {
                         crate::vm::opcodes::VmOp::Binop(opcode) => {
                             let right = self.pop()?;
                             let left = self.pop()?;
-                        }
-                        crate::vm::opcodes::VmOp::Equals => {
-                            let result = match compare_values(
+                            let result = execute_binop(
+                                &self.gc_handle,
                                 self.gc_handle.load(&left),
                                 self.gc_handle.load(&right),
-                            ) {
-                                Some(Ordering::Equal) => true,
-                                _ => false,
-                            };
-                            self.execution_stack
-                                .push(self.gc_handle.alloc(NixValue::Bool(result))?);
+                                opcode,
+                            )?;
+                            self.execution_stack.push(self.gc_handle.alloc(result)?);
                         }
                     }
                 }
@@ -88,13 +84,79 @@ impl<'gc> Evaluator<'gc> {
     }
 }
 
-fn execute_binop(l: &NixValue, r: &NixValue, opcode: Opcode) -> Result<NixValue, EvaluateError> {
-    match opcode {}
+fn execute_binop(
+    gc_handle: &GcHandle,
+    l: &NixValue,
+    r: &NixValue,
+    opcode: parser::ast::BinopOpcode,
+) -> Result<NixValue, EvaluateError> {
+    match opcode {
+        parser::ast::BinopOpcode::Add => match (l, r) {
+            (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(l + r)),
+            (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(*l as f64 + r)),
+            (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(l + *r as f64)),
+            (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(l + r)),
+            _ => Err(EvaluateError::TypeError),
+        },
+        parser::ast::BinopOpcode::ListConcat => todo!(),
+        parser::ast::BinopOpcode::AttrsetMerge => todo!(),
+        parser::ast::BinopOpcode::Equals => {
+            let res = match compare_values(gc_handle, l, r) {
+                Some(Ordering::Equal) => true,
+                _ => false,
+            };
+            Ok(NixValue::Bool(res))
+        }
+        parser::ast::BinopOpcode::NotEqual => todo!(),
+        parser::ast::BinopOpcode::Subtract => match (l, r) {
+            (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(l - r)),
+            (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(*l as f64 - r)),
+            (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(l - *r as f64)),
+            (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(l - r)),
+            _ => Err(EvaluateError::TypeError),
+        },
+        parser::ast::BinopOpcode::Multiply => match (l, r) {
+            (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(l * r)),
+            (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(*l as f64 * r)),
+            (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(l * *r as f64)),
+            (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(l * r)),
+            _ => Err(EvaluateError::TypeError),
+        },
+        parser::ast::BinopOpcode::Divide => match (l, r) {
+            (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(l / r)),
+            (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(*l as f64 / r)),
+            (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(l / *r as f64)),
+            (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(l / r)),
+            _ => Err(EvaluateError::TypeError),
+        },
+        parser::ast::BinopOpcode::LogicalOr => bool_op(l, r, |l, r| l || r),
+        parser::ast::BinopOpcode::LogicalAnd => bool_op(l, r, |l, r| l && r),
+        parser::ast::BinopOpcode::LessThanOrEqual => todo!(),
+        parser::ast::BinopOpcode::LessThanStrict => todo!(),
+        parser::ast::BinopOpcode::GreaterOrRequal => todo!(),
+        parser::ast::BinopOpcode::GreaterThanStrict => todo!(),
+        parser::ast::BinopOpcode::LogicalImplication => bool_op(l, r, |l, r| !l || r),
+    }
 }
 
-fn compare_values(l: &NixValue, r: &NixValue) -> Option<Ordering> {
+fn bool_op(
+    l: &NixValue,
+    r: &NixValue,
+    op: impl FnOnce(bool, bool) -> bool,
+) -> Result<NixValue, EvaluateError> {
     match (l, r) {
-        (NixValue::String(l), NixValue::String(r)) => todo!(),
+        (NixValue::Bool(l), NixValue::Bool(r)) => Ok(NixValue::Bool(op(*l, *r))),
+        _ => Err(EvaluateError::TypeError),
+    }
+}
+
+fn compare_values(gc_handle: &GcHandle, l: &NixValue, r: &NixValue) -> Option<Ordering> {
+    match (l, r) {
+        (NixValue::String(l), NixValue::String(r)) => {
+            let l = l.load(gc_handle);
+            let r = r.load(gc_handle);
+            Some(l.cmp(r))
+        }
         (NixValue::Bool(l), NixValue::Bool(r)) => Some(l.cmp(&r)),
         (NixValue::Null, NixValue::Null) => Some(Ordering::Equal),
         (NixValue::Int(l), NixValue::Int(r)) => Some(l.cmp(&r)),
