@@ -29,9 +29,6 @@ pub enum VmOp {
     /// pushes the provided immediate value on the stack.
     PushImmediate(GcPointer<NixValue>),
 
-    /// pops two values from the stack, executes the specified operation and pushes the result
-    Binop(BinopOpcode),
-
     /// pops n values from the stack and assembles them into an execution context.
     /// then combines it with the provided code instructions to generate a thunk.
     /// the allocated thunk is pushed on the stack.
@@ -45,12 +42,18 @@ pub enum VmOp {
     Skip(u32),
 
     /// pops the top value from the stack and evaluates it as a boolean.
-    /// if it evaluates truthy, the provided number of instructions is skipped,
-    /// if it evaluates falsy, the next instruction is executed.
-    SkipConditional(u32),
+    /// if it evaluates truthy, the next instruction is executed as normal
+    /// if it evaluates falsy, the supplied number of instructions are skipped
+    SkipUnless(u32),
 
     /// pops n lists from the stack, concatenates them and pushes the result
     ConcatLists(u32),
+
+    /// pops 2 values from the stack, concatenates them and pushes the result
+    Add,
+
+    /// pops 2 values from the stack, multiplies them and pushes the result
+    Mul,
 
     /// pops a value from the stack, multiplies it with -1 and pushes the result
     NumericNegate,

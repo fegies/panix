@@ -3,7 +3,10 @@ use std::cmp::Ordering;
 use gc::{GcHandle, GcPointer};
 
 use crate::{
-    vm::value::{NixValue, Thunk},
+    vm::{
+        opcodes::VmOp,
+        value::{NixValue, Thunk},
+    },
     EvaluateError,
 };
 
@@ -11,7 +14,7 @@ use super::InterpreterError;
 
 pub struct Evaluator<'gc> {
     gc_handle: &'gc mut GcHandle,
-    execution_stack: Vec<GcPointer<NixValue>>,
+    execution_stack: Vec<Thunk>,
 }
 
 impl<'gc> Evaluator<'gc> {
@@ -43,7 +46,7 @@ impl<'gc> Evaluator<'gc> {
                         crate::vm::opcodes::VmOp::BuildAttrset => todo!(),
                         crate::vm::opcodes::VmOp::LoadContext(_) => todo!(),
                         crate::vm::opcodes::VmOp::PushImmediate(imm) => {
-                            self.execution_stack.push(imm)
+                            self.execution_stack.push(Thunk::Value(imm))
                         }
                         crate::vm::opcodes::VmOp::AllocateThunk {
                             context_length,
@@ -56,7 +59,7 @@ impl<'gc> Evaluator<'gc> {
                         crate::vm::opcodes::VmOp::BinaryNot => todo!(),
                         crate::vm::opcodes::VmOp::Call => todo!(),
                         crate::vm::opcodes::VmOp::CastToPath => todo!(),
-                        crate::vm::opcodes::VmOp::Binop(opcode) => {
+                        crate::vm::opcodes::VmOp::Mul => {
                             let right = self.pop()?;
                             let left = self.pop()?;
                             let result = execute_binop(
@@ -77,7 +80,7 @@ impl<'gc> Evaluator<'gc> {
         }
     }
 
-    fn pop(&mut self) -> Result<GcPointer<NixValue>, EvaluateError> {
+    fn pop(&mut self) -> Result<Thunk, EvaluateError> {
         self.execution_stack
             .pop()
             .ok_or(EvaluateError::ExecutionStackExhaustedUnexpectedly)
