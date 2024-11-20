@@ -47,6 +47,9 @@ pub enum VmOp {
     /// pops n lists from the stack, concatenates them and pushes the result
     ConcatLists(u32),
 
+    /// pops n strings from the stack, concatenates them and pushes the result
+    ConcatStrings(u32),
+
     /// pops 2 values from the stack, concatenates them and pushes the result
     Add,
 
@@ -73,4 +76,23 @@ pub enum VmOp {
     CompareEqual,
     /// pops two values from the stack, performs a comparison and pushes the result
     CompareNotEqual,
+
+    /// pops two values from the stack, assets they are attrsets and merges the attributes
+    /// from the second into the first, creating a new attrset.
+    /// The resulting attrset is then pushed to the stack
+    MergeAttrsets,
+
+    /// first pops an attrset, then a name value from the stack.
+    /// Then the attribute with that name is retrieved from the attrset
+    /// and pushed to the stack.
+    ///
+    /// the push_error field controls the error reporting behaviour.
+    /// if it is set to _false_ and the requested attribute is not present, a runtime error is
+    /// raised.
+    /// if it is set to _true_ and the attribute was present, an additional boolean value of
+    /// _false_ is pushed to the stack after the attribute value was pushed.
+    /// if it is set to _true_ and the attribute was not present, a value of _true_ is pushed to
+    /// the stack. Since no attribute value could be retrieved in this case, the result boolen will
+    /// be the only pushed value.
+    GetAttribute { push_error: bool },
 }

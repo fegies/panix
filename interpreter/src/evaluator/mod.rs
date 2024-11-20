@@ -49,8 +49,18 @@ impl<'gc> Evaluator<'gc> {
                                 context_length,
                                 code,
                             } => todo!(),
-                            VmOp::Skip(_) => todo!(),
-                            VmOp::SkipUnless(_) => todo!(),
+                            VmOp::Skip(to_skip) => {
+                                (&mut code).take(to_skip as usize).for_each(|_| {});
+                            }
+                            VmOp::SkipUnless(to_skip) => {
+                                if let NixValue::Bool(execute_next_insn) = self.pop_and_force()? {
+                                    if !execute_next_insn {
+                                        (&mut code).take(to_skip as usize).for_each(|_| {});
+                                    }
+                                } else {
+                                    return Err(EvaluateError::TypeError);
+                                }
+                            }
                             VmOp::ConcatLists(_) => todo!(),
                             VmOp::Add => {
                                 let right = self.pop_and_force()?;
@@ -133,6 +143,9 @@ impl<'gc> Evaluator<'gc> {
                                         |l, r| l - r,
                                     )?));
                             }
+                            VmOp::MergeAttrsets => todo!(),
+                            VmOp::GetAttribute { push_error: _ } => todo!(),
+                            VmOp::ConcatStrings(_) => todo!(),
                         }
                     }
 

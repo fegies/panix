@@ -1,5 +1,5 @@
 use gc::{GcError, GcHandle, GcPointer};
-use parser::ast::{Attrset, BasicValue, KnownNixStringContent, Lambda, List, NixExpr, NixString};
+use parser::ast::{BasicValue, IfExpr, KnownNixStringContent, NixExpr, NixString};
 
 use crate::{
     util::BufferPool,
@@ -79,11 +79,15 @@ impl<'gc> Compiler<'gc> {
         str: KnownNixStringContent<'_>,
     ) -> Result<GcPointer<NixValue>, CompileError> {
         let res = match str {
+            KnownNixStringContent::Empty | KnownNixStringContent::Literal("") => {
+                return Ok(self.cached_values.empty_string.clone())
+            }
             KnownNixStringContent::Literal(l) => {
                 value::NixString::from(self.gc_handle.alloc_string(l)?)
             }
-            KnownNixStringContent::Composite(_) => todo!(),
-            KnownNixStringContent::Empty => return Ok(self.cached_values.empty_string.clone()),
+            KnownNixStringContent::Composite(parts) => {
+                value::NixString::from(self.gc_handle.alloc_string_from_parts(&parts)?)
+            }
         };
         Ok(self.gc_handle.alloc(NixValue::String(res))?)
     }
@@ -98,7 +102,9 @@ impl<'gc> Compiler<'gc> {
             parser::ast::NixExprContent::BasicValue(b) => {
                 self.translate_basic_value(lookup_scope, target_buffer, b)
             }
-            parser::ast::NixExprContent::CompoundValue(_) => todo!(),
+            parser::ast::NixExprContent::CompoundValue(c) => {
+                self.translate_compound_value(lookup_scope, target_buffer, c)
+            }
             parser::ast::NixExprContent::Code(c) => {
                 self.translate_code(lookup_scope, target_buffer, c)
             }
@@ -141,7 +147,22 @@ impl<'gc> Compiler<'gc> {
                 let op = VmOp::PushImmediate(literal);
                 target_buffer.push(op);
             }
-            parser::ast::NixStringContent::Interpolated(_) => todo!(),
+            parser::ast::NixStringContent::Interpolated(mut entries) => {
+                entries.reverse();
+                let num_entries = entries.len() as u32;
+                for entry in entries {
+                    match entry {
+                        parser::ast::InterpolationEntry::LiteralPiece(known) => {
+                            let value = self.alloc_string(KnownNixStringContent::Literal(known))?;
+                            target_buffer.push(VmOp::PushImmediate(value));
+                        }
+                        parser::ast::InterpolationEntry::Expression(expr) => {
+                            self.translate_to_ops(lookup_scope, target_buffer, expr)?;
+                        }
+                    }
+                }
+                target_buffer.push(VmOp::ConcatStrings(num_entries));
+            }
         }
         Ok(())
     }
@@ -158,7 +179,34 @@ impl<'gc> Compiler<'gc> {
             parser::ast::Code::WithExpr(_) => todo!(),
             parser::ast::Code::Lambda(_) => todo!(),
             parser::ast::Code::Op(op) => self.translate_op(lookup_scope, target_buffer, op),
-            parser::ast::Code::IfExpr(_) => todo!(),
+            parser::ast::Code::IfExpr(IfExpr {
+                condition,
+                truthy_case,
+                falsy_case,
+            }) => {
+                self.translate_to_ops(lookup_scope, target_buffer, *condition)?;
+
+                let condition_idx = target_buffer.len();
+                target_buffer.push(VmOp::SkipUnless(0));
+
+                self.translate_to_ops(lookup_scope, target_buffer, *truthy_case)?;
+
+                let skip_idx = target_buffer.len();
+                target_buffer.push(VmOp::Skip(0));
+
+                // fix up the jump over the true case branch
+                let true_branch_ops = target_buffer.len() - condition_idx - 1;
+                target_buffer[condition_idx] = VmOp::SkipUnless(true_branch_ops as u32);
+
+                // and now generate the false branch
+                self.translate_to_ops(lookup_scope, target_buffer, *falsy_case)?;
+
+                // finally, fix up the unconditional jump at the end of the true case
+                let false_branch_ops = target_buffer.len() - skip_idx - 1;
+                target_buffer[skip_idx] = VmOp::Skip(false_branch_ops as u32);
+
+                Ok(())
+            }
         }
     }
 
@@ -173,8 +221,33 @@ impl<'gc> Compiler<'gc> {
                 left,
                 name,
                 default,
-            } => todo!(),
-            parser::ast::Op::Call { function, arg } => todo!(),
+            } => {
+                // first push the name
+                self.translate_string_value(lookup_scope, target_buffer, name)?;
+
+                // then the attribute name
+                self.translate_to_ops(lookup_scope, target_buffer, *left)?;
+
+                if let Some(default) = default {
+                    // case with default, we need to emit an extra conditional jump
+                    // to ensure that the default value is evaluated only if the attribute was not
+                    // present
+                    target_buffer.push(VmOp::GetAttribute { push_error: true });
+                    let skip_idx = target_buffer.len();
+                    target_buffer.push(VmOp::SkipUnless(0));
+                    self.translate_to_ops(lookup_scope, target_buffer, *default)?;
+                    let default_value_ops = target_buffer.len() - skip_idx - 1;
+                    target_buffer[skip_idx] = VmOp::SkipUnless(default_value_ops as u32);
+                } else {
+                    // straightforward, throwing case
+                    target_buffer.push(VmOp::GetAttribute { push_error: false });
+                }
+            }
+            parser::ast::Op::Call { function, arg } => {
+                self.translate_to_ops(lookup_scope, target_buffer, *function)?;
+                self.translate_to_ops(lookup_scope, target_buffer, *arg)?;
+                target_buffer.push(VmOp::Call);
+            }
             parser::ast::Op::Binop {
                 left,
                 right,
@@ -183,8 +256,8 @@ impl<'gc> Compiler<'gc> {
                 self.translate_to_ops(lookup_scope, target_buffer, *left)?;
                 let vmop = match opcode {
                     parser::ast::BinopOpcode::Add => VmOp::Add,
-                    parser::ast::BinopOpcode::ListConcat => todo!(),
-                    parser::ast::BinopOpcode::AttrsetMerge => todo!(),
+                    parser::ast::BinopOpcode::ListConcat => VmOp::ConcatLists(2),
+                    parser::ast::BinopOpcode::AttrsetMerge => VmOp::MergeAttrsets,
                     parser::ast::BinopOpcode::Equals => VmOp::CompareEqual,
                     parser::ast::BinopOpcode::NotEqual => VmOp::CompareNotEqual,
                     parser::ast::BinopOpcode::Subtract => VmOp::Sub,
@@ -250,7 +323,7 @@ impl<'gc> Compiler<'gc> {
                     }
                     parser::ast::BinopOpcode::LessThanOrEqual => todo!(),
                     parser::ast::BinopOpcode::LessThanStrict => todo!(),
-                    parser::ast::BinopOpcode::GreaterOrRequal => todo!(),
+                    parser::ast::BinopOpcode::GreaterOrEqual => todo!(),
                     parser::ast::BinopOpcode::GreaterThanStrict => todo!(),
                 };
                 self.translate_to_ops(lookup_scope, target_buffer, *right)?;
@@ -267,5 +340,14 @@ impl<'gc> Compiler<'gc> {
             }
         }
         Ok(())
+    }
+
+    fn translate_compound_value(
+        &mut self,
+        lookup_scope: &mut LookupScope<'_>,
+        target_buffer: &[VmOp],
+        value: parser::ast::CompoundValue<'_>,
+    ) -> Result<(), CompileError> {
+        todo!()
     }
 }

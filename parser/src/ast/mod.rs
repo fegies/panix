@@ -117,7 +117,7 @@ pub enum BinopOpcode {
     LogicalAnd,
     LessThanOrEqual,
     LessThanStrict,
-    GreaterOrRequal,
+    GreaterOrEqual,
     GreaterThanStrict,
     LogicalImplication,
 }

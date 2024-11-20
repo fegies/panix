@@ -100,7 +100,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     Token::And => Some(BinopOpcode::LogicalAnd),
                     Token::Le => Some(BinopOpcode::LessThanOrEqual),
                     Token::Lt => Some(BinopOpcode::LessThanStrict),
-                    Token::Ge => Some(BinopOpcode::GreaterOrRequal),
+                    Token::Ge => Some(BinopOpcode::GreaterOrEqual),
                     Token::Gt => Some(BinopOpcode::GreaterThanStrict),
                     Token::Implication => Some(BinopOpcode::LogicalImplication),
                     _ => None,

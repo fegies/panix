@@ -40,3 +40,9 @@ fn test_plain_value() {
     eval_expr("42", " 42 ");
     eval_expr("''foo''", "\"foo\"");
 }
+
+#[test]
+fn test_if() {
+    eval_expr("if 1 == 2 then 3 else 2", "2");
+    eval_expr("if 1 == 1 then 1 + 1 else 1", "2");
+}

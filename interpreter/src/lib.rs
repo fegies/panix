@@ -52,6 +52,5 @@ pub fn compile_file(gc_handle: &mut GcHandle, file: &Path) -> Result<Thunk, Inte
 pub fn compile_source(gc_handle: &mut GcHandle, content: &[u8]) -> Result<Thunk, InterpreterError> {
     let expr = parser::parse_nix(content)?;
     let res = compiler::translate_expression(gc_handle, expr)?;
-    println!("{res:#?}");
     Ok(res)
 }

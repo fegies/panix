@@ -2,6 +2,7 @@ use parser::ast::NixExpr;
 
 use super::*;
 
+#[test]
 fn test_ops() {
     // let compiler = Compiler::new();
 
