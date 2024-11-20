@@ -11,24 +11,25 @@ pub enum Thunk {
     /// A special kind of null value that is not representable in the nix language
     /// and is mainly useful to detect infinite recursions.
     Blackhole,
-    Value(GcPointer<NixValue>),
+    Value(NixValue),
     Deferred {
         context: ExecutionContext,
         code: GcPointer<Array<VmOp>>,
     },
 }
 
-#[derive(Debug, Trace)]
-pub enum NixString {
-    Empty,
-    Simple(GcPointer<SimpleGcString>),
+#[derive(Debug, Trace, Clone)]
+pub struct NixString {
+    inner: GcPointer<SimpleGcString>,
 }
 impl NixString {
     pub fn load<'a>(&'a self, gc_handle: &'a GcHandle) -> &'a str {
-        match self {
-            NixString::Empty => "",
-            NixString::Simple(ptr) => gc_handle.load(ptr).as_ref(),
-        }
+        gc_handle.load(&self.inner).as_ref()
+    }
+}
+impl From<GcPointer<SimpleGcString>> for NixString {
+    fn from(value: GcPointer<SimpleGcString>) -> Self {
+        Self { inner: value }
     }
 }
 
@@ -40,7 +41,7 @@ impl PartialEq for NixString {
     }
 }
 
-#[derive(Debug, Trace)]
+#[derive(Debug, Trace, Clone)]
 pub enum NixValue {
     String(NixString),
     Bool(bool),
@@ -53,7 +54,7 @@ pub enum NixValue {
     List(List),
 }
 
-#[derive(Debug, Trace)]
+#[derive(Debug, Trace, Clone)]
 pub struct Attrset {
     pub keys: GcPointer<Array<NixString>>,
     pub values: GcPointer<Array<Thunk>>,
@@ -66,7 +67,7 @@ impl PartialEq for Attrset {
     }
 }
 
-#[derive(Debug, Trace)]
+#[derive(Debug, Trace, Clone)]
 pub struct Function {
     pub args: FunctionArgs,
     pub body: GcPointer<Thunk>,
@@ -77,7 +78,7 @@ pub struct AttrsetFunctionArg {
     pub name: GcPointer<NixString>,
     pub default: Option<Thunk>,
 }
-#[derive(Debug, Trace)]
+#[derive(Debug, Trace, Clone)]
 pub enum FunctionArgs {
     Single,
     AttrsetArgs {
@@ -86,7 +87,7 @@ pub enum FunctionArgs {
     },
 }
 
-#[derive(Debug, Trace)]
+#[derive(Debug, Trace, Clone)]
 pub struct List {
     pub entries: GcPointer<Array<Thunk>>,
 }

@@ -1,13 +1,11 @@
+use super::value::{NixValue, Thunk};
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
-use parser::ast::BinopOpcode;
-
-use super::value::{NixValue, Thunk};
 
 #[derive(Debug, Trace, Clone, Copy)]
 pub struct ContextReference(u32);
 
-#[derive(Debug, Trace)]
+#[derive(Debug, Trace, Clone)]
 pub struct ExecutionContext {
     pub entries: GcPointer<Array<Thunk>>,
 }
@@ -64,4 +62,7 @@ pub enum VmOp {
 
     /// pops a string from the stack, converts it to a apth and pushes the result
     CastToPath,
+
+    /// pops two values from the stack, performs a comparison and pushes the result
+    CompareEqual,
 }

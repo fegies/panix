@@ -63,10 +63,11 @@ struct CachedValues {
 }
 impl CachedValues {
     fn new(gc_handle: &mut GcHandle) -> Result<Self, GcError> {
+        let empty_string = NixValue::String(value::NixString::from(gc_handle.alloc_string("")?));
         Ok(Self {
             true_boolean: gc_handle.alloc(NixValue::Bool(true))?,
             false_boolean: gc_handle.alloc(NixValue::Bool(false))?,
-            empty_string: gc_handle.alloc(NixValue::String(value::NixString::Empty))?,
+            empty_string: gc_handle.alloc(empty_string)?,
         })
     }
 }
@@ -75,15 +76,15 @@ impl<'gc> Compiler<'gc> {
     fn alloc_string(
         &mut self,
         str: KnownNixStringContent<'_>,
-    ) -> Result<value::NixString, CompileError> {
+    ) -> Result<GcPointer<NixValue>, CompileError> {
         let res = match str {
             KnownNixStringContent::Literal(l) => {
-                value::NixString::Simple(self.gc_handle.alloc_string(l)?)
+                value::NixString::from(self.gc_handle.alloc_string(l)?)
             }
             KnownNixStringContent::Composite(_) => todo!(),
-            KnownNixStringContent::Empty => value::NixString::Empty,
+            KnownNixStringContent::Empty => return Ok(self.cached_values.empty_string.clone()),
         };
-        Ok(res)
+        Ok(self.gc_handle.alloc(NixValue::String(res))?)
     }
 
     fn translate_to_ops(
@@ -135,8 +136,8 @@ impl<'gc> Compiler<'gc> {
     ) -> Result<(), CompileError> {
         match s.content {
             parser::ast::NixStringContent::Known(known) => {
-                let literal = NixValue::String(self.alloc_string(known)?);
-                let op = VmOp::PushImmediate(self.gc_handle.alloc(literal)?);
+                let literal = self.alloc_string(known)?;
+                let op = VmOp::PushImmediate(literal);
                 target_buffer.push(op);
             }
             parser::ast::NixStringContent::Interpolated(_) => todo!(),
@@ -183,7 +184,7 @@ impl<'gc> Compiler<'gc> {
                     parser::ast::BinopOpcode::Add => VmOp::Add,
                     parser::ast::BinopOpcode::ListConcat => todo!(),
                     parser::ast::BinopOpcode::AttrsetMerge => todo!(),
-                    parser::ast::BinopOpcode::Equals => todo!(),
+                    parser::ast::BinopOpcode::Equals => VmOp::CompareEqual,
                     parser::ast::BinopOpcode::NotEqual => todo!(),
                     parser::ast::BinopOpcode::Subtract => todo!(),
                     parser::ast::BinopOpcode::Multiply => VmOp::Mul,

@@ -7,7 +7,5 @@ edition = "2021"
 
 [dependencies]
 lexer.workspace = true
-gc.workspace = true 
-gc_derive.workspace = true
 
 thiserror.workspace = true

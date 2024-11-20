@@ -24,58 +24,77 @@ impl<'gc> Evaluator<'gc> {
             execution_stack: Vec::new(),
         }
     }
-    pub fn eval_expression(
-        &mut self,
-        mut thunk: Thunk,
-    ) -> Result<GcPointer<NixValue>, InterpreterError> {
+    pub fn eval_expression(&mut self, mut thunk: Thunk) -> Result<NixValue, InterpreterError> {
         Ok(self.force_thunk(&mut thunk)?)
     }
 
-    fn force_thunk(&mut self, thunk: &mut Thunk) -> Result<GcPointer<NixValue>, EvaluateError> {
-        match thunk {
-            Thunk::Blackhole => Err(EvaluateError::BlackholeEvaluated),
-            Thunk::Value(v) => Ok(v.clone()),
-            Thunk::Deferred { context, code } => {
-                let mut code_vec: Vec<_> = Vec::new();
-                code_vec.extend_from_slice(self.gc_handle.load(&code).as_ref());
-                let mut code = code_vec.into_iter();
+    fn force_thunk(&mut self, thunk: &mut Thunk) -> Result<NixValue, EvaluateError> {
+        loop {
+            match thunk {
+                Thunk::Blackhole => return Err(EvaluateError::BlackholeEvaluated),
+                Thunk::Value(v) => return Ok(v.clone()),
+                Thunk::Deferred { context, code } => {
+                    let mut code_vec: Vec<_> = Vec::new();
+                    code_vec.extend_from_slice(self.gc_handle.load(&code).as_ref());
+                    let mut code = code_vec.into_iter();
+                    let context = context.clone();
+                    *thunk = Thunk::Blackhole;
 
-                while let Some(opcode) = code.next() {
-                    match opcode {
-                        crate::vm::opcodes::VmOp::AllocList(_) => todo!(),
-                        crate::vm::opcodes::VmOp::BuildAttrset => todo!(),
-                        crate::vm::opcodes::VmOp::LoadContext(_) => todo!(),
-                        crate::vm::opcodes::VmOp::PushImmediate(imm) => {
-                            self.execution_stack.push(Thunk::Value(imm))
-                        }
-                        crate::vm::opcodes::VmOp::AllocateThunk {
-                            context_length,
-                            code,
-                        } => todo!(),
-                        crate::vm::opcodes::VmOp::Skip(_) => todo!(),
-                        crate::vm::opcodes::VmOp::SkipConditional(_) => todo!(),
-                        crate::vm::opcodes::VmOp::ConcatLists(_) => todo!(),
-                        crate::vm::opcodes::VmOp::NumericNegate => todo!(),
-                        crate::vm::opcodes::VmOp::BinaryNot => todo!(),
-                        crate::vm::opcodes::VmOp::Call => todo!(),
-                        crate::vm::opcodes::VmOp::CastToPath => todo!(),
-                        crate::vm::opcodes::VmOp::Mul => {
-                            let right = self.pop()?;
-                            let left = self.pop()?;
-                            let result = execute_binop(
-                                &self.gc_handle,
-                                self.gc_handle.load(&left),
-                                self.gc_handle.load(&right),
-                                opcode,
-                            )?;
-                            self.execution_stack.push(self.gc_handle.alloc(result)?);
+                    while let Some(opcode) = code.next() {
+                        match opcode {
+                            VmOp::AllocList(_) => todo!(),
+                            VmOp::BuildAttrset => todo!(),
+                            VmOp::LoadContext(_) => todo!(),
+                            VmOp::AllocateThunk {
+                                context_length,
+                                code,
+                            } => todo!(),
+                            VmOp::Skip(_) => todo!(),
+                            VmOp::SkipUnless(_) => todo!(),
+                            VmOp::ConcatLists(_) => todo!(),
+                            VmOp::Add => {
+                                let right = self.pop_and_force()?;
+                                let left = self.pop_and_force()?;
+                                self.execution_stack
+                                    .push(Thunk::Value(execute_arithmetic_op(
+                                        left,
+                                        right,
+                                        |l, r| l + r,
+                                        |l, r| l + r,
+                                    )?));
+                            }
+                            VmOp::Mul => {
+                                let right = self.pop_and_force()?;
+                                let left = self.pop_and_force()?;
+                                self.execution_stack
+                                    .push(Thunk::Value(execute_arithmetic_op(
+                                        left,
+                                        right,
+                                        |l, r| l * r,
+                                        |l, r| l * r,
+                                    )?));
+                            }
+                            VmOp::NumericNegate => todo!(),
+                            VmOp::BinaryNot => todo!(),
+                            VmOp::Call => todo!(),
+                            VmOp::CastToPath => todo!(),
+                            VmOp::PushImmediate(imm) => {
+                                let imm = self.gc_handle.load(&imm);
+                                self.execution_stack.push(Thunk::Value(imm.clone()));
+                            }
+                            VmOp::CompareEqual => {
+                                let right = self.pop_and_force()?;
+                                let left = self.pop_and_force()?;
+                                let result = Some(Ordering::Equal)
+                                    == compare_values(self.gc_handle, &left, &right);
+                                self.execution_stack
+                                    .push(Thunk::Value(NixValue::Bool(result)));
+                            }
                         }
                     }
-                }
 
-                let value = self.pop()?;
-                *thunk = Thunk::Value(value.clone());
-                Ok(value)
+                    *thunk = self.pop()?;
+                }
             }
         }
     }
@@ -85,60 +104,24 @@ impl<'gc> Evaluator<'gc> {
             .pop()
             .ok_or(EvaluateError::ExecutionStackExhaustedUnexpectedly)
     }
+    fn pop_and_force(&mut self) -> Result<NixValue, EvaluateError> {
+        let mut thunk = self.pop()?;
+        self.force_thunk(&mut thunk)
+    }
 }
 
-fn execute_binop(
-    gc_handle: &GcHandle,
-    l: &NixValue,
-    r: &NixValue,
-    opcode: parser::ast::BinopOpcode,
+fn execute_arithmetic_op(
+    l: NixValue,
+    r: NixValue,
+    int_op: impl FnOnce(i64, i64) -> i64,
+    float_op: impl FnOnce(f64, f64) -> f64,
 ) -> Result<NixValue, EvaluateError> {
-    match opcode {
-        parser::ast::BinopOpcode::Add => match (l, r) {
-            (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(l + r)),
-            (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(*l as f64 + r)),
-            (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(l + *r as f64)),
-            (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(l + r)),
-            _ => Err(EvaluateError::TypeError),
-        },
-        parser::ast::BinopOpcode::ListConcat => todo!(),
-        parser::ast::BinopOpcode::AttrsetMerge => todo!(),
-        parser::ast::BinopOpcode::Equals => {
-            let res = match compare_values(gc_handle, l, r) {
-                Some(Ordering::Equal) => true,
-                _ => false,
-            };
-            Ok(NixValue::Bool(res))
-        }
-        parser::ast::BinopOpcode::NotEqual => todo!(),
-        parser::ast::BinopOpcode::Subtract => match (l, r) {
-            (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(l - r)),
-            (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(*l as f64 - r)),
-            (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(l - *r as f64)),
-            (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(l - r)),
-            _ => Err(EvaluateError::TypeError),
-        },
-        parser::ast::BinopOpcode::Multiply => match (l, r) {
-            (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(l * r)),
-            (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(*l as f64 * r)),
-            (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(l * *r as f64)),
-            (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(l * r)),
-            _ => Err(EvaluateError::TypeError),
-        },
-        parser::ast::BinopOpcode::Divide => match (l, r) {
-            (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(l / r)),
-            (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(*l as f64 / r)),
-            (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(l / *r as f64)),
-            (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(l / r)),
-            _ => Err(EvaluateError::TypeError),
-        },
-        parser::ast::BinopOpcode::LogicalOr => bool_op(l, r, |l, r| l || r),
-        parser::ast::BinopOpcode::LogicalAnd => bool_op(l, r, |l, r| l && r),
-        parser::ast::BinopOpcode::LessThanOrEqual => todo!(),
-        parser::ast::BinopOpcode::LessThanStrict => todo!(),
-        parser::ast::BinopOpcode::GreaterOrRequal => todo!(),
-        parser::ast::BinopOpcode::GreaterThanStrict => todo!(),
-        parser::ast::BinopOpcode::LogicalImplication => bool_op(l, r, |l, r| !l || r),
+    match (l, r) {
+        (NixValue::Int(l), NixValue::Int(r)) => Ok(NixValue::Int(int_op(l, r))),
+        (NixValue::Int(l), NixValue::Float(r)) => Ok(NixValue::Float(float_op(l as f64, r))),
+        (NixValue::Float(l), NixValue::Int(r)) => Ok(NixValue::Float(float_op(l, r as f64))),
+        (NixValue::Float(l), NixValue::Float(r)) => Ok(NixValue::Float(float_op(l, r))),
+        _ => Err(EvaluateError::TypeError),
     }
 }
 

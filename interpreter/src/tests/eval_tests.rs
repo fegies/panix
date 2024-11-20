@@ -10,7 +10,7 @@ fn eval_expr(source: &str, expected_source: &str) {
         let thunk = compile_source(gc_handle, full_expr.as_bytes()).unwrap();
 
         let eval_value = Evaluator::new(gc_handle).eval_expression(thunk).unwrap();
-        if let NixValue::Bool(true) = gc_handle.load(&eval_value) {
+        if let NixValue::Bool(true) = eval_value {
             println!("successfully evaluated to true");
         } else {
             panic!("equality assertion failed, got {eval_value:?}");

@@ -3,8 +3,6 @@ use std::{
     fmt::Write,
 };
 
-use gc::Trace;
-use gc_derive::Trace;
 pub use lexer::SourcePosition;
 
 pub mod impls;
@@ -103,7 +101,7 @@ pub struct Lambda<'a> {
     pub body: Box<NixExpr<'a>>,
 }
 
-#[derive(Debug, Clone, Trace)]
+#[derive(Debug, Clone)]
 pub enum BinopOpcode {
     Add,
     ListConcat,
