@@ -7,11 +7,13 @@ pub use lexer::SourcePosition;
 
 pub mod impls;
 
+#[derive(PartialEq)]
 pub struct NixString<'a> {
     pub position: SourcePosition,
     pub content: NixStringContent<'a>,
 }
 
+#[derive(PartialEq)]
 pub enum NixStringContent<'a> {
     Known(KnownNixStringContent<'a>),
     Interpolated(Vec<InterpolationEntry<'a>>),
@@ -24,13 +26,13 @@ pub enum KnownNixStringContent<'a> {
     Empty,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum InterpolationEntry<'a> {
     LiteralPiece(&'a str),
     Expression(NixExpr<'a>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BasicValue<'a> {
     String(NixString<'a>),
     Bool(bool),
@@ -41,7 +43,7 @@ pub enum BasicValue<'a> {
 }
 
 /// This is the key to an attribute set.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AttrsetKey<'a> {
     /// just a single-level item
     Single(NixString<'a>),
@@ -50,7 +52,7 @@ pub enum AttrsetKey<'a> {
     Multi(Vec<NixString<'a>>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Attrset<'a> {
     pub is_recursive: bool,
     pub inherit_keys: HashSet<&'a str>,
@@ -65,43 +67,43 @@ impl<'t> Attrset<'t> {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct List<'a> {
     pub entries: Vec<NixExpr<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum CompoundValue<'a> {
     Attrset(Attrset<'a>),
     List(List<'a>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LetInExpr<'a> {
     pub bindings: HashMap<&'a str, NixExpr<'a>>,
     pub body: Box<NixExpr<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct IfExpr<'a> {
     pub condition: Box<NixExpr<'a>>,
     pub truthy_case: Box<NixExpr<'a>>,
     pub falsy_case: Box<NixExpr<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct WithExpr<'a> {
     pub binding: Box<NixExpr<'a>>,
     pub body: Box<NixExpr<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Lambda<'a> {
     pub args: LambdaArgs<'a>,
     pub body: Box<NixExpr<'a>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinopOpcode {
     Add,
     ListConcat,
@@ -120,13 +122,13 @@ pub enum BinopOpcode {
     LogicalImplication,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum MonopOpcode {
     NumericMinus,
     BinaryNot,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Op<'a> {
     AttrRef {
         left: Box<NixExpr<'a>>,
@@ -152,7 +154,7 @@ pub enum Op<'a> {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Code<'a> {
     LetInExpr(LetInExpr<'a>),
     ValueReference { ident: &'a str },
@@ -162,26 +164,26 @@ pub enum Code<'a> {
     IfExpr(IfExpr<'a>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum NixExprContent<'a> {
     BasicValue(BasicValue<'a>),
     CompoundValue(CompoundValue<'a>),
     Code(Code<'a>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct NixExpr<'a> {
     pub position: SourcePosition,
     pub content: NixExprContent<'a>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LambdaAttrsetArgs<'a> {
     pub bindings: HashMap<&'a str, Option<NixExpr<'a>>>,
     pub includes_rest_pattern: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum LambdaArgs<'a> {
     SimpleBinding(&'a str),
     AttrsetBinding {

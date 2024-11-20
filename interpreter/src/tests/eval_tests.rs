@@ -1,5 +1,4 @@
 use gc::with_gc;
-use parser::ast::{NixExpr, SourcePosition};
 
 use crate::{compile_source, vm::value::NixValue, Evaluator};
 
@@ -22,6 +21,18 @@ fn eval_expr(source: &str, expected_source: &str) {
 #[test]
 fn test_basic_arithmentic() {
     eval_expr("1 + 2 * 3", "7");
+    eval_expr("6 / 2", "3");
+}
+
+#[test]
+fn test_sub() {
+    eval_expr("42 - 11", "30 + 1");
+    eval_expr("42 - - 1", "43");
+}
+
+#[test]
+fn test_braces() {
+    eval_expr("4 * (3 + 2)", "20");
 }
 
 #[test]

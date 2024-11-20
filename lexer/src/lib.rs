@@ -60,7 +60,7 @@ pub enum Token<'a> {
 }
 impl Eq for Token<'_> {}
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourcePosition {
     pub line: u32,
     pub column: u32,

@@ -1,6 +1,9 @@
 pub mod ast;
 pub mod parser;
 
+#[cfg(test)]
+mod tests;
+
 use parser::parser_entrypoint;
 
 pub use lexer::LexError;

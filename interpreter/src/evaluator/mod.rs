@@ -74,8 +74,32 @@ impl<'gc> Evaluator<'gc> {
                                         |l, r| l * r,
                                     )?));
                             }
-                            VmOp::NumericNegate => todo!(),
-                            VmOp::BinaryNot => todo!(),
+                            VmOp::Div => {
+                                let right = self.pop_and_force()?;
+                                let left = self.pop_and_force()?;
+                                self.execution_stack
+                                    .push(Thunk::Value(execute_arithmetic_op(
+                                        left,
+                                        right,
+                                        |l, r| l / r,
+                                        |l, r| l / r,
+                                    )?));
+                            }
+                            VmOp::NumericNegate => {
+                                let result = match self.pop_and_force()? {
+                                    NixValue::Int(i) => NixValue::Int(-i),
+                                    NixValue::Float(f) => NixValue::Float(-f),
+                                    _ => return Err(EvaluateError::TypeError),
+                                };
+                                self.execution_stack.push(Thunk::Value(result));
+                            }
+                            VmOp::BinaryNot => {
+                                let result = match self.pop_and_force()? {
+                                    NixValue::Bool(b) => NixValue::Bool(b),
+                                    _ => return Err(EvaluateError::TypeError),
+                                };
+                                self.execution_stack.push(Thunk::Value(result));
+                            }
                             VmOp::Call => todo!(),
                             VmOp::CastToPath => todo!(),
                             VmOp::PushImmediate(imm) => {
@@ -89,6 +113,25 @@ impl<'gc> Evaluator<'gc> {
                                     == compare_values(self.gc_handle, &left, &right);
                                 self.execution_stack
                                     .push(Thunk::Value(NixValue::Bool(result)));
+                            }
+                            VmOp::CompareNotEqual => {
+                                let right = self.pop_and_force()?;
+                                let left = self.pop_and_force()?;
+                                let result = Some(Ordering::Equal)
+                                    != compare_values(self.gc_handle, &left, &right);
+                                self.execution_stack
+                                    .push(Thunk::Value(NixValue::Bool(result)));
+                            }
+                            VmOp::Sub => {
+                                let right = self.pop_and_force()?;
+                                let left = self.pop_and_force()?;
+                                self.execution_stack
+                                    .push(Thunk::Value(execute_arithmetic_op(
+                                        left,
+                                        right,
+                                        |l, r| l - r,
+                                        |l, r| l - r,
+                                    )?));
                             }
                         }
                     }

@@ -2,7 +2,7 @@ use crate::{
     heap_page::{HeapEntry, Page},
     object::{HeapObject, TraceCallback},
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    GcError, GcHandle, GcPointer, GcResult,
+    GcHandle, GcPointer, GcResult,
 };
 
 pub struct SimpleGcString {
@@ -43,8 +43,8 @@ impl core::hash::Hash for SimpleGcString {
 }
 
 impl Page {
-    fn try_alloc_string(&self, str: &str) -> Option<HeapGcPointer<SimpleGcString>> {
-        let len = str.len();
+    fn try_alloc_strings(&self, pieces: &[&str]) -> Option<HeapGcPointer<SimpleGcString>> {
+        let len = pieces.iter().map(|p| p.len()).sum();
         let required_space = len + core::mem::size_of::<SimpleGcString>();
         let (header_pointer, data_pointer) =
             self.try_reserve(required_space, core::mem::align_of::<SimpleGcString>())?;
@@ -54,8 +54,11 @@ impl Page {
             let obj = &mut *cast_data_pointer;
             core::ptr::write(header_pointer, HeapEntry::for_object(obj));
             let string_begin_pointer = cast_data_pointer.add(1) as *mut u8;
-            let dest = core::slice::from_raw_parts_mut(string_begin_pointer, len);
-            dest.copy_from_slice(str.as_bytes());
+            let mut dest = core::slice::from_raw_parts_mut(string_begin_pointer, len);
+            for piece in pieces {
+                dest.copy_from_slice(piece.as_bytes());
+                dest = &mut dest[piece.len()..];
+            }
             let raw_ptr = RawHeapGcPointer::from_addr(header_pointer);
             Some(HeapGcPointer::from_raw_unchecked(raw_ptr))
         }
@@ -64,15 +67,14 @@ impl Page {
 
 impl GcHandle {
     pub fn alloc_string(&mut self, str: &str) -> GcResult<GcPointer<SimpleGcString>> {
-        let ptr = match self.alloc_pages.pages[0].try_alloc_string(str) {
-            Some(ptr) => ptr,
-            None => {
-                self.clear_nursery()?;
-                self.alloc_pages.pages[0]
-                    .try_alloc_string(str)
-                    .ok_or(GcError::ObjectBiggerThanPage)?
-            }
-        };
+        self.alloc_string_from_parts(&[str])
+    }
+    pub fn alloc_string_from_parts(
+        &mut self,
+        pieces: &[&str],
+    ) -> GcResult<GcPointer<SimpleGcString>> {
+        let ptr =
+            self.with_retry(|gc_handle| gc_handle.get_nursery_page().try_alloc_strings(pieces))?;
         Ok(ptr.root())
     }
 }

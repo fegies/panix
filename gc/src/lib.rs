@@ -192,6 +192,18 @@ impl AllocationPages {
 }
 
 impl GcHandle {
+    fn with_retry<TResult>(
+        &mut self,
+        mut func: impl FnMut(&mut GcHandle) -> Option<TResult>,
+    ) -> GcResult<TResult> {
+        match func(self) {
+            Some(res) => Ok(res),
+            None => {
+                self.clear_nursery()?;
+                func(self).ok_or(GcError::ObjectBiggerThanPage)
+            }
+        }
+    }
     fn run_gc(&mut self) {
         println!("gc triggered!");
         let target_generation = self.alloc_pages.get_fresh_allocpages();
@@ -240,7 +252,7 @@ impl GcHandle {
         &mut self,
         data: TData,
     ) -> GcResult<GcPointer<TData>> {
-        let heap_ptr = match self.alloc_pages.pages[0].try_alloc(data) {
+        let heap_ptr = match self.get_nursery_page().try_alloc(data) {
             Ok(ptr) => ptr,
             Err(value) => {
                 self.clear_nursery()?;
@@ -258,17 +270,11 @@ impl GcHandle {
         &mut self,
         data: &[TData],
     ) -> GcResult<GcPointer<Array<TData>>> {
-        let heap_ptr = match self.alloc_pages.pages[0].try_alloc_slice(data) {
-            Some(ptr) => ptr,
-            None => {
-                self.clear_nursery()?;
-                self.alloc_pages.pages[0]
-                    .try_alloc_slice(data)
-                    .ok_or(GcError::ObjectBiggerThanPage)?
-            }
-        };
+        let heap_ptr =
+            self.with_retry(|gc_handle| gc_handle.get_nursery_page().try_alloc_slice(data))?;
         Ok(heap_ptr.root())
     }
+
     /// Allocate an array of the same length as the passed vector, then moves
     /// the vector entries into the array.
     /// On success the vector is empty.
@@ -277,16 +283,13 @@ impl GcHandle {
         &mut self,
         data: &mut Vec<TData>,
     ) -> GcResult<GcPointer<Array<TData>>> {
-        let heap_ptr = match self.alloc_pages.pages[0].try_alloc_vec(data) {
-            Some(ptr) => ptr,
-            None => {
-                self.clear_nursery()?;
-                self.alloc_pages.pages[0]
-                    .try_alloc_vec(data)
-                    .ok_or(GcError::ObjectBiggerThanPage)?
-            }
-        };
+        let heap_ptr =
+            self.with_retry(|gc_handle| gc_handle.get_nursery_page().try_alloc_vec(data))?;
         Ok(heap_ptr.root())
+    }
+
+    fn get_nursery_page(&mut self) -> &Page {
+        self.alloc_pages.pages[0].as_ref()
     }
 
     fn get() -> GcResult<Self> {

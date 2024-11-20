@@ -24,6 +24,7 @@ pub fn translate_expression(
     mut expr: NixExpr<'_>,
 ) -> Result<Thunk, CompileError> {
     normalize::normalize_ast(&mut expr);
+
     let mut key_buffer = Default::default();
     let mut value_buffer = Default::default();
     let mut compiler = Compiler {
@@ -185,10 +186,10 @@ impl<'gc> Compiler<'gc> {
                     parser::ast::BinopOpcode::ListConcat => todo!(),
                     parser::ast::BinopOpcode::AttrsetMerge => todo!(),
                     parser::ast::BinopOpcode::Equals => VmOp::CompareEqual,
-                    parser::ast::BinopOpcode::NotEqual => todo!(),
-                    parser::ast::BinopOpcode::Subtract => todo!(),
+                    parser::ast::BinopOpcode::NotEqual => VmOp::CompareNotEqual,
+                    parser::ast::BinopOpcode::Subtract => VmOp::Sub,
                     parser::ast::BinopOpcode::Multiply => VmOp::Mul,
-                    parser::ast::BinopOpcode::Divide => todo!(),
+                    parser::ast::BinopOpcode::Divide => VmOp::Div,
                     // these 3 are lazy in the second argument. We emulate that
                     // with a conditional jump
                     parser::ast::BinopOpcode::LogicalOr => {
@@ -256,7 +257,14 @@ impl<'gc> Compiler<'gc> {
                 target_buffer.push(vmop);
             }
             parser::ast::Op::HasAttr { left, path } => todo!(),
-            parser::ast::Op::Monop { opcode, body } => todo!(),
+            parser::ast::Op::Monop { opcode, body } => {
+                let opcode = match opcode {
+                    parser::ast::MonopOpcode::NumericMinus => VmOp::NumericNegate,
+                    parser::ast::MonopOpcode::BinaryNot => VmOp::BinaryNot,
+                };
+                self.translate_to_ops(lookup_scope, target_buffer, *body)?;
+                target_buffer.push(opcode);
+            }
         }
         Ok(())
     }

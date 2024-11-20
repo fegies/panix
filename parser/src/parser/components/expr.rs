@@ -292,7 +292,6 @@ fn could_start_expression(token: &Token) -> bool {
             | Token::KwLet
             | Token::KwRec
             | Token::KwWith
-            | Token::Minus
             | Token::RoundOpen
             | Token::SquareOpen
     )

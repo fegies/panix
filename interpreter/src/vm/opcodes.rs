@@ -53,6 +53,12 @@ pub enum VmOp {
     /// pops 2 values from the stack, multiplies them and pushes the result
     Mul,
 
+    /// pops 2 values from the stack, divides the lower by the upper and pushes the result
+    Div,
+
+    /// pops 2 values from the stack, subtracts the upper from the lower and pushes the result
+    Sub,
+
     /// pops a value from the stack, multiplies it with -1 and pushes the result
     NumericNegate,
     /// pops a value from the stack, performs binary not and pushes the result
@@ -65,4 +71,6 @@ pub enum VmOp {
 
     /// pops two values from the stack, performs a comparison and pushes the result
     CompareEqual,
+    /// pops two values from the stack, performs a comparison and pushes the result
+    CompareNotEqual,
 }
