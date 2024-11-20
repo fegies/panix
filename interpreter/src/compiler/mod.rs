@@ -345,9 +345,24 @@ impl<'gc> Compiler<'gc> {
     fn translate_compound_value(
         &mut self,
         lookup_scope: &mut LookupScope<'_>,
-        target_buffer: &[VmOp],
+        target_buffer: &mut Vec<VmOp>,
         value: parser::ast::CompoundValue<'_>,
     ) -> Result<(), CompileError> {
-        todo!()
+        match value {
+            parser::ast::CompoundValue::Attrset(parser::ast::Attrset {
+                is_recursive,
+                inherit_keys,
+                attrs,
+            }) => {
+                if is_recursive {
+                    unreachable!("recursive attrsets should have been normalized by an ast pass")
+                }
+                todo!()
+            }
+            parser::ast::CompoundValue::List(parser::ast::List { entries }) => {
+                todo!()
+            }
+        }
+        Ok(())
     }
 }

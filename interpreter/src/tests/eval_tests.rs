@@ -23,6 +23,11 @@ fn test_basic_arithmentic() {
     eval_expr("1 + 2 * 3", "7");
     eval_expr("6 / 2", "3");
 }
+#[test]
+fn test_eval_divs() {
+    eval_expr("1 + (1.0 / 2.0) * (3.0 / 4)", "11.0 / 8");
+    eval_expr("-1 + (-1.0 / -2.0) * (-3.0 / -4)", "-5.0 / 8");
+}
 
 #[test]
 fn test_sub() {
@@ -45,4 +50,9 @@ fn test_plain_value() {
 fn test_if() {
     eval_expr("if 1 == 2 then 3 else 2", "2");
     eval_expr("if 1 == 1 then 1 + 1 else 1", "2");
+}
+
+#[test]
+fn test_alloc_list() {
+    eval_expr("[1 2 3]", "[1   2   3]");
 }
