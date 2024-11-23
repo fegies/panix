@@ -56,3 +56,13 @@ fn test_if() {
 fn test_alloc_list() {
     eval_expr("[1 2 3]", "[1   2   3]");
 }
+
+#[test]
+fn test_attrset_lazy_resolution() {
+    eval_expr("with {}; {a = d; b = 42;}.b", "42");
+}
+
+#[test]
+fn test_recursive_attrset() {
+    eval_expr("let a = 42; in rec {b = a; a = 13;}.b", "13");
+}
