@@ -193,6 +193,15 @@ fn string_with_escaped_dollar() {
 }
 
 #[test]
+fn test_multiline_comment() {
+    let str = r#"
+    /**
+     * foo
+     */42"#;
+    assert_lex(str, &[Token::Whitespace, Token::Integer(42)]);
+}
+
+#[test]
 fn multiline_escaped_newline() {
     let str = r#"
         ''

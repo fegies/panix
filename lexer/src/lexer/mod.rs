@@ -179,7 +179,8 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                         }
                         Some(b'*') => {
                             // we have to skip a multiline comment
-                            todo!()
+                            self.input.consume(2);
+                            self.skip_multiline_comment();
                         }
                         Some(c) if is_pathchar(c) => self.lex_path().await?,
                         _ => single!(Token::Slash),
@@ -540,6 +541,15 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
             self.input.consume(endline_pos + 1);
         } else {
             self.input.consume(self.input.slice().len());
+        }
+    }
+
+    fn skip_multiline_comment(&mut self) {
+        let slice = self.input.slice();
+        if let Some(endline_pos) = memmem::find(slice, b"*/") {
+            self.input.consume(endline_pos + 2);
+        } else {
+            self.input.consume(slice.len());
         }
     }
 }
