@@ -120,13 +120,14 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                             let left = Box::new(lhs);
                             // attrset refs are not full expressions. They may only be strings or idents
                             let name = self.parse_attrset_ref()?;
-                            let default = if let Some(Token::Ident("or")) = self.peek() {
-                                // skip or keyword
-                                self.expect_next()?;
-                                Some(Box::new(self.parse_expr()?))
-                            } else {
-                                None
-                            };
+                            let default =
+                                if let Some(Token::Ident("or")) = self.peek_no_whitespace() {
+                                    // skip or keyword
+                                    self.expect_next()?;
+                                    Some(Box::new(self.parse_expr()?))
+                                } else {
+                                    None
+                                };
 
                             NixExprContent::Code(Code::Op(Op::AttrRef {
                                 left,

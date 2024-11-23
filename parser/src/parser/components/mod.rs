@@ -34,6 +34,12 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     fn peek(&mut self) -> Option<&Token<'t>> {
         self.source.peek().map(|t| &t.token)
     }
+    fn peek_no_whitespace(&mut self) -> Option<Token<'t>> {
+        match self.source.peek().map(|t| t.token.clone()) {
+            Some(Token::Whitespace) => self.source.peek_2().map(|t| t.token.clone()),
+            t => t,
+        }
+    }
 
     fn expect_next_or_whitespace(&mut self) -> ParseResult<TokenWithPosition<'t>> {
         self.next().ok_or_else(unexpected_eof)
