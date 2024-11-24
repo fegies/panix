@@ -8,6 +8,7 @@ use std::{
 
 use clap::Parser;
 use gc::with_gc;
+use interpreter::Evaluator;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -18,8 +19,9 @@ fn process_file(file: &Path) {
     println!("parsing: {file:?}");
 
     with_gc(|handle| {
-        let res = interpreter::compile_file(handle, file);
-        println!("{res:?}");
+        let thunk = interpreter::compile_file(handle, file).unwrap();
+        let result = Evaluator::new(handle).eval_expression(thunk);
+        println!("{result:?}");
     })
     .unwrap();
 

@@ -7,7 +7,7 @@ pub mod list;
 pub mod string;
 mod with;
 
-use std::backtrace::Backtrace;
+use std::backtrace::{self, Backtrace};
 
 use lexer::{Token, TokenWithPosition};
 
@@ -103,9 +103,11 @@ fn unexpected_with_expected<T>(t: TokenWithPosition, expected: Token) -> ParseRe
 #[inline]
 fn format_backtrace(backtrace: Backtrace) -> String {
     let backtrace = format!("{}", backtrace);
-    backtrace
+    let res = backtrace
         .lines()
         .take_while(|l| !l.contains("parser::parser::parser_entrypoint"))
         .map(|l| format!("{l}\n"))
-        .collect()
+        .collect();
+    println!("{res}");
+    res
 }

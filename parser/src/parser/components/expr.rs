@@ -220,6 +220,28 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                         let lambda = self.parse_attrset_lambda(first_ident, None)?;
                         NixExprContent::Code(Code::Lambda(lambda))
                     }
+                    Token::CurlyClose => {
+                        // this must be a lambda with an attrset arg as { value } would be invalid
+                        // for an attrset
+                        self.expect(Token::Colon)?;
+                        let body = self.parse_expr()?;
+
+                        let mut bindings = HashMap::new();
+                        bindings.insert(first_ident, None);
+
+                        let lambda = Lambda {
+                            args: LambdaArgs::AttrsetBinding {
+                                total_name: None,
+                                args: LambdaAttrsetArgs {
+                                    bindings,
+                                    includes_rest_pattern: false,
+                                },
+                            },
+                            body: Box::new(body),
+                        };
+
+                        NixExprContent::Code(Code::Lambda(lambda))
+                    }
                     _ => unexpected(t)?,
                 };
 
