@@ -1,10 +1,6 @@
 // mod parser;
 
-use std::{
-    fs::File,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use gc::with_gc;

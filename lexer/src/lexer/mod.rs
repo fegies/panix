@@ -322,7 +322,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 
         for (idx, char) in input_slice.iter().cloned().enumerate() {
             match char {
-                ident_pat!() | b'/' | b'.' => {}
+                ident_pat!() | b'/' | b'.' | b'+' => {}
                 b'$' if matches!(self.input.get(idx + 1), Some(b'{')) => {
                     let pos = self.input.pos();
                     let str = self.input.consume(idx);
