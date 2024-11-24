@@ -69,6 +69,11 @@ trait Pass {
         self.descend_attrset(attrset)
     }
     fn descend_attrset(&mut self, attrset: &mut Attrset) {
+        for entry in &mut attrset.inherit_keys {
+            if let Some(source) = entry.source.as_mut() {
+                self.inspect_expr(source);
+            }
+        }
         for (key, expr) in &mut attrset.attrs {
             match key {
                 parser::ast::AttrsetKey::Single(s) => self.inspect_nix_string(s),

@@ -8,6 +8,12 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     }
 
     /// parse an attribute set.
+    /// assumes that the initial opening brace has been consumed.
+    pub fn parse_attrset_initial(&mut self) -> ParseResult<Attrset<'t>> {
+        self.parse_attrset_inner(Vec::new(), Vec::new())
+    }
+
+    /// parse an attribute set.
     /// Assumes the initial opening brace, and the first ident including a dot have been consumed.
     pub fn parse_attrset_multipath(
         &mut self,

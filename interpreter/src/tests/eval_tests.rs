@@ -71,3 +71,13 @@ fn test_recursive_attrset() {
 fn test_inherit_from_attrset_to_attrset() {
     eval_expr("let a = {f = 42;}; in {inherit (a) f}.f", "42");
 }
+
+#[test]
+fn test_list_without_spaces() {
+    eval_expr("[(1)(2)]", "[1 2]");
+}
+
+#[test]
+fn test_funccall_without_spaces() {
+    eval_expr("let f = a: a+1; in f(42)", "43");
+}

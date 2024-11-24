@@ -143,6 +143,40 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                             function: Box::new(lhs),
                             arg: Box::new(self.parse_with_bindingpower(r_bp, allow_spaces)?),
                         })),
+                        Token::RoundOpen => {
+                            // this is a call, the arg is wrapped in braces
+                            let expr = self.parse_expr()?;
+                            self.expect(Token::RoundClose)?;
+                            NixExprContent::Code(Code::Op(Op::Call {
+                                function: Box::new(lhs),
+                                arg: Box::new(expr),
+                            }))
+                        }
+                        Token::SquareOpen => {
+                            // this is a call, the arg is a list
+                            let list = self.parse_list()?;
+                            let list = NixExpr {
+                                position: token.position,
+                                content: NixExprContent::CompoundValue(CompoundValue::List(list)),
+                            };
+
+                            NixExprContent::Code(Code::Op(Op::Call {
+                                function: Box::new(lhs),
+                                arg: Box::new(list),
+                            }))
+                        }
+                        Token::CurlyOpen => {
+                            let attrset = NixExpr {
+                                position: token.position,
+                                content: NixExprContent::CompoundValue(CompoundValue::Attrset(
+                                    self.parse_attrset_initial()?,
+                                )),
+                            };
+                            NixExprContent::Code(Code::Op(Op::Call {
+                                function: Box::new(lhs),
+                                arg: Box::new(attrset),
+                            }))
+                        }
                         t => todo!("{:?}", t),
                     }
                 };
@@ -345,7 +379,11 @@ fn infix_binding_power(token: &Token<'_>) -> Option<(u8, u8)> {
         Token::DoublePlus => (23, 22),
         Token::QuestionMark => (24, 25),
         // this is where the unary minus would go, with bp 26
-        Token::Whitespace => (27, 28),
+
+        // because of some stupid quirk of the interpreter, function calls can be
+        // done without space if the next expr can be distinguished
+        // This is the case with all types of braces
+        Token::Whitespace | Token::RoundOpen | Token::CurlyOpen | Token::SquareOpen => (27, 28),
         Token::Dot => (29, 30),
         _ => return None,
     };

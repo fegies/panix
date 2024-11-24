@@ -79,3 +79,22 @@ fn test_parse_attrset_inherit() {
     let value = parse_nix("{inherit (a) b;}".as_bytes()).unwrap();
     assert_eq!(expected, value);
 }
+
+#[test]
+fn test_funccall_without_spaces() {
+    let expected = NixExpr {
+        position: SourcePosition { line: 1, column: 2 },
+        content: crate::ast::NixExprContent::Code(Code::Op(Op::Call {
+            function: Box::new(NixExpr {
+                position: SourcePosition { line: 1, column: 1 },
+                content: crate::ast::NixExprContent::Code(Code::ValueReference { ident: "f" }),
+            }),
+            arg: Box::new(NixExpr {
+                position: SourcePosition { line: 1, column: 4 },
+                content: crate::ast::NixExprContent::BasicValue(BasicValue::Int(1)),
+            }),
+        })),
+    };
+    let value = parse_nix("f(1)".as_bytes()).unwrap();
+    assert_eq!(expected, value);
+}
