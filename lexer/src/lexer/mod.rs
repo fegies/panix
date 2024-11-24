@@ -41,7 +41,7 @@ macro_rules! whitespace_pat {
 }
 macro_rules! ident_pat {
     (strip_minus) => {
-        b'a'..=b'z' | b'A'..=b'Z' | b'_'
+        b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'\''
     };
     () => {
         ident_pat!(strip_minus) | b'-' | b'0'..=b'9'
@@ -224,7 +224,10 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 }
                 ident_pat!(strip_minus) => self.lex_ident().await?,
                 c => {
-                    return Err(LexError::InvalidChar(c));
+                    return Err(LexError::InvalidChar {
+                        char: c,
+                        pos: self.input.pos(),
+                    });
                 }
             }
         }

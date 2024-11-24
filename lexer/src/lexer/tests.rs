@@ -237,3 +237,12 @@ fn unquoted_iterpolation() {
         ],
     )
 }
+
+#[test]
+fn ident_with_single_quot() {
+    let str = "foo' bar";
+    assert_lex(
+        &str,
+        &[Token::Ident("foo'"), Token::Whitespace, Token::Ident("bar")],
+    );
+}
