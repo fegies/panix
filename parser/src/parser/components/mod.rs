@@ -72,6 +72,15 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             unexpected_with_expected(next, token)
         }
     }
+
+    fn expect_ident(&mut self) -> ParseResult<&'t str> {
+        let next = self.expect_next()?;
+        if let Token::Ident(ident) = next.token {
+            Ok(ident)
+        } else {
+            unexpected(next)
+        }
+    }
 }
 
 #[cold]
