@@ -251,8 +251,21 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     Token::QuestionMark => {
                         // this is a set of function args, the first one has a default arg
                         let default = self.parse_expr()?;
-                        self.expect(Token::Comma)?;
-                        let lambda = self.parse_attrset_lambda(first_ident, Some(default))?;
+                        let t = self.expect_next()?;
+                        let lambda = match t.token {
+                            Token::Comma => {
+                                self.parse_attrset_lambda(first_ident, Some(default))?
+                            }
+                            Token::CurlyClose => {
+                                let mut bindings = HashMap::with_capacity(1);
+                                bindings.insert(first_ident, Some(default));
+                                self.parse_attrset_lambda_body(LambdaAttrsetArgs {
+                                    bindings,
+                                    includes_rest_pattern: false,
+                                })?
+                            }
+                            _ => unexpected(t)?,
+                        };
                         NixExprContent::Code(Code::Lambda(lambda))
                     }
                     Token::Comma => {

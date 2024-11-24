@@ -51,7 +51,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
     /// Optionally parses the total name of the attrset.
     /// Assumes that the argument def has already been parsed.
-    fn parse_attrset_lambda_body(
+    pub fn parse_attrset_lambda_body(
         &mut self,
         args: LambdaAttrsetArgs<'t>,
     ) -> ParseResult<Lambda<'t>> {
