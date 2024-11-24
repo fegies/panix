@@ -69,7 +69,7 @@ fn test_recursive_attrset() {
 
 #[test]
 fn test_inherit_from_attrset_to_attrset() {
-    eval_expr("let a = {f = 42;}; in {inherit (a) f}.f", "42");
+    eval_expr("let a = {f = 42;}; in {inherit (a) f;}.f", "42");
 }
 
 #[test]
