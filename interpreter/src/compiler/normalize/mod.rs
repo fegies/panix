@@ -100,6 +100,11 @@ trait Pass {
     }
 
     fn inspect_let_expr(&mut self, expr: &mut LetInExpr) {
+        for inherit in &mut expr.inherit_entries {
+            if let Some(expr) = inherit.source.as_mut() {
+                self.inspect_expr(expr)
+            }
+        }
         for expr in expr.bindings.values_mut() {
             self.inspect_expr(expr)
         }

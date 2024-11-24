@@ -86,6 +86,7 @@ pub enum CompoundValue<'a> {
 #[derive(Debug, PartialEq)]
 pub struct LetInExpr<'a> {
     pub bindings: HashMap<&'a str, NixExpr<'a>>,
+    pub inherit_entries: Vec<InheritEntry<'a>>,
     pub body: Box<NixExpr<'a>>,
 }
 

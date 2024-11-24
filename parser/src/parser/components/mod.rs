@@ -2,6 +2,7 @@ pub mod attrset;
 pub mod expr;
 pub mod function;
 pub mod if_expr;
+mod inherit;
 pub mod let_expr;
 pub mod list;
 pub mod string;
