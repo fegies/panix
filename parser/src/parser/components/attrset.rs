@@ -1,12 +1,10 @@
-use std::collections::HashSet;
-
 use super::*;
 
 impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse an attribute set.
     /// Assumes the initial opening brace, first identifier and equality sign have been consumed
     pub fn parse_attrset(&mut self, initial_ident: NixString<'t>) -> ParseResult<Attrset<'t>> {
-        self.parse_attrset_inner(vec![initial_ident], HashSet::new())
+        self.parse_attrset_inner(vec![initial_ident], Vec::new())
     }
 
     /// parse an attribute set.
@@ -17,14 +15,13 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     ) -> ParseResult<Attrset<'t>> {
         let mut pieces = vec![initial_ident];
         self.parse_attrset_path(&mut pieces)?;
-        self.parse_attrset_inner(pieces, HashSet::new())
+        self.parse_attrset_inner(pieces, Vec::new())
     }
 
     /// parse an attribute set.
     /// Assumes the initial opening brace and an inherit keyword have been consumed.
     pub fn parse_attrset_inherit(&mut self) -> ParseResult<Attrset<'t>> {
-        let mut inherit_keys = HashSet::new();
-        self.parse_inherit(&mut inherit_keys)?;
+        let inherit_keys = vec![self.parse_inherit()?];
         self.parse_attrset_inner(Vec::new(), inherit_keys)
     }
 
@@ -32,7 +29,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// Assumes the initial rec keyword has been consumed.
     pub fn parse_attrset_rec(&mut self) -> ParseResult<Attrset<'t>> {
         self.expect(Token::CurlyOpen)?;
-        let mut res = self.parse_attrset_inner(Vec::new(), HashSet::new())?;
+        let mut res = self.parse_attrset_inner(Vec::new(), Vec::new())?;
         res.is_recursive = true;
         Ok(res)
     }
@@ -62,29 +59,60 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         Ok(())
     }
 
-    fn parse_inherit(&mut self, inherit_keys: &mut HashSet<&'t str>) -> ParseResult<()> {
+    /// parse a inherit clause.
+    /// Assumes an initial inherit keyword has already been consumed
+    fn parse_inherit(&mut self) -> ParseResult<InheritEntry<'t>> {
+        let mut entries = Vec::new();
+
+        // either the first value (no source specified) or the source
+        let t = self.expect_next()?;
+        let source = match t.token {
+            Token::Ident(varname) => {
+                entries.push(varname);
+                None
+            }
+            Token::RoundOpen => {
+                let expr = self.parse_expr()?;
+                self.expect(Token::RoundClose)?;
+                // we need to ensure that there is at least one ident provided.
+                let t = self.expect_next()?;
+                if let Token::Ident(varname) = t.token {
+                    entries.push(varname);
+                } else {
+                    unexpected(t)?;
+                }
+                Some(Box::new(expr))
+            }
+            _ => unexpected(t)?,
+        };
+
+        // and collect the remaining values (if any)
         loop {
             let t = self.expect_next()?;
             match t.token {
                 Token::Ident(varname) => {
-                    if !inherit_keys.insert(varname) {
-                        return Err(ParseError::AttributePathConflict(varname.to_owned()));
-                    }
+                    entries.push(varname);
                 }
-                Token::Semicolon => return Ok(()),
-                _ => unexpected(t)?,
+                Token::Semicolon => {
+                    break;
+                }
+                _ => {
+                    unexpected(t)?;
+                }
             }
         }
+
+        Ok(InheritEntry { source, entries })
     }
 
     fn parse_attrset_path_or_inherit(
         &mut self,
         pieces: &mut Vec<NixString<'t>>,
-        inherit_keys: &mut HashSet<&'t str>,
+        inherit_keys: &mut Vec<InheritEntry<'t>>,
     ) -> ParseResult<bool> {
         if let Token::KwInherit = self.expect_peek()? {
             self.expect_next()?;
-            self.parse_inherit(inherit_keys)?;
+            inherit_keys.push(self.parse_inherit()?);
             Ok(false)
         } else {
             self.parse_attrset_path(pieces)?;
@@ -97,7 +125,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     fn parse_attrset_inner(
         &mut self,
         mut ident_buf: Vec<NixString<'t>>,
-        mut inherit_keys: HashSet<&'t str>,
+        mut inherit_keys: Vec<InheritEntry<'t>>,
     ) -> ParseResult<Attrset<'t>> {
         let mut attrs = Vec::new();
 

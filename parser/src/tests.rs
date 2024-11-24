@@ -1,9 +1,9 @@
-use std::collections::HashSet;
-
 use lexer::SourcePosition;
 
 use crate::{
-    ast::{Attrset, BasicValue, BinopOpcode, Code, CompoundValue, NixExpr, NixString, Op},
+    ast::{
+        Attrset, BasicValue, BinopOpcode, Code, CompoundValue, InheritEntry, NixExpr, NixString, Op,
+    },
     parse_nix,
 };
 
@@ -40,11 +40,7 @@ fn test_parse_attrset_or() {
             left: Box::new(NixExpr {
                 position: SourcePosition { line: 1, column: 1 },
                 content: crate::ast::NixExprContent::CompoundValue(CompoundValue::Attrset(
-                    Attrset {
-                        is_recursive: false,
-                        inherit_keys: HashSet::new(),
-                        attrs: Vec::new(),
-                    },
+                    Attrset::empty(),
                 )),
             }),
             name: NixString::from_literal("foo", SourcePosition { line: 1, column: 4 }),
@@ -58,5 +54,28 @@ fn test_parse_attrset_or() {
         })),
     };
     let value = parse_nix("{}.foo or false".as_bytes()).unwrap();
+    assert_eq!(expected, value);
+}
+
+#[test]
+fn test_parse_attrset_inherit() {
+    let expected = NixExpr {
+        position: SourcePosition { line: 1, column: 1 },
+        content: crate::ast::NixExprContent::CompoundValue(CompoundValue::Attrset(Attrset {
+            is_recursive: false,
+            inherit_keys: vec![InheritEntry {
+                source: Some(Box::new(NixExpr {
+                    position: SourcePosition {
+                        line: 1,
+                        column: 11,
+                    },
+                    content: crate::ast::NixExprContent::Code(Code::ValueReference { ident: "a" }),
+                })),
+                entries: vec!["b"],
+            }],
+            attrs: vec![],
+        })),
+    };
+    let value = parse_nix("{inherit (a) b;}".as_bytes()).unwrap();
     assert_eq!(expected, value);
 }

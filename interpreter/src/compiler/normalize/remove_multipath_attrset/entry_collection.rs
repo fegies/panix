@@ -23,7 +23,7 @@ fn expand_out_attrset_path<'a>(
             content: parser::ast::NixExprContent::CompoundValue(
                 parser::ast::CompoundValue::Attrset(Attrset {
                     is_recursive: false,
-                    inherit_keys: HashSet::new(),
+                    inherit_keys: Vec::new(),
                     attrs: vec![(AttrsetKey::Single(key_piece), value)],
                 }),
             ),
@@ -121,7 +121,7 @@ impl<'a> MultipathEntryCollection<'a> {
                         content: parser::ast::NixExprContent::CompoundValue(
                             parser::ast::CompoundValue::Attrset(Attrset {
                                 is_recursive: false,
-                                inherit_keys: HashSet::new(),
+                                inherit_keys: Vec::new(),
                                 attrs: inner_attrs,
                             }),
                         ),

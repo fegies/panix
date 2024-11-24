@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Write,
-};
+use std::{collections::HashMap, fmt::Write};
 
 pub use lexer::SourcePosition;
 
@@ -53,16 +50,24 @@ pub enum AttrsetKey<'a> {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct InheritEntry<'a> {
+    /// the source of the attribute.
+    /// If it is not set to anything, it will be resolved from the variables in scope
+    pub source: Option<Box<NixExpr<'a>>>,
+    pub entries: Vec<&'a str>,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Attrset<'a> {
     pub is_recursive: bool,
-    pub inherit_keys: HashSet<&'a str>,
+    pub inherit_keys: Vec<InheritEntry<'a>>,
     pub attrs: Vec<(AttrsetKey<'a>, NixExpr<'a>)>,
 }
 impl<'t> Attrset<'t> {
     pub(crate) fn empty() -> Attrset<'t> {
         Self {
             is_recursive: false,
-            inherit_keys: HashSet::new(),
+            inherit_keys: Vec::new(),
             attrs: Vec::new(),
         }
     }

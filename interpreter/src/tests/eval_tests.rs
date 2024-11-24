@@ -66,3 +66,8 @@ fn test_attrset_lazy_resolution() {
 fn test_recursive_attrset() {
     eval_expr("let a = 42; in rec {b = a; a = 13;}.b", "13");
 }
+
+#[test]
+fn test_inherit_from_attrset_to_attrset() {
+    eval_expr("let a = {f = 42;}; in {inherit (a) f}.f", "42");
+}
