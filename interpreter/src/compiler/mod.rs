@@ -207,6 +207,7 @@ impl<'gc> Compiler<'gc> {
 
                 Ok(())
             }
+            parser::ast::Code::AssertExpr(_) => todo!(),
         }
     }
 

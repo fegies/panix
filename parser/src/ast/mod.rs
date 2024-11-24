@@ -167,6 +167,13 @@ pub enum Code<'a> {
     Lambda(Lambda<'a>),
     Op(Op<'a>),
     IfExpr(IfExpr<'a>),
+    AssertExpr(AssertExpr<'a>),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct AssertExpr<'a> {
+    pub assertion: Box<NixExpr<'a>>,
+    pub value: Box<NixExpr<'a>>,
 }
 
 #[derive(Debug, PartialEq)]

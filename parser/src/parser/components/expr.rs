@@ -43,6 +43,12 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             Token::KwRec => {
                 NixExprContent::CompoundValue(CompoundValue::Attrset(self.parse_attrset_rec()?))
             }
+            Token::KwAssert => {
+                let assertion = Box::new(self.parse_expr()?);
+                self.expect(Token::Semicolon)?;
+                let value = Box::new(self.parse_expr()?);
+                NixExprContent::Code(Code::AssertExpr(AssertExpr { assertion, value }))
+            }
             Token::KwNull => NixExprContent::BasicValue(BasicValue::Null),
             Token::StringBegin => {
                 NixExprContent::BasicValue(BasicValue::String(self.parse_simple_string()?))

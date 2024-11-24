@@ -1,6 +1,6 @@
 use parser::ast::{
-    Attrset, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda, LetInExpr, List,
-    MonopOpcode, NixExpr, NixString, Op, WithExpr,
+    AssertExpr, Attrset, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda, LetInExpr,
+    List, MonopOpcode, NixExpr, NixString, Op, WithExpr,
 };
 
 use self::remove_multipath_attrset::RemoveMultipathPass;
@@ -46,7 +46,13 @@ trait Pass {
             Code::Lambda(lambda) => self.inspect_lambda(lambda),
             Code::Op(expr) => self.inspect_op(expr),
             Code::IfExpr(expr) => self.inspect_if_expr(expr),
+            Code::AssertExpr(assert) => self.inspect_assert(assert),
         }
+    }
+
+    fn inspect_assert(&mut self, assert: &mut AssertExpr) {
+        self.inspect_expr(&mut assert.assertion);
+        self.inspect_expr(&mut assert.value);
     }
 
     fn inspect_nix_string(&mut self, string: &mut NixString<'_>) {

@@ -33,6 +33,7 @@ pub enum Token<'a> {
     KwWith,
     KwRec,
     KwNull,
+    KwAssert,
     Comma,
     StringBegin,
     StringEnd,
