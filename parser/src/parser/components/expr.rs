@@ -49,7 +49,6 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 let value = Box::new(self.parse_expr()?);
                 NixExprContent::Code(Code::AssertExpr(AssertExpr { assertion, value }))
             }
-            Token::KwNull => NixExprContent::BasicValue(BasicValue::Null),
             Token::StringBegin => {
                 NixExprContent::BasicValue(BasicValue::String(self.parse_simple_string()?))
             }

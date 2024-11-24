@@ -210,10 +210,6 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     .try_parse_keyword("with", Token::KwWith)
                     .await
                     .is_some() => {}
-                b'n' if self
-                    .try_parse_keyword("null", Token::KwNull)
-                    .await
-                    .is_some() => {}
                 b'\'' if self.input.get(1) == Some(b'\'') => {
                     self.lex_indented_string().await?;
                 }
