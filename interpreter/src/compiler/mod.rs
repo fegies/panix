@@ -17,6 +17,11 @@ mod normalize;
 mod tests;
 mod thunk_compiler;
 
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum ValueSource {
+    ContextReference(u32),
+    ThunkStackRef(u32),
+}
 #[derive(Debug, thiserror::Error)]
 pub enum CompileError {
     #[error("error when allocating")]

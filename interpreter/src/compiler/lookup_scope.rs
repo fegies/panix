@@ -1,10 +1,6 @@
-pub struct LocalThunkRef(u32);
+use crate::vm::opcodes::ValueSource;
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub enum ValueSource {
-    ContextReference(u32),
-    ThunkStackRef(u32),
-}
+pub struct LocalThunkRef(pub u32);
 
 struct ScopeLevel<'src> {
     local_entries: Vec<(&'src str, LocalThunkRef)>,
@@ -98,6 +94,16 @@ impl<'src> ScopeBacking<'src> {
         // we searched to the root and did not find anything :(
         None
     }
+
+    fn drop_local_entries(&mut self, count: u32) {
+        let level = self
+            .levels
+            .last_mut()
+            .expect("at least the top level must exist");
+
+        let len_after = level.local_entries.len().saturating_sub(count as usize);
+        level.local_entries.truncate(len_after);
+    }
 }
 
 pub struct LookupScope<'src, 'backing> {
@@ -113,13 +119,17 @@ impl<'src, 'backing> LookupScope<'src, 'backing> {
         self.backing.push_thunkref(name, thunkref);
     }
 
+    pub fn drop_entries(&mut self, count: u32) {
+        self.backing.drop_local_entries(count)
+    }
+
     pub fn deref_ident(&mut self, ident: &'src str) -> Option<ValueSource> {
         self.backing.deref_ident(ident)
     }
 
-    pub fn into_inherit_context(self) -> Vec<ValueSource> {
-        let level    = self.backing.levels.last_mut().expect("there should always be at least 1 level because it is tied to the lifetime of the LookupScope");
-        core::mem::take(&mut level.inherited_values)
+    pub fn get_inherit_context(&self) -> &[ValueSource] {
+        let level    = self.backing.levels.last().expect("there should always be at least 1 level because it is tied to the lifetime of the LookupScope");
+        &level.inherited_values
     }
 }
 

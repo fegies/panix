@@ -2,12 +2,25 @@ use super::value::{NixValue, Thunk};
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
 
+#[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Trace)]
+pub enum ValueSource {
+    ContextReference(u32),
+    ThunkStackRef(u32),
+}
+
 #[derive(Debug, Trace, Clone, Copy)]
-pub struct ContextReference(u32);
+pub struct ContextReference(pub u32);
 
 #[derive(Debug, Trace, Clone)]
 pub struct ExecutionContext {
     pub entries: GcPointer<Array<Thunk>>,
+}
+
+#[derive(Debug, Trace)]
+pub struct ThunkAllocArgs {
+    pub code: GcPointer<Array<VmOp>>,
+    pub context_id: u32,
+    pub context_build_instructions: GcPointer<Array<ValueSource>>,
 }
 
 #[derive(Debug, Trace, Clone)]
@@ -24,15 +37,24 @@ pub enum VmOp {
     /// Loads the provided context item and pushes it on the stack.
     LoadContext(ContextReference),
 
+    /// loads the provided value from the local Thunk stack
+    LoadLocalThunk(u32),
+
     /// pushes the provided immediate value on the stack.
     PushImmediate(GcPointer<NixValue>),
 
-    /// pops n values from the stack and assembles them into an execution context.
-    /// then combines it with the provided code instructions to generate a thunk.
-    /// the allocated thunk is pushed on the stack.
+    /// Pushes the provided number of blackhole thunks onto the thunk context
+    PushBlackholes(u32),
+
+    /// drops the requested number of thunks from the local thunk context
+    DropThunks(u32),
+
+    /// assembles a thunk by following the provided instructions.
+    /// it is then written to the context at the specified slot.
+    /// the slot is measured from the top with 0 being the top element of the stack
     AllocateThunk {
-        context_length: u16,
-        code: GcPointer<Array<VmOp>>,
+        slot: u16,
+        args: GcPointer<ThunkAllocArgs>,
     },
 
     /// skips the provided number of instructions.

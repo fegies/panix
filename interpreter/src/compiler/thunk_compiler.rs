@@ -1,8 +1,14 @@
-use parser::ast::{self, BasicValue, IfExpr, KnownNixStringContent, NixExpr};
+use std::{collections::BTreeMap, u32};
 
-use crate::vm::{
-    opcodes::{ExecutionContext, VmOp},
-    value::{NixValue, Thunk},
+use gc::{specialized_types::array::Array, GcPointer};
+use parser::ast::{self, BasicValue, IfExpr, KnownNixStringContent, NixExpr, SourcePosition};
+
+use crate::{
+    compiler::lookup_scope::LocalThunkRef,
+    vm::{
+        opcodes::{ContextReference, ExecutionContext, ThunkAllocArgs, ValueSource, VmOp},
+        value::{NixValue, Thunk},
+    },
 };
 
 use super::{lookup_scope::LookupScope, CompileError, Compiler};
@@ -21,8 +27,8 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
     }
     pub fn translate_to_thunk(
         mut self,
-        mut scope: LookupScope,
-        expr: NixExpr<'_>,
+        mut scope: LookupScope<'src, '_>,
+        expr: NixExpr<'src>,
     ) -> Result<Thunk, CompileError> {
         let mut opcode_buf = Vec::new();
         self.translate_to_ops(&mut scope, &mut opcode_buf, expr)?;
@@ -35,11 +41,15 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         })
     }
 
+    fn clear(&mut self) {
+        self.current_thunk_stack_height = 0;
+    }
+
     fn translate_to_ops(
         &mut self,
-        lookup_scope: &mut LookupScope,
+        lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
-        expr: NixExpr,
+        expr: NixExpr<'src>,
     ) -> Result<(), CompileError> {
         match expr.content {
             parser::ast::NixExprContent::BasicValue(b) => {
@@ -49,16 +59,16 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 self.translate_compound_value(lookup_scope, target_buffer, c)
             }
             parser::ast::NixExprContent::Code(c) => {
-                self.translate_code(lookup_scope, target_buffer, c)
+                self.translate_code(lookup_scope, target_buffer, c, expr.position)
             }
         }
     }
 
     fn translate_basic_value(
         &mut self,
-        lookup_scope: &mut LookupScope<'_, '_>,
+        lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
-        value: BasicValue<'_>,
+        value: BasicValue<'src>,
     ) -> Result<(), CompileError> {
         let value = match value {
             BasicValue::Bool(b) => NixValue::Bool(b),
@@ -80,9 +90,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
     fn translate_string_value(
         &mut self,
-        lookup_scope: &mut LookupScope<'_, '_>,
+        lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
-        s: ast::NixString<'_>,
+        s: ast::NixString<'src>,
     ) -> Result<(), CompileError> {
         match s.content {
             parser::ast::NixStringContent::Known(known) => {
@@ -114,16 +124,17 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
     fn translate_code(
         &mut self,
-        lookup_scope: &mut LookupScope<'_, '_>,
+        lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
-        code: parser::ast::Code<'_>,
+        code: parser::ast::Code<'src>,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match code {
             parser::ast::Code::LetInExpr(let_expr) => {
-                self.translate_let_expr(lookup_scope, target_buffer, let_expr)
+                self.translate_let_expr(lookup_scope, target_buffer, let_expr, pos)
             }
             parser::ast::Code::ValueReference { ident } => {
-                self.translate_value_ref(lookup_scope, target_buffer, ident)
+                self.translate_value_ref(lookup_scope, target_buffer, ident, pos)
             }
             parser::ast::Code::WithExpr(_) => todo!(),
             parser::ast::Code::Lambda(_) => todo!(),
@@ -162,9 +173,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
     fn translate_op(
         &mut self,
-        lookup_scope: &mut LookupScope,
+        lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
-        op: parser::ast::Op<'_>,
+        op: parser::ast::Op<'src>,
     ) -> Result<(), CompileError> {
         match op {
             parser::ast::Op::AttrRef {
@@ -319,25 +330,172 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
     fn translate_value_ref(
         &mut self,
-        lookup_scope: &mut LookupScope<'_, '_>,
+        lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
-        ident: &str,
+        ident: &'src str,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
-        todo!();
+        let src = lookup_scope
+            .deref_ident(ident)
+            .ok_or_else(|| CompileError::Deref {
+                value: ident.to_string(),
+                pos,
+            })?;
+
+        let opcode = match src {
+            ValueSource::ContextReference(ctxref) => VmOp::LoadContext(ContextReference(ctxref)),
+            ValueSource::ThunkStackRef(localref) => VmOp::LoadLocalThunk(localref),
+        };
+
+        target_buffer.push(opcode);
+
         Ok(())
     }
 
     fn translate_let_expr(
         &mut self,
-        lookup_scope: &mut LookupScope<'_, '_>,
+        lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
-        let_expr: ast::LetInExpr<'_>,
+        let_expr: ast::LetInExpr<'src>,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
-        for inherit_entry in let_expr.inherit_entries {
+        let height_before = self.current_thunk_stack_height;
+        let mut added_keys = 0;
+
+        // first, add the new keys to the lookup scope.
+        for inherit_entry in &let_expr.inherit_entries {
             if inherit_entry.source.is_some() {
-                unreachable!("inherit from source should have been removed by an ast pass");
+                self.current_thunk_stack_height += 1;
+            }
+            for ident in &inherit_entry.entries {
+                lookup_scope
+                    .push_local_thunkref(ident, LocalThunkRef(self.current_thunk_stack_height));
+                self.current_thunk_stack_height += 1;
+                added_keys += 1;
             }
         }
-        todo!()
+        for (ident, _) in &let_expr.bindings {
+            lookup_scope.push_local_thunkref(ident, LocalThunkRef(self.current_thunk_stack_height));
+            self.current_thunk_stack_height += 1;
+            added_keys += 1;
+        }
+
+        // At this point, the lookup scope is populated and the stack height increased.
+        // we need to make sure that the thunks are available for reference. (for mutually recursive
+        // bindings etc).
+        // To do that, we preallocate a set of blackholes, before overwriting them
+        // with the real thunk definitions.
+        let added_thunks = self.current_thunk_stack_height - height_before;
+        target_buffer.push(VmOp::PushBlackholes(added_thunks));
+
+        let mut cached_context_instructions = BTreeMap::new();
+        let mut instruction_buf = Vec::new();
+
+        let mut slot_id = added_thunks as u16;
+        // now, emit all the thunk definitions, ensuring they match up with the keys
+        // by iterating in the same order.
+        for inherit_entry in let_expr.inherit_entries {
+            if let Some(source_expr) = inherit_entry.source {
+                // first, set the inherit source thunk....
+                let thunk_args = self.compile_subchunk(
+                    lookup_scope,
+                    &mut instruction_buf,
+                    &mut cached_context_instructions,
+                    *source_expr,
+                )?;
+                slot_id -= 1;
+                target_buffer.push(VmOp::AllocateThunk {
+                    slot: slot_id,
+                    args: thunk_args,
+                });
+            } else {
+                // as this expression did not have a source, we would need to pick the entries
+                // from the context. Since this is a let expression, they would already
+                // have been part of the context, so this does not make any sense.
+                unreachable!("unqualified inherits in a let in do not make sense.");
+            }
+
+            // and now emit all of the inherit keys as simple attrest refs
+            let context_ref = self.current_thunk_stack_height - slot_id as u32 + 1;
+            let context_build_instructions = self
+                .compiler
+                .gc_handle
+                .alloc_slice(&[ValueSource::ContextReference(context_ref)])?;
+
+            for ident in inherit_entry.entries {
+                instruction_buf.push(VmOp::LoadContext(ContextReference(0)));
+                instruction_buf.push(VmOp::PushImmediate(
+                    self.compiler
+                        .alloc_string(KnownNixStringContent::Literal(&ident))?,
+                ));
+                instruction_buf.push(VmOp::GetAttribute { push_error: false });
+                let code = self.compiler.gc_handle.alloc_vec(&mut instruction_buf)?;
+                slot_id -= 1;
+                target_buffer.push(VmOp::AllocateThunk {
+                    slot: slot_id,
+                    args: self.compiler.gc_handle.alloc(ThunkAllocArgs {
+                        code,
+                        context_id: u32::MAX,
+                        context_build_instructions: context_build_instructions.clone(),
+                    })?,
+                });
+            }
+        }
+
+        // inherit keys done. Now the normal bindings
+        for (ident, body) in let_expr.bindings {
+            let args = self.compile_subchunk(
+                lookup_scope,
+                &mut instruction_buf,
+                &mut cached_context_instructions,
+                body,
+            )?;
+            slot_id -= 1;
+            target_buffer.push(VmOp::AllocateThunk {
+                slot: slot_id,
+                args,
+            });
+        }
+
+        // finally, all binding thunks are properly set.
+        // now we can emit the body instructions
+        self.translate_to_ops(lookup_scope, target_buffer, *let_expr.body)?;
+
+        // and restore the previous status quo
+        target_buffer.push(VmOp::DropThunks(added_thunks));
+        self.current_thunk_stack_height = height_before;
+        lookup_scope.drop_entries(added_keys);
+
+        Ok(())
+    }
+
+    fn compile_subchunk(
+        &mut self,
+        lookup_scope: &mut LookupScope<'src, '_>,
+        opcode_buf: &mut Vec<VmOp>,
+        context_cache: &mut BTreeMap<Vec<ValueSource>, (u32, GcPointer<Array<ValueSource>>)>,
+        expr: NixExpr<'src>,
+    ) -> Result<GcPointer<ThunkAllocArgs>, CompileError> {
+        let mut subscope = lookup_scope.subscope();
+        ThunkCompiler::new(&mut self.compiler).translate_to_ops(&mut subscope, opcode_buf, expr)?;
+        let code = self.compiler.gc_handle.alloc_vec(opcode_buf)?;
+        let ctx_ins = subscope.get_inherit_context();
+        let (context_id, context_build_instructions) =
+            if let Some((id, cached)) = context_cache.get(ctx_ins) {
+                (*id, cached.clone())
+            } else {
+                let insn = self.compiler.gc_handle.alloc_slice(ctx_ins)?;
+                let id = context_cache.len() as u32;
+                context_cache.insert(ctx_ins.to_vec(), (id, insn.clone()));
+                (id, insn)
+            };
+
+        let res = self.compiler.gc_handle.alloc(ThunkAllocArgs {
+            context_id,
+            code,
+            context_build_instructions,
+        })?;
+
+        Ok(res)
     }
 }

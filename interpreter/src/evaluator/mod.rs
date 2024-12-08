@@ -36,6 +36,7 @@ impl<'gc> Evaluator<'gc> {
                 Thunk::Deferred { context, code } => {
                     let mut code_vec: Vec<_> = Vec::new();
                     code_vec.extend_from_slice(self.gc_handle.load(&code).as_ref());
+                    println!("code: {code_vec:?}");
                     let mut code = code_vec.into_iter();
                     let context = context.clone();
                     *thunk = Thunk::Blackhole;
@@ -45,10 +46,10 @@ impl<'gc> Evaluator<'gc> {
                             VmOp::AllocList(_) => todo!(),
                             VmOp::BuildAttrset => todo!(),
                             VmOp::LoadContext(_) => todo!(),
-                            VmOp::AllocateThunk {
-                                context_length,
-                                code,
-                            } => todo!(),
+                            VmOp::LoadLocalThunk(_) => todo!(),
+                            VmOp::PushBlackholes(count) => todo!(),
+                            VmOp::DropThunks(count) => todo!(),
+                            VmOp::AllocateThunk { slot, args } => todo!(),
                             VmOp::Skip(to_skip) => {
                                 (&mut code).take(to_skip as usize).for_each(|_| {});
                             }
