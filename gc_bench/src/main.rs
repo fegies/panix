@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use gc::{specialized_types::string::SimpleGcString, GcHandle, GcPointer, GcResult, RawGcPointer};
 use gc_derive::Trace;
 

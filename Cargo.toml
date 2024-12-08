@@ -1,13 +1,11 @@
 [workspace]
 resolver = "2"
 
-default-run = "panix"
 
 members = [
     "lexer",
     "parser",
     "panix",
-    "identpool",
     "gc",
     "gc_derive",
     "lexer_impedance_matcher",
@@ -16,7 +14,6 @@ members = [
 
 [workspace.dependencies]
 parser = {path = "./parser"}
-identpool = {path = "./identpool"}
 lexer = {path = "./lexer" }
 interpreter = {path = "./interpreter"}
 gc = {path = "./gc"}

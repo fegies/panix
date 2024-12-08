@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use lexer::Token;
 
-use crate::parser::{
-    ast::{LetInExpr, NixExpr},
-    ParseResult, TokenSource,
-};
+use crate::parser::{ast::LetInExpr, ParseResult, TokenSource};
 
 use super::{unexpected, Parser};
 

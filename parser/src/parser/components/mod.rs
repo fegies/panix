@@ -8,7 +8,7 @@ pub mod list;
 pub mod string;
 mod with;
 
-use std::backtrace::{self, Backtrace};
+use std::backtrace::Backtrace;
 
 use lexer::{Token, TokenWithPosition};
 

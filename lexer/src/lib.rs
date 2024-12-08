@@ -1,5 +1,5 @@
 use core::str::Utf8Error;
-use std::fmt::{Display, Pointer};
+use std::fmt::Display;
 
 mod lexer;
 

@@ -315,7 +315,6 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 todo!()
             }
         }
-        Ok(())
     }
 
     fn translate_value_ref(

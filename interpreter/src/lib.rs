@@ -1,3 +1,4 @@
+#![allow(dead_code, unused)]
 mod compiler;
 pub mod util;
 mod vm;
@@ -16,8 +17,8 @@ use std::{
 
 use compiler::CompileError;
 use gc::{GcError, GcHandle};
-use parser::{ast::NixExpr, ParseError};
-use vm::value::{NixValue, Thunk};
+use parser::ParseError;
+use vm::value::Thunk;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EvaluateError {
