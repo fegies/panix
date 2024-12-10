@@ -86,3 +86,7 @@ fn test_funccall_without_spaces() {
 fn test_simple_let_in() {
     eval_expr("let a = 42; b = 11; in a", "42");
 }
+#[test]
+fn test_let_reuse() {
+    eval_expr("let a = 1 + 1; in a + a", "4");
+}
