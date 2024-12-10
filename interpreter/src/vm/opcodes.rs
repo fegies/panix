@@ -13,7 +13,7 @@ pub struct ContextReference(pub u32);
 
 #[derive(Debug, Trace, Clone)]
 pub struct ExecutionContext {
-    pub entries: GcPointer<Array<Thunk>>,
+    pub entries: GcPointer<Array<GcPointer<Thunk>>>,
 }
 
 #[derive(Debug, Trace)]

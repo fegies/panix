@@ -314,7 +314,7 @@ impl GcHandle {
     /// will return a pointer to the new value.
     pub fn replace<TData>(
         &mut self,
-        ptr: GcPointer<TData>,
+        ptr: &GcPointer<TData>,
         new_value: GcPointer<TData>,
     ) -> GcPointer<TData> {
         let target_generation = self
@@ -334,7 +334,7 @@ impl GcHandle {
                 .get_heapref()
                 .resolve_mut()
                 .forward_to(new_value.as_ref().get_heapref());
-            new_value
+            new_value.clone()
         } else {
             // the source reference would outlive the replacement value.
             // to ensure this does not happen, we need to promote the value to the generation the source is in.

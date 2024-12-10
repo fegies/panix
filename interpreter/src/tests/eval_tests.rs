@@ -84,5 +84,5 @@ fn test_funccall_without_spaces() {
 
 #[test]
 fn test_simple_let_in() {
-    eval_expr("let a = 42; in a", "42");
+    eval_expr("let a = 42; b = 11; in a", "42");
 }
