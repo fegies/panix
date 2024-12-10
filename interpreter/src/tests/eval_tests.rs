@@ -90,3 +90,10 @@ fn test_simple_let_in() {
 fn test_let_reuse() {
     eval_expr("let a = 1 + 1; in a + a", "4");
 }
+
+#[test]
+fn test_nested_let() {
+    eval_expr("let a = 1; b = let c = 2; in a + c; in b", "3");
+    todo!();
+    eval_expr("let a = 1; in (let b = 2; in a + b)", "3");
+}
