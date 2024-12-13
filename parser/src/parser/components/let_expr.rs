@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use lexer::Token;
 
@@ -10,7 +10,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
     /// parse a let in expression.
     /// assumes that the initial let has already been parsed
     pub fn parse_let(&mut self) -> ParseResult<LetInExpr<'t>> {
-        let mut bindings = HashMap::new();
+        let mut bindings = BTreeMap::new();
         let mut inherit_entries = Vec::new();
 
         loop {

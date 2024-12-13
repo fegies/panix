@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt::Write};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Write,
+};
 
 pub use lexer::SourcePosition;
 
@@ -85,7 +88,7 @@ pub enum CompoundValue<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct LetInExpr<'a> {
-    pub bindings: HashMap<&'a str, NixExpr<'a>>,
+    pub bindings: BTreeMap<&'a str, NixExpr<'a>>,
     pub inherit_entries: Vec<InheritEntry<'a>>,
     pub body: Box<NixExpr<'a>>,
 }

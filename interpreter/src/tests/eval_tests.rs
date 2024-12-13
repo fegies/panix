@@ -94,6 +94,5 @@ fn test_let_reuse() {
 #[test]
 fn test_nested_let() {
     eval_expr("let a = 1; b = let c = 2; in a + c; in b", "3");
-    todo!();
     eval_expr("let a = 1; in (let b = 2; in a + b)", "3");
 }

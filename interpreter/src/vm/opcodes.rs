@@ -2,7 +2,7 @@ use super::value::{NixValue, Thunk};
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
 
-#[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Trace)]
+#[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Trace, Debug)]
 pub enum ValueSource {
     ContextReference(u32),
     ThunkStackRef(u32),

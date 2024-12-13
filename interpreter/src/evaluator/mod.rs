@@ -17,7 +17,7 @@ pub struct Evaluator<'gc> {
     stack_cache: Vec<ThunkEvalState>,
     thunk_alloc_buffer: Vec<GcPointer<Thunk>>,
 }
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct ThunkEvalState {
     context: Vec<GcPointer<Thunk>>,
     local_stack: Vec<NixValue>,
@@ -52,7 +52,7 @@ impl<'gc> Evaluator<'gc> {
 }
 
 impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
-    fn force_thunk(&mut self, thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
+    fn force_thunk(mut self, thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
         match self.evaluator.gc_handle.load(&thunk) {
             Thunk::Blackhole => return Err(EvaluateError::BlackholeEvaluated),
             Thunk::Value(v) => return Ok(v.clone()),
@@ -81,7 +81,11 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                 match opcode {
                     VmOp::AllocList(_) => todo!(),
                     VmOp::BuildAttrset => todo!(),
-                    VmOp::LoadContext(_) => todo!(),
+                    VmOp::LoadContext(idx) => {
+                        let thunk = self.state.context[idx.0 as usize].clone();
+                        let value = self.evaluator.get_evaluator().force_thunk(thunk)?;
+                        self.state.local_stack.push(value);
+                    }
                     VmOp::LoadLocalThunk(idx) => {
                         let thunk = self.state.thunk_stack[idx as usize].clone();
                         let value = self.evaluator.get_evaluator().force_thunk(thunk)?;
@@ -98,9 +102,16 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         let new_len = thunkstack.len() - count as usize;
                         thunkstack.truncate(new_len);
                     }
+
                     VmOp::AllocateThunk { slot, args } => {
                         let args = self.evaluator.gc_handle.load(&args);
                         let code = args.code.clone();
+                        let build_instructions = self
+                            .evaluator
+                            .gc_handle
+                            .load(&args.context_build_instructions)
+                            .as_ref();
+                        println!("ctx: {build_instructions:?}");
                         let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
                         thunk_buf.clear();
                         for insn in self
@@ -113,7 +124,10 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                 crate::vm::opcodes::ValueSource::ContextReference(ctxref) => {
                                     thunk_buf.push(self.state.context[(*ctxref) as usize].clone())
                                 }
-                                crate::vm::opcodes::ValueSource::ThunkStackRef(_) => todo!(),
+                                crate::vm::opcodes::ValueSource::ThunkStackRef(stackref) => {
+                                    thunk_buf
+                                        .push(self.state.thunk_stack[(*stackref) as usize].clone())
+                                }
                             }
                         }
                         let context = ExecutionContext {
@@ -126,6 +140,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         let dest_idx = self.state.thunk_stack.len() - 1 - slot as usize;
                         self.state.thunk_stack[dest_idx] = new_thunk;
                     }
+
                     VmOp::Skip(to_skip) => {
                         (&mut code).take(to_skip as usize).for_each(|_| {});
                     }
