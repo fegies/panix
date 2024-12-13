@@ -5,7 +5,7 @@ use gc::{GcHandle, GcPointer};
 use crate::{
     vm::{
         opcodes::{ExecutionContext, VmOp},
-        value::{NixValue, Thunk},
+        value::{self, List, NixValue, Thunk},
     },
     EvaluateError,
 };
@@ -79,7 +79,16 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             while let Some(opcode) = code.next() {
                 println!("executing: {opcode:?}");
                 match opcode {
-                    VmOp::AllocList(_) => todo!(),
+                    VmOp::AllocList(list_len) => {
+                        let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
+                        let end = self.state.thunk_stack.len();
+                        let start = end - list_len as usize;
+                        thunk_buf.extend(self.state.thunk_stack.drain(start..end));
+                        let entries = self.evaluator.gc_handle.alloc_vec(thunk_buf)?;
+                        self.state
+                            .local_stack
+                            .push(NixValue::List(value::List { entries }));
+                    }
                     VmOp::BuildAttrset => todo!(),
                     VmOp::LoadContext(idx) => {
                         let thunk = self.state.context[idx.0 as usize].clone();
@@ -213,14 +222,14 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         let right = self.pop()?;
                         let left = self.pop()?;
                         let result = Some(Ordering::Equal)
-                            == compare_values(self.evaluator.gc_handle, &left, &right);
+                            == compare_values(&mut self.evaluator, &left, &right)?;
                         self.state.local_stack.push(NixValue::Bool(result));
                     }
                     VmOp::CompareNotEqual => {
                         let right = self.pop()?;
                         let left = self.pop()?;
                         let result = Some(Ordering::Equal)
-                            != compare_values(self.evaluator.gc_handle, &left, &right);
+                            != compare_values(&mut self.evaluator, &left, &right)?;
                         self.state.local_stack.push(NixValue::Bool(result));
                     }
                     VmOp::Sub => {
@@ -297,8 +306,13 @@ fn bool_op(
     }
 }
 
-fn compare_values(gc_handle: &GcHandle, l: &NixValue, r: &NixValue) -> Option<Ordering> {
-    match (l, r) {
+fn compare_values(
+    evaluator: &mut Evaluator,
+    l: &NixValue,
+    r: &NixValue,
+) -> Result<Option<Ordering>, EvaluateError> {
+    let gc_handle = &evaluator.gc_handle;
+    let res = match (l, r) {
         (NixValue::String(l), NixValue::String(r)) => {
             let l = l.load(gc_handle);
             let r = r.load(gc_handle);
@@ -310,9 +324,47 @@ fn compare_values(gc_handle: &GcHandle, l: &NixValue, r: &NixValue) -> Option<Or
         (NixValue::Int(l), NixValue::Float(r)) => (*l as f64).partial_cmp(&r),
         (NixValue::Float(l), NixValue::Int(r)) => l.partial_cmp(&(*r as f64)),
         (NixValue::Float(l), NixValue::Float(r)) => l.partial_cmp(&r),
-        (NixValue::Path(l), NixValue::Path(r)) => todo!(),
+        (NixValue::Path(l), NixValue::Path(r)) => {
+            let l = l.load(gc_handle);
+            let r = r.load(gc_handle);
+            Some(l.cmp(r))
+        }
         (NixValue::Attrset(l), NixValue::Attrset(r)) => todo!(),
-        (NixValue::List(_), NixValue::List(_)) => todo!(),
+        (NixValue::List(l), NixValue::List(r)) => return compare_lists(evaluator, l, r),
         _ => None,
+    };
+
+    Ok(res)
+}
+
+fn compare_lists(
+    evaluator: &mut Evaluator,
+    left: &List,
+    right: &List,
+) -> Result<Option<Ordering>, EvaluateError> {
+    let mut compared_to_idx: usize = 0;
+    loop {
+        let (l_thunk, r_thunk) = {
+            let gc_handle = &evaluator.gc_handle;
+            let slice_l = &gc_handle.load(&left.entries).as_ref()[compared_to_idx..];
+            let slice_r = &gc_handle.load(&right.entries).as_ref()[compared_to_idx..];
+            match (slice_l.first(), slice_r.first()) {
+                (None, None) => return Ok(Some(Ordering::Equal)),
+                (None, Some(_)) => return Ok(Some(Ordering::Less)),
+                (Some(_), None) => return Ok(Some(Ordering::Greater)),
+                (Some(l), Some(r)) => (l.clone(), r.clone()),
+            }
+        };
+
+        let l_value = evaluator.get_evaluator().force_thunk(l_thunk)?;
+        let r_value = evaluator.get_evaluator().force_thunk(r_thunk)?;
+
+        match compare_values(evaluator, &l_value, &r_value)? {
+            Some(Ordering::Equal) => {
+                // we compared the value completely and need to continue with the next one.
+                compared_to_idx += 1;
+            }
+            res => return Ok(res),
+        }
     }
 }

@@ -89,5 +89,5 @@ pub enum FunctionArgs {
 
 #[derive(Debug, Trace, Clone)]
 pub struct List {
-    pub entries: GcPointer<Array<Thunk>>,
+    pub entries: GcPointer<Array<GcPointer<Thunk>>>,
 }

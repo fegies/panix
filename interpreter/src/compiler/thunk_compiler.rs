@@ -334,7 +334,22 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         target_buffer: &mut Vec<VmOp>,
         list: Vec<NixExpr<'src>>,
     ) -> Result<(), CompileError> {
-        todo!()
+        if list.is_empty() {
+            target_buffer.push(VmOp::AllocList(0));
+            return Ok(());
+        }
+
+        let num_entries = list.len();
+        let mut ctx_cache = BTreeMap::new();
+        let mut sub_code_buf = Vec::new();
+        for expr in list {
+            let args =
+                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut ctx_cache, expr)?;
+            target_buffer.push(VmOp::AllocateThunk { slot: None, args });
+        }
+        target_buffer.push(VmOp::AllocList(num_entries as u32));
+
+        Ok(())
     }
 
     fn translate_value_ref(
