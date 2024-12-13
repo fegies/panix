@@ -307,9 +307,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
     fn translate_compound_value(
         &mut self,
-        lookup_scope: &mut LookupScope<'_, '_>,
+        lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
-        value: parser::ast::CompoundValue<'_>,
+        value: parser::ast::CompoundValue<'src>,
     ) -> Result<(), CompileError> {
         match value {
             parser::ast::CompoundValue::Attrset(parser::ast::Attrset {
@@ -323,9 +323,18 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 todo!()
             }
             parser::ast::CompoundValue::List(parser::ast::List { entries }) => {
-                todo!()
+                self.translate_list(lookup_scope, target_buffer, entries)
             }
         }
+    }
+
+    fn translate_list(
+        &mut self,
+        lookup_scope: &mut LookupScope<'src, '_>,
+        target_buffer: &mut Vec<VmOp>,
+        list: Vec<NixExpr<'src>>,
+    ) -> Result<(), CompileError> {
+        todo!()
     }
 
     fn translate_value_ref(
@@ -405,7 +414,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 )?;
                 slot_id -= 1;
                 target_buffer.push(VmOp::AllocateThunk {
-                    slot: slot_id,
+                    slot: Some(slot_id),
                     args: thunk_args,
                 });
             } else {
@@ -432,7 +441,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 let code = self.compiler.gc_handle.alloc_vec(&mut instruction_buf)?;
                 slot_id -= 1;
                 target_buffer.push(VmOp::AllocateThunk {
-                    slot: slot_id,
+                    slot: Some(slot_id),
                     args: self.compiler.gc_handle.alloc(ThunkAllocArgs {
                         code,
                         context_id: u32::MAX,
@@ -452,7 +461,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             )?;
             slot_id -= 1;
             target_buffer.push(VmOp::AllocateThunk {
-                slot: slot_id,
+                slot: Some(slot_id),
                 args,
             });
         }

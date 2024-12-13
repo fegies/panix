@@ -137,8 +137,12 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             .evaluator
                             .gc_handle
                             .alloc(Thunk::Deferred { context, code })?;
-                        let dest_idx = self.state.thunk_stack.len() - 1 - slot as usize;
-                        self.state.thunk_stack[dest_idx] = new_thunk;
+                        if let Some(slot) = slot {
+                            let dest_idx = self.state.thunk_stack.len() - 1 - slot as usize;
+                            self.state.thunk_stack[dest_idx] = new_thunk;
+                        } else {
+                            self.state.thunk_stack.push(new_thunk);
+                        }
                     }
 
                     VmOp::Skip(to_skip) => {

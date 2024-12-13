@@ -52,8 +52,10 @@ pub enum VmOp {
     /// assembles a thunk by following the provided instructions.
     /// it is then written to the context at the specified slot.
     /// the slot is measured from the top with 0 being the top element of the stack
+    ///
+    /// If the slot is not defined, a new thunk should be pushed to the thunk stack instead.
     AllocateThunk {
-        slot: u16,
+        slot: Option<u16>,
         args: GcPointer<ThunkAllocArgs>,
     },
 
