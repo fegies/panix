@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use gc::{GcHandle, GcPointer};
+use gc::{specialized_types::array::Array, GcHandle, GcPointer};
 
 use crate::{
     vm::{
@@ -40,36 +40,42 @@ impl<'gc> Evaluator<'gc> {
     }
     pub fn eval_expression(&mut self, mut thunk: Thunk) -> Result<NixValue, EvaluateError> {
         let ptr = self.gc_handle.alloc(thunk)?;
-        self.get_evaluator().force_thunk(ptr)
+        self.force_thunk(ptr)
     }
-    fn get_evaluator(&mut self) -> ThunkEvaluator<'_, 'gc> {
-        let state = self.stack_cache.pop().unwrap_or_default();
-        ThunkEvaluator {
-            state,
-            evaluator: self,
+
+    fn force_thunk(&mut self, thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
+        match self.gc_handle.load(&thunk) {
+            Thunk::Blackhole => return Err(EvaluateError::BlackholeEvaluated),
+            Thunk::Value(v) => return Ok(v.clone()),
+            Thunk::Deferred { context, code } => {
+                let mut state = self.stack_cache.pop().unwrap_or_default();
+                state
+                    .context
+                    .extend_from_slice(self.gc_handle.load(&context.entries).as_ref());
+                state
+                    .code_buf
+                    .extend_from_slice(self.gc_handle.load(code).as_ref());
+
+                let blackhole = self.gc_handle.alloc(Thunk::Blackhole)?;
+                self.gc_handle.replace(&thunk, blackhole);
+
+                let result = ThunkEvaluator {
+                    state,
+                    evaluator: self,
+                }
+                .compute_result()?;
+
+                let result_ptr = self.gc_handle.alloc(Thunk::Value(result.clone()))?;
+                self.gc_handle.replace(&thunk, result_ptr);
+
+                Ok(result)
+            }
         }
     }
 }
 
 impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
-    fn force_thunk(mut self, thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
-        match self.evaluator.gc_handle.load(&thunk) {
-            Thunk::Blackhole => return Err(EvaluateError::BlackholeEvaluated),
-            Thunk::Value(v) => return Ok(v.clone()),
-            Thunk::Deferred { context, code } => {
-                self.state.context.clear();
-                self.state
-                    .context
-                    .extend_from_slice(self.evaluator.gc_handle.load(&context.entries).as_ref());
-                self.state.code_buf.clear();
-                self.state
-                    .code_buf
-                    .extend_from_slice(self.evaluator.gc_handle.load(code).as_ref());
-            }
-        }
-
-        let blackhole = self.evaluator.gc_handle.alloc(Thunk::Blackhole)?;
-        self.evaluator.gc_handle.replace(&thunk, blackhole);
+    fn compute_result(mut self) -> Result<NixValue, EvaluateError> {
         let mut code_buf = core::mem::take(&mut self.state.code_buf);
 
         println!("forcing thunk...");
@@ -92,12 +98,12 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                     VmOp::BuildAttrset => todo!(),
                     VmOp::LoadContext(idx) => {
                         let thunk = self.state.context[idx.0 as usize].clone();
-                        let value = self.evaluator.get_evaluator().force_thunk(thunk)?;
+                        let value = self.evaluator.force_thunk(thunk)?;
                         self.state.local_stack.push(value);
                     }
                     VmOp::LoadLocalThunk(idx) => {
                         let thunk = self.state.thunk_stack[idx as usize].clone();
-                        let value = self.evaluator.get_evaluator().force_thunk(thunk)?;
+                        let value = self.evaluator.force_thunk(thunk)?;
                         self.state.local_stack.push(value);
                     }
                     VmOp::PushBlackholes(count) => {
@@ -254,11 +260,6 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
         println!("thunk evaluated to {result_value:?}");
 
-        let value_thunk = self
-            .evaluator
-            .gc_handle
-            .alloc(Thunk::Value(result_value.clone()))?;
-        self.evaluator.gc_handle.replace(&thunk, value_thunk);
         Ok(result_value)
     }
 
@@ -356,8 +357,8 @@ fn compare_lists(
             }
         };
 
-        let l_value = evaluator.get_evaluator().force_thunk(l_thunk)?;
-        let r_value = evaluator.get_evaluator().force_thunk(r_thunk)?;
+        let l_value = evaluator.force_thunk(l_thunk)?;
+        let r_value = evaluator.force_thunk(r_thunk)?;
 
         match compare_values(evaluator, &l_value, &r_value)? {
             Some(Ordering::Equal) => {
