@@ -59,6 +59,7 @@ struct Compiler<'gc> {
 struct CachedValues {
     true_boolean: GcPointer<NixValue>,
     false_boolean: GcPointer<NixValue>,
+    null_value: GcPointer<NixValue>,
     empty_string: GcPointer<NixValue>,
 }
 impl CachedValues {
@@ -67,6 +68,7 @@ impl CachedValues {
         Ok(Self {
             true_boolean: gc_handle.alloc(NixValue::Bool(true))?,
             false_boolean: gc_handle.alloc(NixValue::Bool(false))?,
+            null_value: gc_handle.alloc(NixValue::Null)?,
             empty_string: gc_handle.alloc(empty_string)?,
         })
     }

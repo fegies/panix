@@ -369,16 +369,27 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         ident: &'src str,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
-        let src = lookup_scope
-            .deref_ident(ident)
-            .ok_or_else(|| CompileError::Deref {
-                value: ident.to_string(),
-                pos,
-            })?;
-
-        let opcode = match src {
-            ValueSource::ContextReference(ctxref) => VmOp::LoadContext(ContextReference(ctxref)),
-            ValueSource::ThunkStackRef(localref) => VmOp::LoadLocalThunk(localref),
+        let opcode = if let Some(src) = lookup_scope.deref_ident(ident) {
+            match src {
+                ValueSource::ContextReference(ctxref) => {
+                    VmOp::LoadContext(ContextReference(ctxref))
+                }
+                ValueSource::ThunkStackRef(localref) => VmOp::LoadLocalThunk(localref),
+            }
+        } else {
+            // whatever we tried to look up did not exist in the defined scope.
+            // try to see if it is a builtin.
+            match ident {
+                "true" => VmOp::PushImmediate(self.compiler.cached_values.true_boolean.clone()),
+                "false" => VmOp::PushImmediate(self.compiler.cached_values.false_boolean.clone()),
+                "null" => VmOp::PushImmediate(self.compiler.cached_values.null_value.clone()),
+                _ => {
+                    return Err(CompileError::Deref {
+                        value: ident.to_string(),
+                        pos,
+                    });
+                }
+            }
         };
 
         target_buffer.push(opcode);
