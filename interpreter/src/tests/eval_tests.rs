@@ -74,10 +74,10 @@ fn test_alloc_list() {
 //     eval_expr("let a = {f = 42;}; in {inherit (a) f;}.f", "42");
 // }
 
-// #[test]
-// fn test_list_without_spaces() {
-//     eval_expr("[(1)(2)]", "[1 2]");
-// }
+#[test]
+fn test_list_without_spaces() {
+    eval_expr("[(1)(2)]", "[1 2]");
+}
 
 // #[test]
 // fn test_funccall_without_spaces() {
