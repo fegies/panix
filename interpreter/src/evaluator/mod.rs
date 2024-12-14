@@ -213,7 +213,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                     }
                     VmOp::BinaryNot => {
                         let result = match self.pop()? {
-                            NixValue::Bool(b) => NixValue::Bool(b),
+                            NixValue::Bool(b) => NixValue::Bool(!b),
                             _ => return Err(EvaluateError::TypeError),
                         };
                         self.state.local_stack.push(result);
@@ -224,18 +224,42 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         let imm = self.evaluator.gc_handle.load(&imm);
                         self.state.local_stack.push(imm.clone());
                     }
-                    VmOp::CompareEqual => {
+                    VmOp::Compare(compare_mode) => {
                         let right = self.pop()?;
                         let left = self.pop()?;
-                        let result = Some(Ordering::Equal)
-                            == compare_values(&mut self.evaluator, &left, &right)?;
-                        self.state.local_stack.push(NixValue::Bool(result));
-                    }
-                    VmOp::CompareNotEqual => {
-                        let right = self.pop()?;
-                        let left = self.pop()?;
-                        let result = Some(Ordering::Equal)
-                            != compare_values(&mut self.evaluator, &left, &right)?;
+
+                        let result = match (
+                            compare_mode,
+                            compare_values(&mut self.evaluator, &left, &right)?,
+                        ) {
+                            (crate::vm::opcodes::CompareMode::Equal, Some(Ordering::Equal)) => true,
+                            (crate::vm::opcodes::CompareMode::Equal, _) => false,
+                            (crate::vm::opcodes::CompareMode::NotEqual, Some(Ordering::Equal)) => {
+                                false
+                            }
+                            (crate::vm::opcodes::CompareMode::NotEqual, _) => true,
+                            (
+                                crate::vm::opcodes::CompareMode::LessThanStrict,
+                                Some(Ordering::Less),
+                            ) => true,
+                            (crate::vm::opcodes::CompareMode::LessThanStrict, _) => false,
+                            (
+                                crate::vm::opcodes::CompareMode::LessThanOrEqual,
+                                Some(Ordering::Less | Ordering::Equal),
+                            ) => true,
+                            (crate::vm::opcodes::CompareMode::LessThanOrEqual, _) => false,
+                            (
+                                crate::vm::opcodes::CompareMode::GreaterThanStrict,
+                                Some(Ordering::Greater),
+                            ) => true,
+                            (crate::vm::opcodes::CompareMode::GreaterThanStrict, _) => false,
+                            (
+                                crate::vm::opcodes::CompareMode::GreaterOrEqual,
+                                Some(Ordering::Greater | Ordering::Equal),
+                            ) => true,
+                            (crate::vm::opcodes::CompareMode::GreaterOrEqual, _) => false,
+                        };
+
                         self.state.local_stack.push(NixValue::Bool(result));
                     }
                     VmOp::Sub => {

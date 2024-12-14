@@ -97,9 +97,7 @@ pub enum VmOp {
     CastToPath,
 
     /// pops two values from the stack, performs a comparison and pushes the result
-    CompareEqual,
-    /// pops two values from the stack, performs a comparison and pushes the result
-    CompareNotEqual,
+    Compare(CompareMode),
 
     /// pops two values from the stack, assets they are attrsets and merges the attributes
     /// from the second into the first, creating a new attrset.
@@ -119,4 +117,14 @@ pub enum VmOp {
     /// the stack. Since no attribute value could be retrieved in this case, the result boolen will
     /// be the only pushed value.
     GetAttribute { push_error: bool },
+}
+
+#[derive(Clone, Copy, Debug, Trace)]
+pub enum CompareMode {
+    Equal,
+    NotEqual,
+    LessThanStrict,
+    LessThanOrEqual,
+    GreaterThanStrict,
+    GreaterOrEqual,
 }

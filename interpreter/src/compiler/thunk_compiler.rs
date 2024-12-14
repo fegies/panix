@@ -6,7 +6,9 @@ use parser::ast::{self, BasicValue, IfExpr, KnownNixStringContent, NixExpr, Sour
 use crate::{
     compiler::lookup_scope::LocalThunkRef,
     vm::{
-        opcodes::{ContextReference, ExecutionContext, ThunkAllocArgs, ValueSource, VmOp},
+        opcodes::{
+            CompareMode, ContextReference, ExecutionContext, ThunkAllocArgs, ValueSource, VmOp,
+        },
         value::{NixValue, Thunk},
     },
 };
@@ -219,8 +221,8 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                     parser::ast::BinopOpcode::Add => VmOp::Add,
                     parser::ast::BinopOpcode::ListConcat => VmOp::ConcatLists(2),
                     parser::ast::BinopOpcode::AttrsetMerge => VmOp::MergeAttrsets,
-                    parser::ast::BinopOpcode::Equals => VmOp::CompareEqual,
-                    parser::ast::BinopOpcode::NotEqual => VmOp::CompareNotEqual,
+                    parser::ast::BinopOpcode::Equals => VmOp::Compare(CompareMode::Equal),
+                    parser::ast::BinopOpcode::NotEqual => VmOp::Compare(CompareMode::NotEqual),
                     parser::ast::BinopOpcode::Subtract => VmOp::Sub,
                     parser::ast::BinopOpcode::Multiply => VmOp::Mul,
                     parser::ast::BinopOpcode::Divide => VmOp::Div,
@@ -284,10 +286,18 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
                         return Ok(());
                     }
-                    parser::ast::BinopOpcode::LessThanOrEqual => todo!(),
-                    parser::ast::BinopOpcode::LessThanStrict => todo!(),
-                    parser::ast::BinopOpcode::GreaterOrEqual => todo!(),
-                    parser::ast::BinopOpcode::GreaterThanStrict => todo!(),
+                    parser::ast::BinopOpcode::LessThanOrEqual => {
+                        VmOp::Compare(CompareMode::LessThanOrEqual)
+                    }
+                    parser::ast::BinopOpcode::LessThanStrict => {
+                        VmOp::Compare(CompareMode::LessThanStrict)
+                    }
+                    parser::ast::BinopOpcode::GreaterOrEqual => {
+                        VmOp::Compare(CompareMode::GreaterOrEqual)
+                    }
+                    parser::ast::BinopOpcode::GreaterThanStrict => {
+                        VmOp::Compare(CompareMode::GreaterThanStrict)
+                    }
                 };
                 self.translate_to_ops(lookup_scope, target_buffer, *right)?;
                 target_buffer.push(vmop);
