@@ -79,6 +79,12 @@ fn test_list_without_spaces() {
     eval_expr("[(1)(2)]", "[1 2]");
 }
 
+#[test]
+fn test_boolean_logic() {
+    eval_expr("true || false", "true");
+    eval_expr("true && false", "false");
+}
+
 // #[test]
 // fn test_funccall_without_spaces() {
 //     eval_expr("let f = a: a+1; in f(42)", "43");
