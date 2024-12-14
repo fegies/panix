@@ -98,3 +98,24 @@ fn test_funccall_without_spaces() {
     let value = parse_nix("f(1)".as_bytes()).unwrap();
     assert_eq!(expected, value);
 }
+
+#[test]
+fn test_list_without_spaces() {
+    let expected = NixExpr {
+        position: SourcePosition { line: 1, column: 1 },
+        content: crate::ast::NixExprContent::CompoundValue(CompoundValue::List(crate::ast::List {
+            entries: vec![
+                NixExpr {
+                    position: SourcePosition { line: 1, column: 4 },
+                    content: crate::ast::NixExprContent::BasicValue(BasicValue::Int(1)),
+                },
+                NixExpr {
+                    position: SourcePosition { line: 1, column: 7 },
+                    content: crate::ast::NixExprContent::BasicValue(BasicValue::Int(2)),
+                },
+            ],
+        })),
+    };
+    let value = parse_nix("[(1)(2)]".as_bytes()).unwrap();
+    assert_eq!(expected, value);
+}

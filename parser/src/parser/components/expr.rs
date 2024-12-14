@@ -75,6 +75,14 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             content: lhs,
         };
 
+        if !allow_spaces {
+            if let Some(peeked) = self.peek() {
+                if *peeked == Token::Whitespace || could_start_expression(peeked) {
+                    return Ok(lhs);
+                }
+            }
+        }
+
         loop {
             if let Some((l_bp, r_bp)) = self.peek().and_then(infix_binding_power) {
                 if l_bp < min_bp {
@@ -83,13 +91,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
 
                 let token = self.expect_next_or_whitespace()?;
 
-                if token.token == Token::Whitespace {
-                    if !allow_spaces {
-                        break;
-                    }
-                    if !could_start_expression(self.expect_peek()?) {
-                        continue;
-                    }
+                if token.token == Token::Whitespace && !could_start_expression(self.expect_peek()?)
+                {
+                    continue;
                 }
 
                 let opcode = match token.token {
@@ -171,6 +175,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                             }))
                         }
                         Token::CurlyOpen => {
+                            // this is a call, the arg is an attrset
                             let attrset = NixExpr {
                                 position: token.position,
                                 content: NixExprContent::CompoundValue(CompoundValue::Attrset(
