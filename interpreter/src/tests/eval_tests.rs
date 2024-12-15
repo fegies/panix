@@ -69,6 +69,8 @@ fn test_simple_attrset() {
 #[test]
 fn test_get_attribute() {
     eval_expr("{a = 42;}.a", "42");
+    eval_expr("{a = 1;}.a or 42", "1");
+    eval_expr("{a = 1;}.b or 42", "42");
 }
 
 // #[test]
