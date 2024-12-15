@@ -30,9 +30,10 @@ pub enum VmOp {
     /// before pushing the list on the stack.
     AllocList(u32),
 
-    /// pops an array of keys and an array of values from the stack and combines
-    /// them into an attribute set.
-    BuildAttrset,
+    /// pops the specified number of keys from the value stack and
+    /// the specified number of chunks from the thunk stack
+    /// builds an attrest from the pairs and pushes the result.
+    BuildAttrset(u32),
 
     /// Loads the provided context item and pushes it on the stack.
     LoadContext(ContextReference),

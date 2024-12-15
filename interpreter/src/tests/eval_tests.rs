@@ -59,6 +59,18 @@ fn test_alloc_list() {
     eval_expr("[] < []", "false");
 }
 
+#[test]
+fn test_simple_attrset() {
+    eval_expr("{}", "{}");
+    eval_expr("{a = 1;}", "{ a = 1; }");
+    eval_expr("{a = 1;} == {a = 2; }", "false");
+}
+
+// #[test]
+// fn test_get_attribute() {
+//     eval_expr("{a = 42;}.a", "42");
+// }
+
 // #[test]
 // fn test_attrset_lazy_resolution() {
 //     eval_expr("with {}; {a = d; b = 42;}.b", "42");

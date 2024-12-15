@@ -5,7 +5,7 @@ use gc::{specialized_types::array::Array, GcHandle, GcPointer};
 use crate::{
     vm::{
         opcodes::{ExecutionContext, VmOp},
-        value::{self, List, NixValue, Thunk},
+        value::{self, Attrset, List, NixValue, Thunk},
     },
     EvaluateError,
 };
@@ -95,7 +95,46 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             .local_stack
                             .push(NixValue::List(value::List { entries }));
                     }
-                    VmOp::BuildAttrset => todo!(),
+
+                    VmOp::BuildAttrset(num_keys) => {
+                        let entries = if num_keys > 0 {
+                            let mut entries = Vec::new();
+                            for _ in 0..num_keys {
+                                let key = match self.pop()? {
+                                    NixValue::String(key) => key,
+                                    _ => return Err(EvaluateError::TypeError),
+                                };
+                                let value = self
+                                    .state
+                                    .thunk_stack
+                                    .pop()
+                                    .expect("thunk stack exhausted unexpectedly");
+                                entries.push((key, value));
+                            }
+                            entries.sort_by(|(a, _), (b, _)| {
+                                a.load(&self.evaluator.gc_handle)
+                                    .cmp(b.load(&self.evaluator.gc_handle))
+                            });
+
+                            entries.dedup_by(|(a, _), (b, _)| {
+                                a.load(&self.evaluator.gc_handle)
+                                    == b.load(&self.evaluator.gc_handle)
+                            });
+
+                            if entries.len() < num_keys as usize {
+                                return Err(EvaluateError::DuplicateAttrsetKey);
+                            }
+
+                            self.evaluator.gc_handle.alloc_vec(&mut entries)?
+                        } else {
+                            self.evaluator.gc_handle.alloc_slice(&[])?
+                        };
+
+                        self.state
+                            .local_stack
+                            .push(NixValue::Attrset(value::Attrset { entries }));
+                    }
+
                     VmOp::LoadContext(idx) => {
                         let thunk = self.state.context[idx.0 as usize].clone();
                         let value = self.evaluator.force_thunk(thunk)?;
@@ -354,12 +393,63 @@ fn compare_values(
             let r = r.load(gc_handle);
             Some(l.cmp(r))
         }
-        (NixValue::Attrset(l), NixValue::Attrset(r)) => todo!(),
+        (NixValue::Attrset(l), NixValue::Attrset(r)) => return compare_attrsets(evaluator, l, r),
         (NixValue::List(l), NixValue::List(r)) => return compare_lists(evaluator, l, r),
         _ => None,
     };
 
     Ok(res)
+}
+
+fn compare_attrsets(
+    evaluator: &mut Evaluator,
+    left: &Attrset,
+    right: &Attrset,
+) -> Result<Option<Ordering>, EvaluateError> {
+    // first try to detect a difference by looking at just the keys.
+    let number_of_keys = {
+        let left = evaluator.gc_handle.load(&left.entries).as_ref();
+        let right = evaluator.gc_handle.load(&right.entries).as_ref();
+
+        if left.len() != right.len() {
+            return Ok(None);
+        }
+        if (left.is_empty()) {
+            return Ok(Some(Ordering::Equal));
+        }
+
+        let keys_are_equal = left
+            .iter()
+            .map(|e| e.0.load(&evaluator.gc_handle))
+            .eq(right.iter().map(|e| e.0.load(&evaluator.gc_handle)));
+
+        if !keys_are_equal {
+            return Ok(None);
+        }
+
+        left.len()
+    };
+
+    // if we got to this point, the attrests are identical from the key perspective (number and
+    // count).
+    // Now we just need to compare the values.
+    for key_idx in 0..number_of_keys {
+        let left = evaluator.gc_handle.load(&left.entries).as_ref()[key_idx]
+            .1
+            .clone();
+        let right = evaluator.gc_handle.load(&right.entries).as_ref()[key_idx]
+            .1
+            .clone();
+        let left_value = evaluator.force_thunk(left)?;
+        let right_value = evaluator.force_thunk(right)?;
+
+        if compare_values(evaluator, &left_value, &right_value)? != Some(Ordering::Equal) {
+            return Ok(None);
+        }
+    }
+
+    // we could not find a difference
+    Ok(Some(Ordering::Equal))
 }
 
 fn compare_lists(

@@ -158,3 +158,14 @@ where
         }
     }
 }
+
+unsafe impl<T1, T2> Trace for (T1, T2)
+where
+    T1: Trace,
+    T2: Trace,
+{
+    fn trace(&mut self, trace_fn: TraceCallback) {
+        self.0.trace(trace_fn);
+        self.1.trace(trace_fn);
+    }
+}

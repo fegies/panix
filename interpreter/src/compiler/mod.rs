@@ -17,6 +17,13 @@ mod normalize;
 mod tests;
 mod thunk_compiler;
 
+fn get_null_expr() -> NixExpr<'static> {
+    NixExpr {
+        position: SourcePosition { line: 0, column: 0 },
+        content: parser::ast::NixExprContent::BasicValue(parser::ast::BasicValue::Null),
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum ValueSource {
     ContextReference(u32),

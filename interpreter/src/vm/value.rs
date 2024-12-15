@@ -23,7 +23,10 @@ pub struct NixString {
     inner: GcPointer<SimpleGcString>,
 }
 impl NixString {
-    pub fn load<'a>(&'a self, gc_handle: &'a GcHandle) -> &'a str {
+    pub fn load<'a, 'g>(&'a self, gc_handle: &'g GcHandle) -> &'a str
+    where
+        'g: 'a,
+    {
         gc_handle.load(&self.inner).as_ref()
     }
 }
@@ -56,8 +59,7 @@ pub enum NixValue {
 
 #[derive(Debug, Trace, Clone)]
 pub struct Attrset {
-    pub keys: GcPointer<Array<NixString>>,
-    pub values: GcPointer<Array<Thunk>>,
+    pub entries: GcPointer<Array<(NixString, GcPointer<Thunk>)>>,
 }
 impl PartialEq for Attrset {
     fn eq(&self, other: &Self) -> bool {

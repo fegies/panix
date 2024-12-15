@@ -30,6 +30,8 @@ pub enum EvaluateError {
     GcError(#[from] GcError),
     #[error("Type error during evaluation")]
     TypeError,
+    #[error("Key conflict in attribute set")]
+    DuplicateAttrsetKey,
 }
 
 #[derive(Debug, thiserror::Error)]

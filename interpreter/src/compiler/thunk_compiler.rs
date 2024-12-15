@@ -1,10 +1,10 @@
-use std::{collections::BTreeMap, u32};
+use std::{collections::BTreeMap, process::id};
 
 use gc::{specialized_types::array::Array, GcPointer};
 use parser::ast::{self, BasicValue, IfExpr, KnownNixStringContent, NixExpr, SourcePosition};
 
 use crate::{
-    compiler::lookup_scope::LocalThunkRef,
+    compiler::{get_null_expr, lookup_scope::LocalThunkRef},
     vm::{
         opcodes::{
             CompareMode, ContextReference, ExecutionContext, ThunkAllocArgs, ValueSource, VmOp,
@@ -58,7 +58,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 self.translate_basic_value(lookup_scope, target_buffer, b)
             }
             parser::ast::NixExprContent::CompoundValue(c) => {
-                self.translate_compound_value(lookup_scope, target_buffer, c)
+                self.translate_compound_value(lookup_scope, target_buffer, c, expr.position)
             }
             parser::ast::NixExprContent::Code(c) => {
                 self.translate_code(lookup_scope, target_buffer, c, expr.position)
@@ -320,22 +320,156 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
         value: parser::ast::CompoundValue<'src>,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match value {
-            parser::ast::CompoundValue::Attrset(parser::ast::Attrset {
-                is_recursive,
-                inherit_keys,
-                attrs,
-            }) => {
-                if is_recursive {
-                    unreachable!("recursive attrsets should have been normalized by an ast pass")
-                }
-                todo!()
+            parser::ast::CompoundValue::Attrset(attrset) => {
+                self.translate_attrset(lookup_scope, target_buffer, attrset, pos)
             }
             parser::ast::CompoundValue::List(parser::ast::List { entries }) => {
                 self.translate_list(lookup_scope, target_buffer, entries)
             }
         }
+    }
+
+    fn translate_attrset(
+        &mut self,
+        lookup_scope: &mut LookupScope<'src, '_>,
+        target_buffer: &mut Vec<VmOp>,
+        mut attrset: ast::Attrset<'src>,
+        pos: SourcePosition,
+    ) -> Result<(), CompileError> {
+        if attrset.is_recursive {
+            unreachable!("recursive attrsets should have been removed by an ast pass");
+        }
+
+        let mut context_cache = BTreeMap::new();
+        let mut sub_code_buf = Vec::new();
+
+        let previous_height = self.current_thunk_stack_height;
+        let mut number_of_keys = 0;
+
+        if !attrset.inherit_keys.is_empty() {
+            // first, ensure that we have the inherit source attrsets pushed.
+            // we leave the Option filled, but put a null expr in so we can tell later that it had a
+            // source expr.
+            for entry in &mut attrset.inherit_keys {
+                if let Some(src) = entry.source.as_mut() {
+                    let src = core::mem::replace(src.as_mut(), get_null_expr());
+                    let args = self.compile_subchunk(
+                        lookup_scope,
+                        &mut sub_code_buf,
+                        &mut context_cache,
+                        src,
+                    )?;
+                    target_buffer.push(VmOp::AllocateThunk { slot: None, args });
+                    self.current_thunk_stack_height += 1;
+                }
+            }
+
+            let mut current_inherit_source_idx = previous_height;
+
+            let inherit_from_0_code = self.compiler.gc_handle.alloc_vec(&mut sub_code_buf)?;
+
+            // and now, actually emit all the inherit entries.
+            for entry in attrset.inherit_keys {
+                if entry.source.is_some() {
+                    // we actually already emitted the inherit info.
+                    // actually loading the value is implemented as a getattr call.
+                    let context_insn =
+                        self.compiler
+                            .gc_handle
+                            .alloc_slice(&[ValueSource::ContextReference(
+                                current_inherit_source_idx,
+                            )])?;
+                    let context_id = current_inherit_source_idx;
+                    current_inherit_source_idx += 1;
+                    for ident in entry.entries {
+                        let ident_value = self
+                            .compiler
+                            .alloc_string(KnownNixStringContent::Literal(&ident))?;
+
+                        sub_code_buf.push(VmOp::PushImmediate(ident_value.clone()));
+                        // the source, added to the thunk context
+                        sub_code_buf.push(VmOp::LoadContext(ContextReference(0)));
+                        sub_code_buf.push(VmOp::GetAttribute { push_error: false });
+
+                        let code = self.compiler.gc_handle.alloc_vec(&mut sub_code_buf)?;
+                        let alloc_args = self.compiler.gc_handle.alloc(ThunkAllocArgs {
+                            context_id,
+                            code,
+                            context_build_instructions: context_insn.clone(),
+                        })?;
+
+                        target_buffer.push(VmOp::PushImmediate(ident_value));
+                        target_buffer.push(VmOp::AllocateThunk {
+                            slot: None,
+                            args: alloc_args,
+                        });
+                        self.current_thunk_stack_height += 1;
+                        number_of_keys += 1;
+                    }
+                } else {
+                    // we are inheriting from the local scope.
+                    for ident in entry.entries {
+                        let ident_value = self
+                            .compiler
+                            .alloc_string(KnownNixStringContent::Literal(ident))?;
+                        let value_source =
+                            lookup_scope
+                                .deref_ident(ident)
+                                .ok_or_else(|| CompileError::Deref {
+                                    value: ident.to_string(),
+                                    pos,
+                                })?;
+                        let context_build_instructions =
+                            self.compiler.gc_handle.alloc_slice(&[value_source])?;
+                        let alloc_args = self.compiler.gc_handle.alloc(ThunkAllocArgs {
+                            code: inherit_from_0_code.clone(),
+                            context_id: 0,
+                            context_build_instructions,
+                        })?;
+
+                        target_buffer.push(VmOp::PushImmediate(ident_value));
+                        target_buffer.push(VmOp::AllocateThunk {
+                            slot: None,
+                            args: alloc_args,
+                        });
+                        self.current_thunk_stack_height += 1;
+                        number_of_keys += 1;
+                    }
+                }
+            }
+        }
+
+        // inherit entries are done, emit the normal key-value pairs
+        for (key, value) in attrset.attrs {
+            let key = match key {
+                ast::AttrsetKey::Single(key) => key,
+                ast::AttrsetKey::Multi(_) => {
+                    unreachable!("mutlipart attrsets shold have been removed by an ast pass.")
+                }
+            };
+
+            let args =
+                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut context_cache, value)?;
+            target_buffer.push(VmOp::AllocateThunk { slot: None, args });
+            self.current_thunk_stack_height += 1;
+
+            self.translate_string_value(lookup_scope, target_buffer, key)?;
+            number_of_keys += 1;
+        }
+
+        target_buffer.push(VmOp::BuildAttrset(number_of_keys));
+        self.current_thunk_stack_height -= number_of_keys;
+
+        let thunks_to_drop = self.current_thunk_stack_height - previous_height;
+        if thunks_to_drop > 0 {
+            target_buffer.push(VmOp::DropThunks(thunks_to_drop));
+            self.current_thunk_stack_height = previous_height;
+        }
+
+        Ok(())
     }
 
     fn translate_list(
