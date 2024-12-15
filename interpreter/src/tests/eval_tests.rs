@@ -66,10 +66,10 @@ fn test_simple_attrset() {
     eval_expr("{a = 1;} == {a = 2; }", "false");
 }
 
-// #[test]
-// fn test_get_attribute() {
-//     eval_expr("{a = 42;}.a", "42");
-// }
+#[test]
+fn test_get_attribute() {
+    eval_expr("{a = 42;}.a", "42");
+}
 
 // #[test]
 // fn test_attrset_lazy_resolution() {

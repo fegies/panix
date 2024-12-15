@@ -188,7 +188,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 // first push the name
                 self.translate_string_value(lookup_scope, target_buffer, name)?;
 
-                // then the attribute name
+                // then the attribute set value
                 self.translate_to_ops(lookup_scope, target_buffer, *left)?;
 
                 if let Some(default) = default {

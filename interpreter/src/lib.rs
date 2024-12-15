@@ -32,6 +32,8 @@ pub enum EvaluateError {
     TypeError,
     #[error("Key conflict in attribute set")]
     DuplicateAttrsetKey,
+    #[error("the provided attrest key could not be found")]
+    AttrsetKeyNotFound,
 }
 
 #[derive(Debug, thiserror::Error)]

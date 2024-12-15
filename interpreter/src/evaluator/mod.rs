@@ -312,7 +312,39 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         )?);
                     }
                     VmOp::MergeAttrsets => todo!(),
-                    VmOp::GetAttribute { push_error: _ } => todo!(),
+                    VmOp::GetAttribute { push_error } => {
+                        let (attrset, key) = match (self.pop()?, self.pop()?) {
+                            (NixValue::Attrset(a), NixValue::String(s)) => (a, s),
+                            _ => return Err(EvaluateError::TypeError),
+                        };
+
+                        let attrset_slice =
+                            self.evaluator.gc_handle.load(&attrset.entries).as_ref();
+                        let key_str = key.load(&self.evaluator.gc_handle);
+
+                        let value = attrset_slice
+                            .binary_search_by_key(&key_str, |(k, _)| {
+                                k.load(&self.evaluator.gc_handle)
+                            })
+                            .ok()
+                            .map(|value_idx| attrset_slice[value_idx].1.clone());
+
+                        if push_error {
+                            if let Some(val) = value {
+                                self.state
+                                    .local_stack
+                                    .push(self.evaluator.force_thunk(val)?);
+                                self.state.local_stack.push(NixValue::Bool(false));
+                            } else {
+                                self.state.local_stack.push(NixValue::Bool(true));
+                            }
+                        } else {
+                            let val = value.ok_or_else(|| EvaluateError::AttrsetKeyNotFound)?;
+                            self.state
+                                .local_stack
+                                .push(self.evaluator.force_thunk(val)?);
+                        }
+                    }
                     VmOp::ConcatStrings(_) => todo!(),
                 }
             }
