@@ -118,6 +118,11 @@ pub enum VmOp {
     /// the stack. Since no attribute value could be retrieved in this case, the result boolen will
     /// be the only pushed value.
     GetAttribute { push_error: bool },
+
+    /// first pops an attrset, then a name value from the stack.
+    /// test if the key is present in the attrset, and push the result as a bool
+    /// to the stack.
+    HasAttribute,
 }
 
 #[derive(Clone, Copy, Debug, Trace)]

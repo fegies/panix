@@ -258,7 +258,15 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         self.state.local_stack.push(result);
                     }
                     VmOp::Call => todo!(),
-                    VmOp::CastToPath => todo!(),
+                    VmOp::CastToPath => {
+                        let value = if let NixValue::String(s) = self.pop()? {
+                            s
+                        } else {
+                            return Err(EvaluateError::TypeError);
+                        };
+
+                        self.state.local_stack.push(NixValue::Path(value));
+                    }
                     VmOp::PushImmediate(imm) => {
                         let imm = self.evaluator.gc_handle.load(&imm);
                         self.state.local_stack.push(imm.clone());
@@ -344,6 +352,24 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                 .local_stack
                                 .push(self.evaluator.force_thunk(val)?);
                         }
+                    }
+                    VmOp::HasAttribute => {
+                        let result = match (self.pop()?, self.pop()?) {
+                            (NixValue::Attrset(attrset), NixValue::String(key)) => {
+                                let attrset_slice =
+                                    self.evaluator.gc_handle.load(&attrset.entries).as_ref();
+                                let key_str = key.load(&self.evaluator.gc_handle);
+
+                                attrset_slice
+                                    .binary_search_by_key(&key_str, |(k, _)| {
+                                        k.load(&self.evaluator.gc_handle)
+                                    })
+                                    .is_ok()
+                            }
+                            _ => false,
+                        };
+
+                        self.state.local_stack.push(NixValue::Bool(result));
                     }
                     VmOp::ConcatStrings(_) => todo!(),
                 }

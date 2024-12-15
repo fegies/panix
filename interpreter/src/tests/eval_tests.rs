@@ -73,6 +73,21 @@ fn test_get_attribute() {
     eval_expr("{a = 1;}.b or 42", "42");
 }
 
+#[test]
+fn test_hasattr() {
+    eval_expr("{a = 42;} ? a", "true");
+    eval_expr("{a = 42;} ? b", "false");
+    eval_expr("12 ? a", "false");
+}
+
+#[test]
+fn test_hasattr_multi() {
+    eval_expr("{a = 42;} ? a.b", "false");
+    eval_expr("{a = {b = 1;};} ? a.b", "true");
+    eval_expr("{a = {b = 1;};} ? a.b.c", "false");
+    eval_expr("{a = {b = 1;};} ? a.c.c", "false");
+}
+
 // #[test]
 // fn test_attrset_lazy_resolution() {
 //     eval_expr("with {}; {a = d; b = 42;}.b", "42");

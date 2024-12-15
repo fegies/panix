@@ -1,11 +1,11 @@
 use parser::ast::{
-    AssertExpr, Attrset, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda, LetInExpr,
-    List, MonopOpcode, NixExpr, NixString, Op, WithExpr,
+    AssertExpr, Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda,
+    LetInExpr, List, MonopOpcode, NixExpr, NixString, Op, WithExpr,
 };
 
 use self::remove_multipath_attrset::RemoveMultipathPass;
 
-pub mod remove_multipath_attrset;
+mod remove_multipath_attrset;
 
 pub fn normalize_ast(ast: &mut NixExpr) {
     RemoveMultipathPass::new().inspect_expr(ast);
@@ -156,18 +156,24 @@ trait Pass {
                 right,
                 opcode,
             } => self.inspect_binop(left, right, opcode),
-            Op::HasAttr { left, path } => {
-                self.inspect_expr(left);
-                match path {
-                    parser::ast::AttrsetKey::Single(s) => self.inspect_nix_string(s),
-                    parser::ast::AttrsetKey::Multi(parts) => {
-                        for part in parts {
-                            self.inspect_nix_string(part)
-                        }
-                    }
+            Op::HasAttr { left, path } => self.inspect_hasattr(left, path),
+            Op::Monop { opcode, body } => self.inspect_monop(body, opcode),
+        }
+    }
+
+    fn inspect_hasattr<'a>(&mut self, attrset: &mut NixExpr<'a>, path: &mut AttrsetKey<'a>) {
+        self.descend_hasattr(attrset, path)
+    }
+
+    fn descend_hasattr(&mut self, attrset: &mut NixExpr, path: &mut AttrsetKey) {
+        self.inspect_expr(attrset);
+        match path {
+            parser::ast::AttrsetKey::Single(s) => self.inspect_nix_string(s),
+            parser::ast::AttrsetKey::Multi(parts) => {
+                for part in parts {
+                    self.inspect_nix_string(part)
                 }
             }
-            Op::Monop { opcode, body } => self.inspect_monop(body, opcode),
         }
     }
 

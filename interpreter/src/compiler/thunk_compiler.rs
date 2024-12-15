@@ -302,7 +302,16 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 self.translate_to_ops(lookup_scope, target_buffer, *right)?;
                 target_buffer.push(vmop);
             }
-            parser::ast::Op::HasAttr { left, path } => todo!(),
+            parser::ast::Op::HasAttr { left, path } => match path {
+                ast::AttrsetKey::Single(name) => {
+                    self.translate_string_value(lookup_scope, target_buffer, name)?;
+                    self.translate_to_ops(lookup_scope, target_buffer, *left)?;
+                    target_buffer.push(VmOp::HasAttribute);
+                }
+                ast::AttrsetKey::Multi(_) => {
+                    unreachable!("multipart hasattr should have been removed by an ast pass")
+                }
+            },
             parser::ast::Op::Monop { opcode, body } => {
                 let opcode = match opcode {
                     parser::ast::MonopOpcode::NumericMinus => VmOp::NumericNegate,
