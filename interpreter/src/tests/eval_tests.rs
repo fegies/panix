@@ -23,6 +23,7 @@ fn test_basic_arithmentic() {
     eval_expr("1 + 2 * 3", "7");
     eval_expr("6 / 2", "3");
 }
+
 #[test]
 fn test_eval_divs() {
     eval_expr("1 + (1.0 / 2.0) * (3.0 / 4)", "11.0 / 8");
@@ -98,10 +99,10 @@ fn test_hasattr_multi() {
 //     eval_expr("let a = 42; in rec {b = a; a = 13;}.b", "13");
 // }
 
-// #[test]
-// fn test_inherit_from_attrset_to_attrset() {
-//     eval_expr("let a = {f = 42;}; in {inherit (a) f;}.f", "42");
-// }
+#[test]
+fn test_inherit_from_attrset_to_attrset() {
+    eval_expr("let a = {f = 42;}; in {inherit (a) f;}.f", "42");
+}
 
 #[test]
 fn test_list_without_spaces() {

@@ -37,7 +37,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
         Ok(Thunk::Deferred {
             context: ExecutionContext {
-                entries: self.compiler.gc_handle.alloc_vec(&mut Vec::new())?,
+                entries: self.compiler.gc_handle.alloc_slice(&[])?,
             },
             code: self.compiler.gc_handle.alloc_vec(&mut opcode_buf)?,
         })
@@ -377,7 +377,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             }
 
             let mut current_inherit_source_idx = previous_height;
-
+            sub_code_buf.push(VmOp::LoadContext(ContextReference(0)));
             let inherit_from_0_code = self.compiler.gc_handle.alloc_vec(&mut sub_code_buf)?;
 
             // and now, actually emit all the inherit entries.
@@ -385,12 +385,10 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 if entry.source.is_some() {
                     // we actually already emitted the inherit info.
                     // actually loading the value is implemented as a getattr call.
-                    let context_insn =
-                        self.compiler
-                            .gc_handle
-                            .alloc_slice(&[ValueSource::ContextReference(
-                                current_inherit_source_idx,
-                            )])?;
+                    let context_insn = self
+                        .compiler
+                        .gc_handle
+                        .alloc_slice(&[ValueSource::ThunkStackRef(current_inherit_source_idx)])?;
                     let context_id = current_inherit_source_idx;
                     current_inherit_source_idx += 1;
                     for ident in entry.entries {
