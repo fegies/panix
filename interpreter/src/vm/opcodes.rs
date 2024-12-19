@@ -1,6 +1,7 @@
-use super::value::{NixValue, Thunk};
+use super::value::{self, NixValue, Thunk};
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
+use parser::ast::NixString;
 
 #[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Trace, Debug)]
 pub enum ValueSource {
@@ -21,6 +22,21 @@ pub struct ThunkAllocArgs {
     pub code: GcPointer<Array<VmOp>>,
     pub context_id: u32,
     pub context_build_instructions: GcPointer<Array<ValueSource>>,
+}
+
+#[derive(Debug, Trace)]
+pub struct LambdaAllocArgs {
+    pub code: GcPointer<Array<VmOp>>,
+    pub context_build_instructions: GcPointer<Array<ValueSource>>,
+    pub call_requirements: LambdaCallType,
+}
+
+#[derive(Debug, Trace, Clone)]
+pub enum LambdaCallType {
+    Simple,
+    Attrset {
+        required_keys: GcPointer<Array<value::NixString>>,
+    },
 }
 
 #[derive(Debug, Trace, Clone)]
@@ -59,6 +75,10 @@ pub enum VmOp {
         slot: Option<u16>,
         args: GcPointer<ThunkAllocArgs>,
     },
+
+    /// allocates a lambda using the provided code
+    /// and call arguments, as well as the provided context instructions
+    AllocLambda(GcPointer<LambdaAllocArgs>),
 
     /// skips the provided number of instructions.
     /// You can think of it as a forward-only jump.

@@ -1,13 +1,16 @@
 use std::{collections::BTreeMap, process::id};
 
 use gc::{specialized_types::array::Array, GcPointer};
-use parser::ast::{self, BasicValue, IfExpr, KnownNixStringContent, NixExpr, SourcePosition};
+use parser::ast::{
+    self, BasicValue, IfExpr, KnownNixStringContent, Lambda, NixExpr, SourcePosition,
+};
 
 use crate::{
     compiler::{get_null_expr, lookup_scope::LocalThunkRef},
     vm::{
         opcodes::{
-            CompareMode, ContextReference, ExecutionContext, ThunkAllocArgs, ValueSource, VmOp,
+            CompareMode, ContextReference, ExecutionContext, LambdaAllocArgs, LambdaCallType,
+            ThunkAllocArgs, ValueSource, VmOp,
         },
         value::{NixValue, Thunk},
     },
@@ -139,7 +142,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 self.translate_value_ref(lookup_scope, target_buffer, ident, pos)
             }
             parser::ast::Code::WithExpr(_) => todo!(),
-            parser::ast::Code::Lambda(_) => todo!(),
+            parser::ast::Code::Lambda(lambda) => {
+                self.translate_lambda(lookup_scope, target_buffer, lambda)
+            }
             parser::ast::Code::Op(op) => self.translate_op(lookup_scope, target_buffer, op),
             parser::ast::Code::IfExpr(IfExpr {
                 condition,
@@ -171,6 +176,45 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             }
             parser::ast::Code::AssertExpr(_) => todo!(),
         }
+    }
+
+    fn translate_lambda(
+        &mut self,
+        lookup_scope: &mut LookupScope<'src, '_>,
+        target_buffer: &mut Vec<VmOp>,
+        lambda: Lambda<'src>,
+    ) -> Result<(), CompileError> {
+        let mut subscope = lookup_scope.subscope();
+        let mut code_buf = Vec::new();
+        let mut body_compiler = ThunkCompiler::new(&mut self.compiler);
+
+        let call_requirements = match lambda.args {
+            ast::LambdaArgs::AttrsetBinding { total_name, args } => todo!(),
+            ast::LambdaArgs::SimpleBinding(arg_name) => {
+                body_compiler.current_thunk_stack_height = 1; // the lambda starts with the arg on
+                                                              // the thunk stack.
+                subscope.push_local_thunkref(arg_name, LocalThunkRef(0));
+
+                LambdaCallType::Simple
+            }
+        };
+
+        body_compiler.translate_to_ops(&mut subscope, &mut code_buf, *lambda.body)?;
+        let code = self.compiler.gc_handle.alloc_vec(&mut code_buf)?;
+        let context_build_instructions = self
+            .compiler
+            .gc_handle
+            .alloc_slice(subscope.get_inherit_context())?;
+
+        let args = self.compiler.gc_handle.alloc(LambdaAllocArgs {
+            code,
+            context_build_instructions,
+            call_requirements,
+        })?;
+
+        target_buffer.push(VmOp::AllocLambda(args));
+
+        Ok(())
     }
 
     fn translate_op(

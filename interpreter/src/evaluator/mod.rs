@@ -3,9 +3,10 @@ use std::cmp::Ordering;
 use gc::{specialized_types::array::Array, GcHandle, GcPointer};
 
 use crate::{
+    compiler::ValueSource,
     vm::{
-        opcodes::{ExecutionContext, VmOp},
-        value::{self, Attrset, List, NixValue, Thunk},
+        opcodes::{ExecutionContext, LambdaAllocArgs, VmOp},
+        value::{self, Attrset, Function, List, NixValue, Thunk},
     },
     EvaluateError,
 };
@@ -96,6 +97,36 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             .push(NixValue::List(value::List { entries }));
                     }
 
+                    VmOp::AllocLambda(args) => {
+                        let LambdaAllocArgs {
+                            code,
+                            context_build_instructions,
+                            call_requirements,
+                        } = self.evaluator.gc_handle.load(&args);
+
+                        let code = code.clone();
+                        let call_requirements = call_requirements.clone();
+
+                        let alloc_buf = &mut self.evaluator.thunk_alloc_buffer;
+                        fetch_context_entries(
+                            alloc_buf,
+                            &self.state,
+                            self.evaluator
+                                .gc_handle
+                                .load(context_build_instructions)
+                                .as_ref(),
+                        );
+                        let context = ExecutionContext {
+                            entries: self.evaluator.gc_handle.alloc_vec(alloc_buf)?,
+                        };
+
+                        self.state.local_stack.push(NixValue::Function(Function {
+                            context,
+                            code,
+                            call_type: call_requirements,
+                        }));
+                    }
+
                     VmOp::BuildAttrset(num_keys) => {
                         let entries = if num_keys > 0 {
                             let mut entries = Vec::new();
@@ -166,27 +197,13 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             .load(&args.context_build_instructions)
                             .as_ref();
                         println!("ctx: {build_instructions:?}");
+
                         let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
-                        thunk_buf.clear();
-                        for insn in self
-                            .evaluator
-                            .gc_handle
-                            .load(&args.context_build_instructions)
-                            .as_ref()
-                        {
-                            match insn {
-                                crate::vm::opcodes::ValueSource::ContextReference(ctxref) => {
-                                    thunk_buf.push(self.state.context[(*ctxref) as usize].clone())
-                                }
-                                crate::vm::opcodes::ValueSource::ThunkStackRef(stackref) => {
-                                    thunk_buf
-                                        .push(self.state.thunk_stack[(*stackref) as usize].clone())
-                                }
-                            }
-                        }
+                        fetch_context_entries(thunk_buf, &self.state, build_instructions);
                         let context = ExecutionContext {
                             entries: self.evaluator.gc_handle.alloc_vec(thunk_buf)?,
                         };
+
                         let new_thunk = self
                             .evaluator
                             .gc_handle
@@ -257,7 +274,46 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         };
                         self.state.local_stack.push(result);
                     }
-                    VmOp::Call => todo!(),
+                    VmOp::Call => {
+                        let arg = self.pop()?;
+                        let func = if let NixValue::Function(func) = self.pop()? {
+                            func
+                        } else {
+                            return Err(EvaluateError::TypeError);
+                        };
+
+                        // check that all required keys are present if needed
+                        match func.call_type {
+                            crate::vm::opcodes::LambdaCallType::Simple => {
+                                // nothing to validate here.
+                            }
+                            crate::vm::opcodes::LambdaCallType::Attrset { required_keys } => {
+                                todo!()
+                            }
+                        }
+
+                        let mut sub_state = self.evaluator.stack_cache.pop().unwrap_or_default();
+                        sub_state
+                            .thunk_stack
+                            .push(self.evaluator.gc_handle.alloc(Thunk::Value(arg))?);
+                        sub_state
+                            .code_buf
+                            .extend_from_slice(self.evaluator.gc_handle.load(&func.code).as_ref());
+                        sub_state.context.extend_from_slice(
+                            self.evaluator
+                                .gc_handle
+                                .load(&func.context.entries)
+                                .as_ref(),
+                        );
+
+                        let result = ThunkEvaluator {
+                            state: sub_state,
+                            evaluator: self.evaluator,
+                        }
+                        .compute_result()?;
+
+                        self.state.local_stack.push(result);
+                    }
                     VmOp::CastToPath => {
                         let value = if let NixValue::String(s) = self.pop()? {
                             s
@@ -396,9 +452,28 @@ impl Drop for ThunkEvaluator<'_, '_> {
     fn drop(&mut self) {
         self.state.context.clear();
         self.state.local_stack.clear();
+        self.state.thunk_stack.clear();
         self.evaluator
             .stack_cache
             .push(core::mem::take(&mut self.state));
+    }
+}
+
+fn fetch_context_entries(
+    dest: &mut Vec<GcPointer<Thunk>>,
+    state: &ThunkEvalState,
+    instructions: &[crate::vm::opcodes::ValueSource],
+) {
+    dest.clear();
+    for insn in instructions {
+        match insn {
+            crate::vm::opcodes::ValueSource::ContextReference(ctxref) => {
+                dest.push(state.context[(*ctxref) as usize].clone())
+            }
+            crate::vm::opcodes::ValueSource::ThunkStackRef(stackref) => {
+                dest.push(state.thunk_stack[(*stackref) as usize].clone())
+            }
+        }
     }
 }
 

@@ -115,10 +115,20 @@ fn test_boolean_logic() {
     eval_expr("true && false", "false");
 }
 
-// #[test]
-// fn test_funccall_without_spaces() {
-//     eval_expr("let f = a: a+1; in f(42)", "43");
-// }
+#[test]
+fn test_funccall_without_spaces() {
+    eval_expr("let f = a: a+1; in f(42)", "43");
+}
+
+#[test]
+fn test_funccall() {
+    eval_expr("(let x = 12; in (a : a + x)) 2", "14");
+}
+
+#[test]
+fn test_currying() {
+    eval_expr("let f = a : b : a + b; in f 1 4", "5");
+}
 
 #[test]
 fn test_simple_let_in() {

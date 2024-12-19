@@ -4,7 +4,7 @@ use gc::{
 };
 use gc_derive::Trace;
 
-use super::opcodes::{ExecutionContext, VmOp};
+use super::opcodes::{ExecutionContext, LambdaCallType, VmOp};
 
 #[derive(Debug, Trace)]
 pub enum Thunk {
@@ -71,8 +71,10 @@ impl PartialEq for Attrset {
 
 #[derive(Debug, Trace, Clone)]
 pub struct Function {
-    pub args: FunctionArgs,
-    pub body: GcPointer<Thunk>,
+    /// the captured execution context to be used in the body
+    pub context: ExecutionContext,
+    pub code: GcPointer<Array<VmOp>>,
+    pub call_type: LambdaCallType,
 }
 
 #[derive(Debug)]
