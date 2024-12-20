@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use parser::ast::{Attrset, InheritEntry, LetInExpr, NixExpr, NixExprContent};
+use parser::ast::{Attrset, InheritEntry, LetInExpr, NixExpr, NixExprContent, NixString};
 
 use super::Pass;
 
@@ -34,21 +34,20 @@ impl Pass for RemoveAttrsetRecPass {
 
             for (key, body) in core::mem::take(attrs) {
                 match &key {
-                    parser::ast::AttrsetKey::Multi(_) => {
-                        unreachable!("multi keys have been removed by the previous pass")
+                    parser::ast::AttrsetKey::Single(NixString {
+                        content:
+                            parser::ast::NixStringContent::Known(
+                                parser::ast::KnownNixStringContent::Literal(lit),
+                            ),
+                        position: _,
+                    }) => {
+                        bindings.insert(*lit, body);
+                        attrset_inherit_keys.push(*lit);
                     }
-                    parser::ast::AttrsetKey::Single(str) => match str.content {
-                        parser::ast::NixStringContent::Known(
-                            parser::ast::KnownNixStringContent::Literal(lit),
-                        ) => {
-                            bindings.insert(lit, body);
-                            attrset_inherit_keys.push(lit);
-                        }
-                        _ => {
-                            // we cannot interpret it at compile time, just pass it through
-                            attrset_attrs.push((key, body));
-                        }
-                    },
+                    _ => {
+                        // we cannot interpret it at compile time, just pass it through
+                        attrset_attrs.push((key, body));
+                    }
                 }
             }
 
