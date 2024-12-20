@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Write,
-};
+use std::{collections::BTreeMap, fmt::Write};
 
 pub use lexer::SourcePosition;
 
@@ -195,7 +192,7 @@ pub struct NixExpr<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct LambdaAttrsetArgs<'a> {
-    pub bindings: HashMap<&'a str, Option<NixExpr<'a>>>,
+    pub bindings: BTreeMap<&'a str, Option<NixExpr<'a>>>,
     pub includes_rest_pattern: bool,
 }
 

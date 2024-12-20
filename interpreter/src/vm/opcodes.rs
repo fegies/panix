@@ -35,7 +35,10 @@ pub struct LambdaAllocArgs {
 pub enum LambdaCallType {
     Simple,
     Attrset {
-        required_keys: GcPointer<Array<value::NixString>>,
+        /// the keys for this function, given as pairs of the name
+        /// and a bool set to true if the arg is required
+        keys: GcPointer<Array<(value::NixString, bool)>>,
+        includes_rest_pattern: bool,
     },
 }
 

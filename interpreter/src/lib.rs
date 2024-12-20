@@ -34,6 +34,12 @@ pub enum EvaluateError {
     DuplicateAttrsetKey,
     #[error("the provided attrest key could not be found")]
     AttrsetKeyNotFound,
+
+    #[error("Lambda called with unexpected argument: `{arg_name}`")]
+    CallWithUnexpectedArg { arg_name: String },
+
+    #[error("Lambda called with missing argument: `{arg_name}`")]
+    CallWithMissingArg { arg_name: String },
 }
 
 #[derive(Debug, thiserror::Error)]

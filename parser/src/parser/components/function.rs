@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::*;
 
@@ -81,7 +81,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         mut includes_rest_pattern: bool,
     ) -> ParseResult<LambdaAttrsetArgs<'t>> {
         let mut first = !includes_rest_pattern;
-        let mut bindings = HashMap::new();
+        let mut bindings = BTreeMap::new();
 
         if let Some((ident, val)) = initial {
             bindings.insert(ident, val);

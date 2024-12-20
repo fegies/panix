@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::*;
 
@@ -261,7 +261,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                                 self.parse_attrset_lambda(first_ident, Some(default))?
                             }
                             Token::CurlyClose => {
-                                let mut bindings = HashMap::with_capacity(1);
+                                let mut bindings = BTreeMap::new();
                                 bindings.insert(first_ident, Some(default));
                                 self.parse_attrset_lambda_body(LambdaAttrsetArgs {
                                     bindings,
@@ -283,7 +283,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                         self.expect(Token::Colon)?;
                         let body = self.parse_expr()?;
 
-                        let mut bindings = HashMap::new();
+                        let mut bindings = BTreeMap::new();
                         bindings.insert(first_ident, None);
 
                         let lambda = Lambda {
@@ -332,7 +332,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                         args: LambdaArgs::AttrsetBinding {
                             total_name: None,
                             args: LambdaAttrsetArgs {
-                                bindings: HashMap::new(),
+                                bindings: BTreeMap::new(),
                                 includes_rest_pattern: false,
                             },
                         },

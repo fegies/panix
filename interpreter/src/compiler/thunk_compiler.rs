@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, process::id};
 
-use gc::{specialized_types::array::Array, GcPointer};
+use gc::{specialized_types::array::Array, GcError, GcHandle, GcPointer};
 use parser::ast::{
     self, BasicValue, IfExpr, KnownNixStringContent, Lambda, NixExpr, SourcePosition,
 };
@@ -12,7 +12,7 @@ use crate::{
             CompareMode, ContextReference, ExecutionContext, LambdaAllocArgs, LambdaCallType,
             ThunkAllocArgs, ValueSource, VmOp,
         },
-        value::{NixValue, Thunk},
+        value::{self, NixValue, Thunk},
     },
 };
 
@@ -186,18 +186,105 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
     ) -> Result<(), CompileError> {
         let mut subscope = lookup_scope.subscope();
         let mut code_buf = Vec::new();
-        let mut body_compiler = ThunkCompiler::new(&mut self.compiler);
+
+        let mut current_thunk_stack_height = 1; // the lambda always starts with the arg on
+                                                // the thunk stack.
 
         let call_requirements = match lambda.args {
-            ast::LambdaArgs::AttrsetBinding { total_name, args } => todo!(),
+            ast::LambdaArgs::AttrsetBinding { total_name, args } => {
+                // if the total name was not provided, we define it as a string that is
+                // not actually a valid identifier in the nix language to avoid conflicts.
+                let total_name = total_name.unwrap_or("<arg>");
+                subscope.push_local_thunkref(total_name, LocalThunkRef(0));
+
+                for (key, default_value) in &args.bindings {
+                    subscope.push_local_thunkref(key, LocalThunkRef(current_thunk_stack_height));
+                    current_thunk_stack_height += 1;
+                }
+
+                let mut call_key_buffer = Vec::new();
+
+                // we don't count the initial argument for the purposes of this
+                let added_keys = current_thunk_stack_height - 1;
+                if added_keys > 0 {
+                    code_buf.push(VmOp::PushBlackholes(added_keys));
+                    let first_item_ctx = self
+                        .compiler
+                        .gc_handle
+                        .alloc_slice(&[ValueSource::ThunkStackRef(0)])?;
+
+                    let mut subcode_buf = Vec::new();
+                    let mut current_slot = added_keys;
+                    for (key, default_value) in args.bindings {
+                        let key_ptr: value::NixString =
+                            self.compiler.gc_handle.alloc_string(key)?.into();
+                        call_key_buffer.push((key_ptr.clone(), default_value.is_none()));
+                        let key_ptr = self.compiler.gc_handle.alloc(NixValue::String(key_ptr))?;
+                        subcode_buf.push(VmOp::PushImmediate(key_ptr));
+
+                        let mut context_cache = BTreeMap::new();
+                        let args = if let Some(default_value) = default_value {
+                            // we do have a default, we need to use the more complicated form
+
+                            let mut subscope = subscope.subscope();
+                            // resolve the arg0 at least once so that it is included in the context
+                            //  even if no code explicitly refers to it
+                            subscope.deref_ident(total_name);
+
+                            subcode_buf.push(VmOp::LoadContext(ContextReference(0)));
+                            subcode_buf.push(VmOp::GetAttribute { push_error: true });
+                            let skip_idx = subcode_buf.len();
+                            subcode_buf.push(VmOp::SkipUnless(0));
+                            self.translate_to_ops(&mut subscope, &mut subcode_buf, default_value)?;
+                            let added_ops = subcode_buf.len() - skip_idx - 1;
+                            subcode_buf[skip_idx] = VmOp::SkipUnless(added_ops as u32);
+                            let (ctx_id, ctx_insn) = resolve_possibly_cached_context(
+                                &mut self.compiler.gc_handle,
+                                &mut context_cache,
+                                subscope.get_inherit_context(),
+                            )?;
+
+                            let code = self.compiler.gc_handle.alloc_vec(&mut subcode_buf)?;
+
+                            self.compiler.gc_handle.alloc(ThunkAllocArgs {
+                                code,
+                                context_id: ctx_id,
+                                context_build_instructions: ctx_insn,
+                            })?
+                        } else {
+                            // no default, the thunk is just a normal getattr
+                            subcode_buf.push(VmOp::LoadContext(ContextReference(0)));
+                            subcode_buf.push(VmOp::GetAttribute { push_error: false });
+                            let code = self.compiler.gc_handle.alloc_vec(&mut subcode_buf)?;
+                            self.compiler.gc_handle.alloc(ThunkAllocArgs {
+                                code,
+                                context_id: 0,
+                                context_build_instructions: first_item_ctx.clone(),
+                            })?
+                        };
+
+                        current_slot -= 1;
+                        code_buf.push(VmOp::AllocateThunk {
+                            slot: Some(current_slot as u16),
+                            args,
+                        });
+                    }
+                }
+
+                LambdaCallType::Attrset {
+                    keys: self.compiler.gc_handle.alloc_vec(&mut call_key_buffer)?,
+                    includes_rest_pattern: args.includes_rest_pattern,
+                }
+            }
             ast::LambdaArgs::SimpleBinding(arg_name) => {
-                body_compiler.current_thunk_stack_height = 1; // the lambda starts with the arg on
-                                                              // the thunk stack.
                 subscope.push_local_thunkref(arg_name, LocalThunkRef(0));
 
                 LambdaCallType::Simple
             }
         };
+
+        let mut body_compiler = ThunkCompiler::new(&mut self.compiler);
+        body_compiler.current_thunk_stack_height = current_thunk_stack_height;
 
         body_compiler.translate_to_ops(&mut subscope, &mut code_buf, *lambda.body)?;
         let code = self.compiler.gc_handle.alloc_vec(&mut code_buf)?;
@@ -711,15 +798,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         let code = self.compiler.gc_handle.alloc_vec(opcode_buf)?;
         let ctx_ins = subscope.get_inherit_context();
         let (context_id, context_build_instructions) =
-            if let Some((id, cached)) = context_cache.get(ctx_ins) {
-                (*id, cached.clone())
-            } else {
-                let insn = self.compiler.gc_handle.alloc_slice(ctx_ins)?;
-                let id = context_cache.len() as u32;
-                context_cache.insert(ctx_ins.to_vec(), (id, insn.clone()));
-                (id, insn)
-            };
-
+            resolve_possibly_cached_context(&mut self.compiler.gc_handle, context_cache, ctx_ins)?;
         let res = self.compiler.gc_handle.alloc(ThunkAllocArgs {
             context_id,
             code,
@@ -727,5 +806,20 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         })?;
 
         Ok(res)
+    }
+}
+
+fn resolve_possibly_cached_context(
+    gc_handle: &mut GcHandle,
+    context_cache: &mut BTreeMap<Vec<ValueSource>, (u32, GcPointer<Array<ValueSource>>)>,
+    ctx_ins: &[ValueSource],
+) -> Result<(u32, GcPointer<Array<ValueSource>>), GcError> {
+    if let Some((id, cached)) = context_cache.get(ctx_ins) {
+        Ok((*id, cached.clone()))
+    } else {
+        let insn = gc_handle.alloc_slice(ctx_ins)?;
+        let id = context_cache.len() as u32;
+        context_cache.insert(ctx_ins.to_vec(), (id, insn.clone()));
+        Ok((id, insn))
     }
 }

@@ -91,7 +91,7 @@ fn test_hasattr_multi() {
 
 // #[test]
 // fn test_attrset_lazy_resolution() {
-//     eval_expr("with {}; {a = d; b = 42;}.b", "42");
+//     eval_expr("with {u = 42;}; {a = d; b = u;}.b", "42");
 // }
 
 // #[test]
@@ -128,6 +128,19 @@ fn test_funccall() {
 #[test]
 fn test_currying() {
     eval_expr("let f = a : b : a + b; in f 1 4", "5");
+}
+
+#[test]
+fn test_attrset_lambda() {
+    eval_expr("({a, b ? null}: a) {a = 42;}", "42");
+    eval_expr("({a, b ? null}: b) {a = 42;}", "null");
+    eval_expr("({a, b ? null}: b) {b = 12; a = null;}", "12");
+    eval_expr("(arg@{a, ...}: arg ){a = 42; b = 42;}", "{a = 42; b = 42;}");
+}
+
+#[test]
+fn test_attrset_reference_other_arg() {
+    eval_expr("({a, b ? a }: b) {a = 42;}", "42");
 }
 
 #[test]

@@ -287,8 +287,45 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             crate::vm::opcodes::LambdaCallType::Simple => {
                                 // nothing to validate here.
                             }
-                            crate::vm::opcodes::LambdaCallType::Attrset { required_keys } => {
-                                todo!()
+                            crate::vm::opcodes::LambdaCallType::Attrset {
+                                keys,
+                                includes_rest_pattern,
+                            } => {
+                                let arg = arg.as_attrset()?;
+                                let keys = self.evaluator.gc_handle.load(&keys).as_ref();
+
+                                // check that no unexpected args were provided
+                                if !includes_rest_pattern {
+                                    for key in arg.keys(&self.evaluator.gc_handle) {
+                                        if !keys.iter().any(|(nix_str, _)| {
+                                            nix_str.load(&self.evaluator.gc_handle) == key
+                                        }) {
+                                            return Err(EvaluateError::CallWithUnexpectedArg {
+                                                arg_name: key.to_owned(),
+                                            });
+                                        }
+                                    }
+                                }
+
+                                // and check that all required args are here.
+                                for expected_arg in
+                                    keys.iter().filter_map(|(arg_name, is_required)| {
+                                        if *is_required {
+                                            Some(arg_name)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                {
+                                    if arg
+                                        .get_entry(&self.evaluator.gc_handle, expected_arg)
+                                        .is_none()
+                                    {
+                                        let arg_name =
+                                            expected_arg.load(&self.evaluator.gc_handle).to_owned();
+                                        return Err(EvaluateError::CallWithMissingArg { arg_name });
+                                    }
+                                }
                             }
                         }
 
@@ -377,21 +414,10 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                     }
                     VmOp::MergeAttrsets => todo!(),
                     VmOp::GetAttribute { push_error } => {
-                        let (attrset, key) = match (self.pop()?, self.pop()?) {
-                            (NixValue::Attrset(a), NixValue::String(s)) => (a, s),
-                            _ => return Err(EvaluateError::TypeError),
-                        };
+                        let attrset = self.pop()?.expect_attrset()?;
+                        let key = self.pop()?.expect_string()?;
 
-                        let attrset_slice =
-                            self.evaluator.gc_handle.load(&attrset.entries).as_ref();
-                        let key_str = key.load(&self.evaluator.gc_handle);
-
-                        let value = attrset_slice
-                            .binary_search_by_key(&key_str, |(k, _)| {
-                                k.load(&self.evaluator.gc_handle)
-                            })
-                            .ok()
-                            .map(|value_idx| attrset_slice[value_idx].1.clone());
+                        let value = attrset.get_entry(&self.evaluator.gc_handle, &key);
 
                         if push_error {
                             if let Some(val) = value {
@@ -613,6 +639,28 @@ fn compare_lists(
                 compared_to_idx += 1;
             }
             res => return Ok(res),
+        }
+    }
+}
+
+impl NixValue {
+    pub fn as_attrset(&self) -> Result<&Attrset, EvaluateError> {
+        match self {
+            NixValue::Attrset(a) => Ok(a),
+            _ => Err(EvaluateError::TypeError),
+        }
+    }
+    pub fn expect_attrset(self) -> Result<Attrset, EvaluateError> {
+        match self {
+            NixValue::Attrset(a) => Ok(a),
+            _ => Err(EvaluateError::TypeError),
+        }
+    }
+
+    pub fn expect_string(self) -> Result<value::NixString, EvaluateError> {
+        match self {
+            NixValue::String(s) => Ok(s),
+            _ => Err(EvaluateError::TypeError),
         }
     }
 }

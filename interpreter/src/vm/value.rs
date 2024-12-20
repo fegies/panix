@@ -57,10 +57,29 @@ pub enum NixValue {
     List(List),
 }
 
+
 #[derive(Debug, Trace, Clone)]
 pub struct Attrset {
     pub entries: GcPointer<Array<(NixString, GcPointer<Thunk>)>>,
 }
+
+impl Attrset {
+    pub fn get_entry(&self, gc_handle: &GcHandle, key: &NixString) -> Option<GcPointer<Thunk>> {
+        let attrset_slice = gc_handle.load(&self.entries).as_ref();
+        let key_str = key.load(gc_handle);
+
+        attrset_slice
+            .binary_search_by_key(&key_str, |(k, _)| k.load(gc_handle))
+            .ok()
+            .map(|value_idx| attrset_slice[value_idx].1.clone())
+    }
+
+    pub fn keys<'a>(&'a self, gc_handle: &'a GcHandle) -> impl Iterator<Item = &'a str> {
+        let slice = gc_handle.load(&self.entries).as_ref();
+        slice.iter().map(|nix_str| nix_str.0.load(gc_handle))
+    }
+}
+
 impl PartialEq for Attrset {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
