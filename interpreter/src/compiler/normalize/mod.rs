@@ -2,17 +2,24 @@ use parser::ast::{
     AssertExpr, Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda,
     LetInExpr, List, MonopOpcode, NixExpr, NixString, Op, WithExpr,
 };
+use remove_attrset_rec::RemoveAttrsetRecPass;
 
 use self::remove_multipath_attrset::RemoveMultipathPass;
 
+mod remove_attrset_rec;
 mod remove_multipath_attrset;
 
 pub fn normalize_ast(ast: &mut NixExpr) {
     RemoveMultipathPass::new().inspect_expr(ast);
+    RemoveAttrsetRecPass::new().inspect_expr(ast);
 }
 
 trait Pass {
     fn inspect_expr(&mut self, expr: &mut NixExpr) {
+        self.descend_expr(expr)
+    }
+
+    fn descend_expr(&mut self, expr: &mut NixExpr) {
         match &mut expr.content {
             parser::ast::NixExprContent::BasicValue(val) => self.inspect_basic_value(val),
             parser::ast::NixExprContent::CompoundValue(val) => self.inspect_compount_value(val),

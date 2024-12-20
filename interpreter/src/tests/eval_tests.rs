@@ -94,10 +94,10 @@ fn test_hasattr_multi() {
 //     eval_expr("with {u = 42;}; {a = d; b = u;}.b", "42");
 // }
 
-// #[test]
-// fn test_recursive_attrset() {
-//     eval_expr("let a = 42; in rec {b = a; a = 13;}.b", "13");
-// }
+#[test]
+fn test_recursive_attrset() {
+    eval_expr("let a = 42; in rec {b = a; a = 13;}.b", "13");
+}
 
 #[test]
 fn test_inherit_from_attrset_to_attrset() {
