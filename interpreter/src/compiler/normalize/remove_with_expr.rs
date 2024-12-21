@@ -108,13 +108,13 @@ impl<'src> Pass<'src> for RemoveWithExprPass<'src> {
         match &mut expr.content {
             NixExprContent::Code(Code::WithExpr(WithExpr { binding, body })) => {
                 // first, descend the binding
-                self.descend_expr(binding.as_mut());
+                self.inspect_expr(binding.as_mut());
 
                 let ident = self.get_with_ident();
                 self.used_with_ident_stack.push(ident);
 
                 // now, we can just descend into the body as normal to replace any unknown refs
-                self.descend_expr(body.as_mut());
+                self.inspect_expr(body.as_mut());
 
                 let mut bindings = BTreeMap::new();
                 bindings.insert(ident, core::mem::replace(binding.as_mut(), get_null_expr()));

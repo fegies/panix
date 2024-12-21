@@ -141,7 +141,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             parser::ast::Code::ValueReference { ident } => {
                 self.translate_value_ref(lookup_scope, target_buffer, ident, pos)
             }
-            parser::ast::Code::WithExpr(_) => todo!(),
+            parser::ast::Code::WithExpr(_) => unreachable!("With expressions should have been removed by an ast pass"),
             parser::ast::Code::Lambda(lambda) => {
                 self.translate_lambda(lookup_scope, target_buffer, lambda)
             }

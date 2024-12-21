@@ -159,6 +159,11 @@ fn test_with_expr() {
 }
 
 #[test]
+fn test_nested_with() {
+    eval_expr("with {a = 42;}; with {b = 13;}; a + b", "55");
+}
+
+#[test]
 fn test_attrset_lazy_resolution() {
     eval_expr("with {u = 42;}; {a = d; b = u;}.b", "42");
 }
