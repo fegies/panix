@@ -14,7 +14,7 @@ impl RemoveAttrsetRecPass {
     }
 }
 
-impl Pass for RemoveAttrsetRecPass {
+impl Pass<'_> for RemoveAttrsetRecPass {
     fn inspect_expr(&mut self, expr: &mut parser::ast::NixExpr) {
         // first, descend
         self.descend_expr(expr);

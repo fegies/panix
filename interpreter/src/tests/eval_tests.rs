@@ -89,11 +89,6 @@ fn test_hasattr_multi() {
     eval_expr("{a = {b = 1;};} ? a.c.c", "false");
 }
 
-// #[test]
-// fn test_attrset_lazy_resolution() {
-//     eval_expr("with {u = 42;}; {a = d; b = u;}.b", "42");
-// }
-
 #[test]
 fn test_recursive_attrset() {
     eval_expr("let a = 42; in rec {b = a; a = 13;}.b", "13");
@@ -156,4 +151,14 @@ fn test_let_reuse() {
 fn test_nested_let() {
     eval_expr("let a = 1; b = let c = 2; in a + c; in b", "3");
     eval_expr("let a = 1; in (let b = 2; in a + b)", "3");
+}
+
+#[test]
+fn test_with_expr() {
+    eval_expr("with {a = 42;}; a + 1", "43");
+}
+
+#[test]
+fn test_attrset_lazy_resolution() {
+    eval_expr("with {u = 42;}; {a = d; b = u;}.b", "42");
 }

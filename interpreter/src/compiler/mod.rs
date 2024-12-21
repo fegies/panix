@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use gc::{GcError, GcHandle, GcPointer};
 use lookup_scope::ScopeBacking;
 use parser::ast::{BasicValue, IfExpr, KnownNixStringContent, NixExpr, NixString, SourcePosition};
@@ -37,11 +38,12 @@ pub enum CompileError {
     Deref { value: String, pos: SourcePosition },
 }
 
-pub fn translate_expression(
+pub fn translate_expression<'src>(
     gc_handle: &mut GcHandle,
-    mut expr: NixExpr<'_>,
+    mut expr: NixExpr<'src>,
+    bump: &'src Bump,
 ) -> Result<Thunk, CompileError> {
-    normalize::normalize_ast(&mut expr);
+    normalize::normalize_ast(&mut expr, bump);
 
     let mut key_buffer = Default::default();
     let mut value_buffer = Default::default();

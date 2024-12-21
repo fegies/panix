@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bumpalo = {version = "3"}
+
 parser.workspace = true
 gc.workspace = true
 gc_derive.workspace = true

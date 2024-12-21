@@ -16,8 +16,8 @@ impl RemoveMultipathPass {
     }
 }
 
-impl Pass for RemoveMultipathPass {
-    fn inspect_attrset(&mut self, attrset: &mut Attrset) {
+impl Pass<'_> for RemoveMultipathPass {
+    fn inspect_attrset(&mut self, attrset: &mut Attrset, _pos: SourcePosition) {
         // first recurse down.
         self.descend_attrset(attrset);
 

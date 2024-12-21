@@ -1,33 +1,39 @@
+use bumpalo::Bump;
 use parser::ast::{
     AssertExpr, Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda,
-    LetInExpr, List, MonopOpcode, NixExpr, NixString, Op, WithExpr,
+    LetInExpr, List, MonopOpcode, NixExpr, NixString, Op, SourcePosition, WithExpr,
 };
 use remove_attrset_rec::RemoveAttrsetRecPass;
+use remove_with_expr::RemoveWithExprPass;
 
 use self::remove_multipath_attrset::RemoveMultipathPass;
 
 mod remove_attrset_rec;
 mod remove_multipath_attrset;
+mod remove_with_expr;
 
-pub fn normalize_ast(ast: &mut NixExpr) {
+pub fn normalize_ast<'src>(ast: &mut NixExpr<'src>, bump: &'src Bump) {
     RemoveMultipathPass::new().inspect_expr(ast);
     RemoveAttrsetRecPass::new().inspect_expr(ast);
+    RemoveWithExprPass::new(bump).inspect_expr(ast);
 }
 
-trait Pass {
-    fn inspect_expr(&mut self, expr: &mut NixExpr) {
+trait Pass<'src> {
+    fn inspect_expr(&mut self, expr: &mut NixExpr<'src>) {
         self.descend_expr(expr)
     }
 
-    fn descend_expr(&mut self, expr: &mut NixExpr) {
+    fn descend_expr(&mut self, expr: &mut NixExpr<'src>) {
         match &mut expr.content {
             parser::ast::NixExprContent::BasicValue(val) => self.inspect_basic_value(val),
-            parser::ast::NixExprContent::CompoundValue(val) => self.inspect_compount_value(val),
+            parser::ast::NixExprContent::CompoundValue(val) => {
+                self.inspect_compount_value(val, expr.position)
+            }
             parser::ast::NixExprContent::Code(code) => self.inspect_code(code),
         }
     }
 
-    fn inspect_basic_value(&mut self, val: &mut BasicValue) {
+    fn inspect_basic_value(&mut self, val: &mut BasicValue<'src>) {
         match val {
             BasicValue::String(str) => self.inspect_nix_string(str),
             BasicValue::Bool(_) => {}
@@ -38,14 +44,14 @@ trait Pass {
         }
     }
 
-    fn inspect_compount_value(&mut self, value: &mut CompoundValue) {
+    fn inspect_compount_value(&mut self, value: &mut CompoundValue<'src>, pos: SourcePosition) {
         match value {
-            CompoundValue::Attrset(attrset) => self.inspect_attrset(attrset),
+            CompoundValue::Attrset(attrset) => self.inspect_attrset(attrset, pos),
             CompoundValue::List(list) => self.inspect_list(list),
         }
     }
 
-    fn inspect_code(&mut self, code: &mut Code) {
+    fn inspect_code(&mut self, code: &mut Code<'src>) {
         match code {
             Code::LetInExpr(letexpr) => self.inspect_let_expr(letexpr),
             Code::ValueReference { mut ident } => self.inspect_value_ref(&mut ident),
@@ -57,12 +63,12 @@ trait Pass {
         }
     }
 
-    fn inspect_assert(&mut self, assert: &mut AssertExpr) {
+    fn inspect_assert(&mut self, assert: &mut AssertExpr<'src>) {
         self.inspect_expr(&mut assert.assertion);
         self.inspect_expr(&mut assert.value);
     }
 
-    fn inspect_nix_string(&mut self, string: &mut NixString<'_>) {
+    fn inspect_nix_string(&mut self, string: &mut NixString<'src>) {
         match &mut string.content {
             parser::ast::NixStringContent::Known(_) => {}
             parser::ast::NixStringContent::Interpolated(exprs) => {
@@ -78,10 +84,10 @@ trait Pass {
         }
     }
 
-    fn inspect_attrset(&mut self, attrset: &mut Attrset) {
+    fn inspect_attrset(&mut self, attrset: &mut Attrset<'src>, pos: SourcePosition) {
         self.descend_attrset(attrset)
     }
-    fn descend_attrset(&mut self, attrset: &mut Attrset) {
+    fn descend_attrset(&mut self, attrset: &mut Attrset<'src>) {
         for entry in &mut attrset.inherit_keys {
             if let Some(source) = entry.source.as_mut() {
                 self.inspect_expr(source);
@@ -100,13 +106,17 @@ trait Pass {
         }
     }
 
-    fn inspect_list(&mut self, list: &mut List) {
+    fn inspect_list(&mut self, list: &mut List<'src>) {
         for expr in &mut list.entries {
             self.inspect_expr(expr)
         }
     }
 
-    fn inspect_let_expr(&mut self, expr: &mut LetInExpr) {
+    fn inspect_let_expr(&mut self, expr: &mut LetInExpr<'src>) {
+        self.descend_let_expr(expr)
+    }
+
+    fn descend_let_expr(&mut self, expr: &mut LetInExpr<'src>) {
         for inherit in &mut expr.inherit_entries {
             if let Some(expr) = inherit.source.as_mut() {
                 self.inspect_expr(expr)
@@ -120,12 +130,12 @@ trait Pass {
 
     fn inspect_value_ref(&mut self, _ident: &mut &str) {}
 
-    fn inspect_with_expr(&mut self, expr: &mut WithExpr) {
+    fn inspect_with_expr(&mut self, expr: &mut WithExpr<'src>) {
         self.inspect_expr(&mut expr.binding);
         self.inspect_expr(&mut expr.body);
     }
 
-    fn inspect_lambda(&mut self, lambda: &mut Lambda) {
+    fn inspect_lambda(&mut self, lambda: &mut Lambda<'src>) {
         match &mut lambda.args {
             parser::ast::LambdaArgs::SimpleBinding(_name) => {}
             parser::ast::LambdaArgs::AttrsetBinding {
@@ -141,7 +151,7 @@ trait Pass {
         self.inspect_expr(&mut lambda.body);
     }
 
-    fn inspect_op(&mut self, expr: &mut Op) {
+    fn inspect_op(&mut self, expr: &mut Op<'src>) {
         match expr {
             Op::AttrRef {
                 left,
@@ -168,11 +178,11 @@ trait Pass {
         }
     }
 
-    fn inspect_hasattr<'a>(&mut self, attrset: &mut NixExpr<'a>, path: &mut AttrsetKey<'a>) {
+    fn inspect_hasattr(&mut self, attrset: &mut NixExpr<'src>, path: &mut AttrsetKey<'src>) {
         self.descend_hasattr(attrset, path)
     }
 
-    fn descend_hasattr(&mut self, attrset: &mut NixExpr, path: &mut AttrsetKey) {
+    fn descend_hasattr(&mut self, attrset: &mut NixExpr<'src>, path: &mut AttrsetKey<'src>) {
         self.inspect_expr(attrset);
         match path {
             parser::ast::AttrsetKey::Single(s) => self.inspect_nix_string(s),
@@ -186,19 +196,19 @@ trait Pass {
 
     fn inspect_binop(
         &mut self,
-        left: &mut NixExpr,
-        right: &mut NixExpr,
+        left: &mut NixExpr<'src>,
+        right: &mut NixExpr<'src>,
         _opcode: &mut BinopOpcode,
     ) {
         self.inspect_expr(left);
         self.inspect_expr(right);
     }
 
-    fn inspect_monop(&mut self, expr: &mut NixExpr, _opcode: &mut MonopOpcode) {
+    fn inspect_monop(&mut self, expr: &mut NixExpr<'src>, _opcode: &mut MonopOpcode) {
         self.inspect_expr(expr)
     }
 
-    fn inspect_if_expr(&mut self, expr: &mut IfExpr) {
+    fn inspect_if_expr(&mut self, expr: &mut IfExpr<'src>) {
         self.inspect_expr(&mut expr.condition);
         self.inspect_expr(&mut expr.truthy_case);
         self.inspect_expr(&mut expr.falsy_case);
