@@ -173,6 +173,14 @@ fn test_add_strings() {
     eval_expr("''foo'' + ''bar''", "\"foobar\"");
 }
 
+#[test]
+fn test_string_interpol() {
+    eval_expr(
+        "let a = \"42\"; b = \"15\"; in \"foo ${a}${a} bar ${b}\"",
+        "\"foo 4242 bar 15\"",
+    );
+}
+
 // #[test]
 // fn test_tryeval() {
 //     eval_expr(

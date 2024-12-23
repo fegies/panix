@@ -461,7 +461,15 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         self.state.local_stack.push(NixValue::Bool(result));
                     }
                     VmOp::PushBuiltin(builtin) => todo!(),
-                    VmOp::ConcatStrings(_) => todo!(),
+                    VmOp::ConcatStrings(num) => {
+                        let mut result = self.pop()?.expect_string()?;
+                        for _ in 1..num {
+                            let suffix = self.pop()?.expect_string()?;
+                            result = result.concat(suffix, &mut self.evaluator.gc_handle)?;
+                        }
+
+                        self.state.local_stack.push(NixValue::String(result));
+                    }
                 }
             }
         }
