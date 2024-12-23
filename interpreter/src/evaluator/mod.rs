@@ -232,12 +232,19 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                     VmOp::Add => {
                         let right = self.pop()?;
                         let left = self.pop()?;
-                        self.state.local_stack.push(execute_arithmetic_op(
-                            left,
-                            right,
-                            |l, r| l + r,
-                            |l, r| l + r,
-                        )?);
+
+                        if let NixValue::String(left) = left {
+                            let right = right.expect_string()?;
+                            let result = left.concat(right, self.evaluator.gc_handle)?;
+                            self.state.local_stack.push(NixValue::String(result));
+                        } else {
+                            self.state.local_stack.push(execute_arithmetic_op(
+                                left,
+                                right,
+                                |l, r| l + r,
+                                |l, r| l + r,
+                            )?);
+                        }
                     }
                     VmOp::Mul => {
                         let right = self.pop()?;
@@ -453,6 +460,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
                         self.state.local_stack.push(NixValue::Bool(result));
                     }
+                    VmOp::PushBuiltin(builtin) => todo!(),
                     VmOp::ConcatStrings(_) => todo!(),
                 }
             }

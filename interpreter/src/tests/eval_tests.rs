@@ -167,3 +167,16 @@ fn test_nested_with() {
 fn test_attrset_lazy_resolution() {
     eval_expr("with {u = 42;}; {a = d; b = u;}.b", "42");
 }
+
+#[test]
+fn test_add_strings() {
+    eval_expr("''foo'' + ''bar''", "\"foobar\"");
+}
+
+// #[test]
+// fn test_tryeval() {
+//     eval_expr(
+//         "builtins.tryEval (throw \"foo\")",
+//         "{success = false; value = false;}",
+//     )
+// }

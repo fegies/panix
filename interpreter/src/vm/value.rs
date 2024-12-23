@@ -1,6 +1,6 @@
 use gc::{
     specialized_types::{array::Array, string::SimpleGcString},
-    GcHandle, GcPointer,
+    GcError, GcHandle, GcPointer,
 };
 use gc_derive::Trace;
 
@@ -29,6 +29,11 @@ impl NixString {
     {
         gc_handle.load(&self.inner).as_ref()
     }
+
+    pub fn concat(self, other: NixString, gc: &mut GcHandle) -> Result<NixString, GcError> {
+        let res = gc.alloc_string_concat(&[self.inner, other.inner])?;
+        Ok(NixString { inner: res })
+    }
 }
 impl From<GcPointer<SimpleGcString>> for NixString {
     fn from(value: GcPointer<SimpleGcString>) -> Self {
@@ -56,7 +61,6 @@ pub enum NixValue {
     Function(Function),
     List(List),
 }
-
 
 #[derive(Debug, Trace, Clone)]
 pub struct Attrset {

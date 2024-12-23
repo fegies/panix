@@ -43,8 +43,11 @@ impl core::hash::Hash for SimpleGcString {
 }
 
 impl Page {
-    fn try_alloc_strings(&self, pieces: &[&str]) -> Option<HeapGcPointer<SimpleGcString>> {
-        let len = pieces.iter().map(|p| p.len()).sum();
+    unsafe fn try_alloc_with_init(
+        &self,
+        len: usize,
+        init: impl FnOnce(&mut [u8]),
+    ) -> Option<HeapGcPointer<SimpleGcString>> {
         let required_space = len + core::mem::size_of::<SimpleGcString>();
         let (header_pointer, data_pointer) =
             self.try_reserve(required_space, core::mem::align_of::<SimpleGcString>())?;
@@ -54,11 +57,10 @@ impl Page {
             let obj = &mut *cast_data_pointer;
             core::ptr::write(header_pointer, HeapEntry::for_object(obj));
             let string_begin_pointer = cast_data_pointer.add(1) as *mut u8;
-            let mut dest = core::slice::from_raw_parts_mut(string_begin_pointer, len);
-            for piece in pieces {
-                dest.copy_from_slice(piece.as_bytes());
-                dest = &mut dest[piece.len()..];
-            }
+            let dest = core::slice::from_raw_parts_mut(string_begin_pointer, len);
+
+            init(dest);
+
             let raw_ptr = RawHeapGcPointer::from_addr(header_pointer);
             Some(HeapGcPointer::from_raw_unchecked(raw_ptr))
         }
@@ -67,14 +69,58 @@ impl Page {
 
 impl GcHandle {
     pub fn alloc_string(&mut self, str: &str) -> GcResult<GcPointer<SimpleGcString>> {
-        self.alloc_string_from_parts(&[str])
+        let ptr = self.with_retry(|gc_handle| {
+            let page = gc_handle.get_nursery_page();
+            unsafe {
+                page.try_alloc_with_init(str.len(), |dest| dest.copy_from_slice(str.as_bytes()))
+            }
+        })?;
+        Ok(ptr.root())
     }
     pub fn alloc_string_from_parts(
         &mut self,
         pieces: &[&str],
     ) -> GcResult<GcPointer<SimpleGcString>> {
-        let ptr =
-            self.with_retry(|gc_handle| gc_handle.get_nursery_page().try_alloc_strings(pieces))?;
+        let len = pieces.iter().map(|p| p.len()).sum();
+        let ptr = self.with_retry(|gc_handle| {
+            let alloc_page = gc_handle.get_nursery_page();
+            unsafe {
+                alloc_page.try_alloc_with_init(len, |mut dest| {
+                    for piece in pieces {
+                        let len = piece.len();
+                        dest[..len].copy_from_slice(piece.as_bytes());
+                        dest = &mut dest[len..];
+                    }
+                })
+            }
+        })?;
+        Ok(ptr.root())
+    }
+
+    pub fn alloc_string_concat(
+        &mut self,
+        pieces: &[GcPointer<SimpleGcString>],
+    ) -> GcResult<GcPointer<SimpleGcString>> {
+        let len = pieces
+            .iter()
+            .map(|ptr| self.load(ptr).length as usize)
+            .sum();
+
+        let ptr = self.with_retry(|gc_handle| {
+            let alloc_page = gc_handle.get_nursery_page();
+            unsafe {
+                alloc_page.try_alloc_with_init(len, |mut dest| {
+                    // and, now we need to load everything a second time...
+                    for piece in pieces {
+                        let piece = gc_handle.load(piece).as_ref();
+                        let len = piece.len();
+                        dest[..len].copy_from_slice(piece.as_bytes());
+                        dest = &mut dest[len..];
+                    }
+                })
+            }
+        })?;
+
         Ok(ptr.root())
     }
 }

@@ -191,6 +191,14 @@ impl AllocationPages {
     }
 }
 
+impl Drop for AllocationPages {
+    fn drop(&mut self) {
+        let mut heap = self.global.lock().unwrap();
+        heap.mark_current_pages_as_previous(Generation(GC_GEN_HIGHEST));
+        heap.rotate_used_pages_to_generation(Generation(GC_GEN_HIGHEST));
+    }
+}
+
 impl GcHandle {
     fn with_retry<TResult>(
         &mut self,
@@ -288,7 +296,7 @@ impl GcHandle {
         Ok(heap_ptr.root())
     }
 
-    fn get_nursery_page(&mut self) -> &Page {
+    fn get_nursery_page(&self) -> &Page {
         self.alloc_pages.pages[0].as_ref()
     }
 

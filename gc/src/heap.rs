@@ -29,7 +29,7 @@ pub struct Pagetracker {
     base: *mut u8,
     size: usize,
     next_free_base: *mut u8,
-    free_pages: Vec<ZeroedPage>,
+    free_pages: Vec<AllocatedPage>,
     used_pages_current: [Vec<AllocatedPage>; GC_NUM_GENERATIONS],
     used_pages_previous: [Vec<AllocatedPage>; GC_NUM_GENERATIONS],
     generations: GenerationAnalyzer,
@@ -78,8 +78,7 @@ impl Pagetracker {
         for gen in 0..=target_generation.0 {
             let gen = gen as usize;
 
-            self.free_pages
-                .extend(self.used_pages_previous[gen].drain(..).map(|p| p.zero()));
+            self.free_pages.append(&mut self.used_pages_previous[gen]);
 
             core::mem::swap(
                 &mut self.used_pages_current[gen],
@@ -95,14 +94,14 @@ impl Pagetracker {
     }
 
     pub fn get_page(&mut self, generation: Generation) -> Option<Page> {
-        let page = self.free_pages.pop().or_else(|| self.grow_heap())?;
+        let page = self.free_pages.pop().or_else(|| self.grow_heap())?.zero();
         self.generations.set_generation(page.base, generation);
         self.used_pages_current[generation.0 as usize].push(AllocatedPage { base: page.base });
-        let page = Page::new(page.base);
-        Some(page)
+
+        Some(Page::new(page))
     }
 
-    fn grow_heap(&mut self) -> Option<ZeroedPage> {
+    fn grow_heap(&mut self) -> Option<AllocatedPage> {
         let page = self.next_free_base;
         let next_free = unsafe { page.byte_add(GC_PAGE_SIZE) };
 
@@ -110,11 +109,7 @@ impl Pagetracker {
             return None;
         } else {
             self.next_free_base = next_free;
-            // because we do not want to zero out the entire memory block initially, and only
-            // touch the parts we absolutely have to, we instead zero the newly carved out pages
-            // individually.
-            let page = AllocatedPage { base: page };
-            Some(page.zero())
+            Some(AllocatedPage { base: page })
         }
     }
 }
@@ -127,6 +122,9 @@ impl ZeroedPage {
     /// zero the provided page and provide a type witness for it
     pub unsafe fn from_zeroed_addr(base: *mut u8) -> Self {
         Self { base }
+    }
+    pub fn into_base(self) -> *mut u8 {
+        self.base
     }
 }
 

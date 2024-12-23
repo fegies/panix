@@ -1,3 +1,4 @@
+use add_builtins::add_builtins_def;
 use bumpalo::Bump;
 use parser::ast::{
     AssertExpr, Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda,
@@ -8,11 +9,13 @@ use remove_with_expr::RemoveWithExprPass;
 
 use self::remove_multipath_attrset::RemoveMultipathPass;
 
+mod add_builtins;
 mod remove_attrset_rec;
 mod remove_multipath_attrset;
 mod remove_with_expr;
 
 pub fn normalize_ast<'src>(ast: &mut NixExpr<'src>, bump: &'src Bump) {
+    add_builtins_def(ast);
     RemoveMultipathPass::new().inspect_expr(ast);
     RemoveAttrsetRecPass::new().inspect_expr(ast);
     RemoveWithExprPass::new(bump).inspect_expr(ast);
@@ -54,7 +57,7 @@ trait Pass<'src> {
     fn inspect_code(&mut self, code: &mut Code<'src>) {
         match code {
             Code::LetInExpr(letexpr) => self.inspect_let_expr(letexpr),
-            Code::ValueReference { mut ident } => self.inspect_value_ref(&mut ident),
+            Code::ValueReference { ident } => self.inspect_value_ref(ident),
             Code::WithExpr(expr) => self.inspect_with_expr(expr),
             Code::Lambda(lambda) => self.inspect_lambda(lambda),
             Code::Op(expr) => self.inspect_op(expr),

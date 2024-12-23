@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     systems.url = "github:nix-systems/default";
     devenv.url = "github:cachix/devenv";
     fenix = {
@@ -42,7 +42,7 @@
                 components = ["rustc" "cargo" "clippy" "rust-analyzer" "rust-src" "rustfmt"];
               };
               # https://devenv.sh/reference/options/
-              packages = [pkgs.mold pkgs.cargo-expand];
+              packages = [pkgs.mold pkgs.cargo-expand pkgs.cargo-nextest];
 
               # enterShell = ''
               #   hello

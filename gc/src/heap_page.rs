@@ -1,4 +1,5 @@
 use crate::{
+    heap::ZeroedPage,
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
     CollectionHandle, GcError, Generation, PageSource, GC_PAGE_SIZE,
@@ -148,7 +149,8 @@ impl Page {
         self.base_address
     }
 
-    pub(crate) fn new(base_address: *mut u8) -> Self {
+    pub(crate) fn new(page: ZeroedPage) -> Self {
+        let base_address = page.into_base();
         debug_assert!(base_address as usize % GC_PAGE_SIZE == 0);
 
         let free_top = unsafe { base_address.add(GC_PAGE_SIZE) } as *mut HeapEntry;

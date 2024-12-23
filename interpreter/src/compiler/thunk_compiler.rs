@@ -141,7 +141,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             parser::ast::Code::ValueReference { ident } => {
                 self.translate_value_ref(lookup_scope, target_buffer, ident, pos)
             }
-            parser::ast::Code::WithExpr(_) => unreachable!("With expressions should have been removed by an ast pass"),
+            parser::ast::Code::WithExpr(_) => {
+                unreachable!("With expressions should have been removed by an ast pass")
+            }
             parser::ast::Code::Lambda(lambda) => {
                 self.translate_lambda(lookup_scope, target_buffer, lambda)
             }
@@ -655,6 +657,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 "true" => VmOp::PushImmediate(self.compiler.cached_values.true_boolean.clone()),
                 "false" => VmOp::PushImmediate(self.compiler.cached_values.false_boolean.clone()),
                 "null" => VmOp::PushImmediate(self.compiler.cached_values.null_value.clone()),
+                "throw" => VmOp::PushBuiltin(crate::vm::opcodes::Builtin::Throw),
+                "<builtin_hasAttr>" => VmOp::PushBuiltin(crate::vm::opcodes::Builtin::HasAttr),
+                "<builtin_abort>" => VmOp::PushBuiltin(crate::vm::opcodes::Builtin::Abort),
                 _ => {
                     return Err(CompileError::Deref {
                         value: ident.to_string(),

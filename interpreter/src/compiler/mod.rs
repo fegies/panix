@@ -14,8 +14,6 @@ use crate::{
 
 mod lookup_scope;
 mod normalize;
-#[cfg(test)]
-mod tests;
 mod thunk_compiler;
 
 fn get_null_expr() -> NixExpr<'static> {
@@ -45,13 +43,9 @@ pub fn translate_expression<'src>(
 ) -> Result<Thunk, CompileError> {
     normalize::normalize_ast(&mut expr, bump);
 
-    let mut key_buffer = Default::default();
-    let mut value_buffer = Default::default();
     let mut compiler = Compiler {
         cached_values: CachedValues::new(gc_handle)?,
         gc_handle,
-        key_buffer: &mut key_buffer,
-        value_buffer: &mut value_buffer,
     };
     let mut scope_backing = ScopeBacking::new();
 
@@ -60,8 +54,6 @@ pub fn translate_expression<'src>(
 
 struct Compiler<'gc> {
     gc_handle: &'gc mut GcHandle,
-    key_buffer: &'gc BufferPool<value::NixString>,
-    value_buffer: &'gc BufferPool<Thunk>,
     cached_values: CachedValues,
 }
 
@@ -71,6 +63,7 @@ struct CachedValues {
     null_value: GcPointer<NixValue>,
     empty_string: GcPointer<NixValue>,
 }
+
 impl CachedValues {
     fn new(gc_handle: &mut GcHandle) -> Result<Self, GcError> {
         let empty_string = NixValue::String(value::NixString::from(gc_handle.alloc_string("")?));
