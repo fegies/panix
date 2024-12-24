@@ -342,7 +342,16 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             }
             parser::ast::Op::Call { function, arg } => {
                 self.translate_to_ops(lookup_scope, target_buffer, *function)?;
-                self.translate_to_ops(lookup_scope, target_buffer, *arg)?;
+                let alloc_args = self.compile_subchunk(
+                    lookup_scope,
+                    &mut Vec::new(),
+                    &mut BTreeMap::new(),
+                    *arg,
+                )?;
+                target_buffer.push(VmOp::AllocateThunk {
+                    slot: None,
+                    args: alloc_args,
+                });
                 target_buffer.push(VmOp::Call);
             }
             parser::ast::Op::Binop {

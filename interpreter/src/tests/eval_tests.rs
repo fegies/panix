@@ -186,5 +186,10 @@ fn test_tryeval() {
     eval_expr(
         "builtins.tryEval (throw \"foo\")",
         "{success = false; value = false;}",
-    )
+    );
+    eval_expr(
+        "builtins.tryEval (42)",
+        "{success = true; value = 42;}",
+    );
+
 }

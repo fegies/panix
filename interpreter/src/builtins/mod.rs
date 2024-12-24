@@ -1,13 +1,17 @@
 use std::sync::LazyLock;
 
-use gc::GcHandle;
+use gc::{GcHandle, GcPointer};
 use gc_derive::Trace;
 use parser::{
     ast::{Code, LetInExpr, NixExprContent},
     parse_nix,
 };
 
-use crate::{vm::value::NixValue, EvaluateError};
+use crate::{
+    evaluator,
+    vm::value::{Attrset, NixValue, Thunk},
+    EvaluateError, Evaluator,
+};
 
 pub trait Builtins {
     /// an opaque token that identifies the specific builtin being called.
@@ -21,8 +25,8 @@ pub trait Builtins {
     fn execute_builtin(
         &self,
         builtin: Self::TypeToken,
-        argument: NixValue,
-        gc: &mut GcHandle,
+        argument: GcPointer<Thunk>,
+        evaluator: &mut Evaluator,
     ) -> Result<NixValue, Self::ExecuteError>;
 }
 
@@ -47,6 +51,7 @@ fn build_builtins_expr() -> LetInExpr<'static> {
     }
 }
 
+#[derive(Clone)]
 pub struct NixBuiltins {
     _private: (),
 }
@@ -78,14 +83,33 @@ impl Builtins for NixBuiltins {
     fn execute_builtin(
         &self,
         builtin: Self::TypeToken,
-        argument: NixValue,
-        gc: &mut GcHandle,
+        argument: GcPointer<Thunk>,
+        evaluator: &mut Evaluator,
     ) -> Result<NixValue, Self::ExecuteError> {
         match builtin.inner {
             BuiltinType::Throw => Err(EvaluateError::Throw {
                 value: "todo".to_owned(),
             }),
-            BuiltinType::TryEval => todo!(),
+            BuiltinType::TryEval => {
+                let value = evaluator.force_thunk(argument).ok();
+                let success_string = evaluator.gc_handle.alloc_string("success")?.into();
+                let value_string = evaluator.gc_handle.alloc_string("value")?.into();
+
+                let bool_value = NixValue::Bool(value.is_some());
+
+                let value = evaluator
+                    .gc_handle
+                    .alloc(Thunk::Value(value.unwrap_or_else(|| bool_value.clone())))?;
+                let bool_value = evaluator.gc_handle.alloc(Thunk::Value(bool_value))?;
+
+                let entries = evaluator
+                    .gc_handle
+                    .alloc_slice(&[(success_string, bool_value), (value_string, value)])?;
+
+                let attrset = Attrset { entries };
+
+                Ok(NixValue::Attrset(attrset))
+            }
         }
     }
 }

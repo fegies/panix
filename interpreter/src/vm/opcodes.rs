@@ -116,7 +116,10 @@ pub enum VmOp {
     NumericNegate,
     /// pops a value from the stack, performs binary not and pushes the result
     BinaryNot,
-    /// pops two values from the stack, applies the top to the bottom and pushes the result
+
+    /// pops a value from the stack. this is the function to be called.
+    /// then pops a thunk from the thunk stack and uses it as the argument.
+    /// the function is evaluated with the thunk as argument and the result pushed to the stack
     Call,
 
     /// pops a string from the stack, converts it to a apth and pushes the result

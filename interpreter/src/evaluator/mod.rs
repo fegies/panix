@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use gc::{specialized_types::array::Array, GcHandle, GcPointer};
 
 use crate::{
-    builtins::{get_builtins, Builtins, NixBuiltins},
+    builtins::{get_builtins, BuiltinTypeToken, Builtins, NixBuiltins},
     compiler::ValueSource,
     util::Stackvec,
     vm::{
@@ -16,7 +16,7 @@ use crate::{
 use super::InterpreterError;
 
 pub struct Evaluator<'gc> {
-    gc_handle: &'gc mut GcHandle,
+    pub gc_handle: &'gc mut GcHandle,
     stack_cache: Vec<ThunkEvalState>,
     thunk_alloc_buffer: Vec<GcPointer<Thunk>>,
     builtins: NixBuiltins,
@@ -31,6 +31,7 @@ struct ThunkEvalState {
 
 struct ThunkEvaluator<'eval, 'gc> {
     state: ThunkEvalState,
+    builtins: NixBuiltins,
     evaluator: &'eval mut Evaluator<'gc>,
 }
 
@@ -48,7 +49,7 @@ impl<'gc> Evaluator<'gc> {
         self.force_thunk(ptr)
     }
 
-    fn force_thunk(&mut self, thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
+    pub fn force_thunk(&mut self, thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
         match self.gc_handle.load(&thunk) {
             Thunk::Blackhole => return Err(EvaluateError::BlackholeEvaluated),
             Thunk::Value(v) => return Ok(v.clone()),
@@ -66,6 +67,7 @@ impl<'gc> Evaluator<'gc> {
 
                 let result = ThunkEvaluator {
                     state,
+                    builtins: self.builtins.clone(),
                     evaluator: self,
                 }
                 .compute_result()?;
@@ -286,14 +288,17 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         self.state.local_stack.push(result);
                     }
                     VmOp::Call => {
-                        let arg = self.pop()?;
+                        let arg = self
+                            .state
+                            .thunk_stack
+                            .pop()
+                            .expect("thunk stack exhausted unexpectedly");
                         let result = match self.pop()? {
                             NixValue::Function(function) => self.execute_call(function, arg),
-                            NixValue::Builtin(builtin) => self.evaluator.builtins.execute_builtin(
-                                builtin,
-                                arg,
-                                &mut self.evaluator.gc_handle,
-                            ),
+                            NixValue::Builtin(builtin) => {
+                                self.builtins
+                                    .execute_builtin(builtin, arg, &mut self.evaluator)
+                            }
                             _ => Err(EvaluateError::TypeError),
                         }?;
 
@@ -442,7 +447,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
     fn execute_call(
         &mut self,
         func: value::Function,
-        arg: NixValue,
+        arg: GcPointer<Thunk>,
     ) -> Result<NixValue, EvaluateError> {
         // check that all required keys are present if needed
         match func.call_type {
@@ -453,6 +458,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                 keys,
                 includes_rest_pattern,
             } => {
+                let arg = self.evaluator.force_thunk(arg.clone())?;
                 let arg = arg.as_attrset()?;
                 let keys = self.evaluator.gc_handle.load(&keys).as_ref();
 
@@ -494,9 +500,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
         }
 
         let mut sub_state = self.evaluator.stack_cache.pop().unwrap_or_default();
-        sub_state
-            .thunk_stack
-            .push(self.evaluator.gc_handle.alloc(Thunk::Value(arg))?);
+        sub_state.thunk_stack.push(arg);
         sub_state
             .code_buf
             .extend_from_slice(self.evaluator.gc_handle.load(&func.code).as_ref());
@@ -509,6 +513,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
         ThunkEvaluator {
             state: sub_state,
+            builtins: self.builtins.clone(),
             evaluator: self.evaluator,
         }
         .compute_result()
