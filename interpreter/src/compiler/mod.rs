@@ -4,12 +4,9 @@ use lookup_scope::ScopeBacking;
 use parser::ast::{BasicValue, IfExpr, KnownNixStringContent, NixExpr, NixString, SourcePosition};
 use thunk_compiler::ThunkCompiler;
 
-use crate::{
-    util::BufferPool,
-    vm::{
-        opcodes::{ExecutionContext, VmOp},
-        value::{self, NixValue, Thunk},
-    },
+use crate::vm::{
+    opcodes::{ExecutionContext, VmOp},
+    value::{self, NixValue, Thunk},
 };
 
 mod lookup_scope;

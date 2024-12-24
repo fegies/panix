@@ -4,9 +4,10 @@ use gc::{specialized_types::array::Array, GcHandle, GcPointer};
 
 use crate::{
     compiler::ValueSource,
+    util::Stackvec,
     vm::{
         opcodes::{ExecutionContext, LambdaAllocArgs, VmOp},
-        value::{self, Attrset, Function, List, NixValue, Thunk},
+        value::{self, Attrset, Function, List, NixString, NixValue, Thunk},
     },
     EvaluateError,
 };
@@ -462,13 +463,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                     }
                     VmOp::PushBuiltin(builtin) => todo!(),
                     VmOp::ConcatStrings(num) => {
-                        let mut result = self.pop()?.expect_string()?;
-                        for _ in 1..num {
-                            let suffix = self.pop()?.expect_string()?;
-                            result = result.concat(suffix, &mut self.evaluator.gc_handle)?;
-                        }
-
-                        self.state.local_stack.push(NixValue::String(result));
+                        self.execute_concat_strings(num)?;
                     }
                 }
             }
@@ -487,6 +482,22 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             .local_stack
             .pop()
             .ok_or(EvaluateError::ExecutionStackExhaustedUnexpectedly)
+    }
+
+    fn execute_concat_strings(&mut self, mut count: u32) -> Result<(), EvaluateError> {
+        let source = core::iter::repeat_with(|| {
+            self.state
+                .local_stack
+                .pop()
+                .ok_or(EvaluateError::ExecutionStackExhaustedUnexpectedly)?
+                .expect_string()
+        })
+        .take(count as usize);
+        let result = NixString::concat_many(source, &mut self.evaluator.gc_handle)?;
+
+        self.state.local_stack.push(NixValue::String(result));
+
+        Ok(())
     }
 }
 

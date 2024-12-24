@@ -1,60 +1,71 @@
-use std::cell::UnsafeCell;
+use std::{cell::UnsafeCell, mem::MaybeUninit};
 
-pub struct BufferPool<T> {
-    inner: InnerPool<T>,
-}
-struct InnerPool<T> {
-    backing: UnsafeCell<Vec<Vec<T>>>,
-}
-pub struct RentedBuffer<'pool, T> {
-    inner: Vec<T>,
-    pool: &'pool InnerPool<T>,
+pub struct Stackvec<const N: usize, T> {
+    inner: [MaybeUninit<T>; N],
+    length: usize,
 }
 
-impl<T> BufferPool<T> {
-    pub fn get(&self) -> RentedBuffer<T> {
-        let buf = self.inner.get_buf();
-        RentedBuffer {
-            inner: buf,
-            pool: &self.inner,
+impl<const N: usize, T> Stackvec<N, T> {
+    pub fn new() -> Self {
+        unsafe {
+            let inner = MaybeUninit::uninit().assume_init();
+            Self { inner, length: 0 }
+        }
+    }
+
+    /// push the new value onto the vec.
+    /// if the vec is full, the passed value is returned.
+    pub fn push(&mut self, value: T) -> Option<T> {
+        if self.length < N {
+            self.inner[self.length].write(value);
+            self.length += 1;
+            None
+        } else {
+            Some(value)
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        if self.length == 0 {
+            None
+        } else {
+            self.length -= 1;
+            unsafe { Some(self.inner[self.length].assume_init_read()) }
+        }
+    }
+
+    /// clears all entries in this vector.
+    pub fn clear(&mut self) {
+        let length = self.length;
+        // set to 0 first to avoid multiple drop
+        self.length = 0;
+
+        unsafe {
+            let slice = core::slice::from_raw_parts_mut(self.inner.as_mut_ptr() as *mut T, length);
+            core::ptr::drop_in_place(slice);
         }
     }
 }
 
-impl<T> Default for BufferPool<T> {
-    fn default() -> Self {
-        Self {
-            inner: InnerPool {
-                backing: UnsafeCell::new(Vec::new()),
-            },
-        }
+impl<const N: usize, T> AsRef<[T]> for Stackvec<N, T> {
+    fn as_ref(&self) -> &[T] {
+        let start_ptr = self.inner.as_ptr() as *const T;
+        unsafe { core::slice::from_raw_parts(start_ptr, self.length) }
+    }
+}
+impl<const N: usize, T> AsMut<[T]> for Stackvec<N, T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        let start_ptr = self.inner.as_ptr() as *mut T;
+        unsafe { core::slice::from_raw_parts_mut(start_ptr, self.length) }
     }
 }
 
-impl<T> InnerPool<T> {
-    fn with_backing<R>(&self, func: impl FnOnce(&mut Vec<Vec<T>>) -> R) -> R {
-        let vec = unsafe { &mut *self.backing.get() };
-        func(vec)
-    }
-    fn get_buf(&self) -> Vec<T> {
-        unsafe { &mut *self.backing.get() }
-            .pop()
-            .unwrap_or_default()
-    }
-    fn return_buf(&self, mut buf: Vec<T>) {
-        buf.clear();
-        unsafe { &mut *self.backing.get() }.push(buf)
-    }
-}
-
-impl<T> AsMut<Vec<T>> for RentedBuffer<'_, T> {
-    fn as_mut(&mut self) -> &mut Vec<T> {
-        &mut self.inner
-    }
-}
-
-impl<T> Drop for RentedBuffer<'_, T> {
+impl<const N: usize, T> Drop for Stackvec<N, T> {
     fn drop(&mut self) {
-        self.pool.return_buf(core::mem::take(&mut self.inner))
+        unsafe { core::ptr::drop_in_place(self.as_mut()) }
     }
 }

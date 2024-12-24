@@ -4,6 +4,8 @@ use gc::{
 };
 use gc_derive::Trace;
 
+use crate::util::Stackvec;
+
 use super::opcodes::{ExecutionContext, LambdaCallType, VmOp};
 
 #[derive(Debug, Trace)]
@@ -33,6 +35,37 @@ impl NixString {
     pub fn concat(self, other: NixString, gc: &mut GcHandle) -> Result<NixString, GcError> {
         let res = gc.alloc_string_concat(&[self.inner, other.inner])?;
         Ok(NixString { inner: res })
+    }
+
+    pub fn concat_many<E>(
+        pieces: impl Iterator<Item = Result<NixString, E>>,
+        gc: &mut GcHandle,
+    ) -> Result<NixString, E>
+    where
+        E: From<GcError>,
+    {
+        let mut vec = Stackvec::<64, _>::new();
+        for item in pieces {
+            if let Some(item) = vec.push(item?.inner) {
+                // our vec was full. Execute a concat with the stored pieces
+                // to free up some space again.
+
+                let concatted = gc.alloc_string_concat(vec.as_ref())?;
+                vec.clear();
+                vec.push(concatted);
+                // and retry to push the item.
+                vec.push(item);
+            }
+        }
+
+        let result = if vec.len() > 0 {
+            gc.alloc_string_concat(vec.as_ref())?
+        } else {
+            // there were 0 pieces to concat. In this case we emit an empty string.
+            gc.alloc_string("")?
+        };
+
+        Ok(NixString { inner: result })
     }
 }
 impl From<GcPointer<SimpleGcString>> for NixString {
