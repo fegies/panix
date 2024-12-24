@@ -1,3 +1,5 @@
+use crate::builtins::BuiltinTypeToken;
+
 use super::value::{self, NixValue, Thunk};
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
@@ -140,23 +142,12 @@ pub enum VmOp {
     /// if it is set to _true_ and the attribute was not present, a value of _true_ is pushed to
     /// the stack. Since no attribute value could be retrieved in this case, the result boolen will
     /// be the only pushed value.
-    GetAttribute {
-        push_error: bool,
-    },
+    GetAttribute { push_error: bool },
 
     /// first pops an attrset, then a name value from the stack.
     /// test if the key is present in the attrset, and push the result as a bool
     /// to the stack.
     HasAttribute,
-
-    PushBuiltin(Builtin),
-}
-
-#[derive(Clone, Copy, Debug, Trace)]
-pub enum Builtin {
-    HasAttr,
-    Throw,
-    Abort,
 }
 
 #[derive(Clone, Copy, Debug, Trace)]

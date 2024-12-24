@@ -4,9 +4,12 @@ use lookup_scope::ScopeBacking;
 use parser::ast::{BasicValue, IfExpr, KnownNixStringContent, NixExpr, NixString, SourcePosition};
 use thunk_compiler::ThunkCompiler;
 
-use crate::vm::{
-    opcodes::{ExecutionContext, VmOp},
-    value::{self, NixValue, Thunk},
+use crate::{
+    builtins::{get_builtins, get_builtins_expr, NixBuiltins},
+    vm::{
+        opcodes::{ExecutionContext, VmOp},
+        value::{self, NixValue, Thunk},
+    },
 };
 
 mod lookup_scope;
@@ -43,6 +46,7 @@ pub fn translate_expression<'src>(
     let mut compiler = Compiler {
         cached_values: CachedValues::new(gc_handle)?,
         gc_handle,
+        builtins: get_builtins(),
     };
     let mut scope_backing = ScopeBacking::new();
 
@@ -52,6 +56,7 @@ pub fn translate_expression<'src>(
 struct Compiler<'gc> {
     gc_handle: &'gc mut GcHandle,
     cached_values: CachedValues,
+    builtins: NixBuiltins,
 }
 
 struct CachedValues {

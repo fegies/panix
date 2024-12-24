@@ -4,7 +4,7 @@ use gc::{
 };
 use gc_derive::Trace;
 
-use crate::util::Stackvec;
+use crate::{builtins::BuiltinTypeToken, util::Stackvec};
 
 use super::opcodes::{ExecutionContext, LambdaCallType, VmOp};
 
@@ -93,6 +93,7 @@ pub enum NixValue {
     Attrset(Attrset),
     Function(Function),
     List(List),
+    Builtin(BuiltinTypeToken),
 }
 
 #[derive(Debug, Trace, Clone)]

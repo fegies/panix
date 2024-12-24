@@ -3,6 +3,7 @@ mod compiler;
 pub mod util;
 mod vm;
 
+mod builtins;
 pub mod evaluator;
 use bumpalo::Bump;
 pub use evaluator::Evaluator;
@@ -41,6 +42,9 @@ pub enum EvaluateError {
 
     #[error("Lambda called with missing argument: `{arg_name}`")]
     CallWithMissingArg { arg_name: String },
+
+    #[error("The code threw an exception")]
+    Throw { value: String },
 }
 
 #[derive(Debug, thiserror::Error)]

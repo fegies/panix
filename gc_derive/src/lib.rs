@@ -79,11 +79,16 @@ fn generate_trace_body(data: &Data) -> proc_macro2::TokenStream {
             quote!(#(#fields)*)
         }
         Data::Enum(e) => {
-            let variants = e.variants.iter().map(generate_variant_access);
-            let variants = quote!(#(#variants)*);
-            quote!(match self {
-                #variants
-            })
+            if e.variants.is_empty() {
+                // in the case that there are no variants, we do not need to do anything.
+                quote!()
+            } else {
+                let variants = e.variants.iter().map(generate_variant_access);
+                let variants = quote!(#(#variants)*);
+                quote!(match self {
+                    #variants
+                })
+            }
         }
         Data::Union(_) => {
             panic!("C unions are not supported as there is no indication which variant is correct.")

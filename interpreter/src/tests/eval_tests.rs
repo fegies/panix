@@ -181,10 +181,10 @@ fn test_string_interpol() {
     );
 }
 
-// #[test]
-// fn test_tryeval() {
-//     eval_expr(
-//         "builtins.tryEval (throw \"foo\")",
-//         "{success = false; value = false;}",
-//     )
-// }
+#[test]
+fn test_tryeval() {
+    eval_expr(
+        "builtins.tryEval (throw \"foo\")",
+        "{success = false; value = false;}",
+    )
+}

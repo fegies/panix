@@ -6,6 +6,7 @@ use parser::ast::{
 };
 
 use crate::{
+    builtins::{BuiltinTypeToken, Builtins},
     compiler::{get_null_expr, lookup_scope::LocalThunkRef},
     vm::{
         opcodes::{
@@ -657,14 +658,17 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 "true" => VmOp::PushImmediate(self.compiler.cached_values.true_boolean.clone()),
                 "false" => VmOp::PushImmediate(self.compiler.cached_values.false_boolean.clone()),
                 "null" => VmOp::PushImmediate(self.compiler.cached_values.null_value.clone()),
-                "throw" => VmOp::PushBuiltin(crate::vm::opcodes::Builtin::Throw),
-                "<builtin_hasAttr>" => VmOp::PushBuiltin(crate::vm::opcodes::Builtin::HasAttr),
-                "<builtin_abort>" => VmOp::PushBuiltin(crate::vm::opcodes::Builtin::Abort),
                 _ => {
-                    return Err(CompileError::Deref {
-                        value: ident.to_string(),
-                        pos,
-                    });
+                    if let Some(builtin) = self.compiler.builtins.get_builtin(ident) {
+                        VmOp::PushImmediate(
+                            self.compiler.gc_handle.alloc(NixValue::Builtin(builtin))?,
+                        )
+                    } else {
+                        return Err(CompileError::Deref {
+                            value: ident.to_string(),
+                            pos,
+                        });
+                    }
                 }
             }
         };
