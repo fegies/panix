@@ -187,9 +187,27 @@ fn test_tryeval() {
         "builtins.tryEval (throw \"foo\")",
         "{success = false; value = false;}",
     );
-    eval_expr(
-        "builtins.tryEval (42)",
-        "{success = true; value = 42;}",
-    );
+    eval_expr("builtins.tryEval (42)", "{success = true; value = 42;}");
+}
 
+#[test]
+fn test_typeof() {
+    let pairs = &[
+        ("42", "int"),
+        ("true", "bool"),
+        ("\"foo\"", "string"),
+        ("null", "null"),
+        ("{}", "set"),
+        ("[]", "list"),
+        ("./foo", "path"),
+        ("42.1", "float"),
+        ("a: a", "lambda"),
+    ];
+
+    for (nix_expr, type_) in pairs {
+        eval_expr(
+            &format!("builtins.typeOf {nix_expr}"),
+            &(format!("\"{type_}\"")),
+        )
+    }
 }

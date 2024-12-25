@@ -6,6 +6,7 @@ let
     false = false;
     null = null;
     tryEval = ___builtin_tryeval;
+    typeOf = ___builtin_typeof;
   };
 in
   __body__

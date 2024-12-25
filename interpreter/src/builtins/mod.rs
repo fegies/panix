@@ -64,6 +64,7 @@ pub struct BuiltinTypeToken {
 enum BuiltinType {
     Throw,
     TryEval,
+    TypeOf,
 }
 
 impl Builtins for NixBuiltins {
@@ -74,6 +75,7 @@ impl Builtins for NixBuiltins {
         let t = match ident {
             "___builtin_throw" => BuiltinType::Throw,
             "___builtin_tryeval" => BuiltinType::TryEval,
+            "___builtin_typeof" => BuiltinType::TypeOf,
             _ => return None,
         };
 
@@ -109,6 +111,24 @@ impl Builtins for NixBuiltins {
                 let attrset = Attrset { entries };
 
                 Ok(NixValue::Attrset(attrset))
+            }
+            BuiltinType::TypeOf => {
+                let typename = match evaluator.force_thunk(argument)? {
+                    NixValue::String(_) => "string",
+                    NixValue::Bool(_) => "bool",
+                    NixValue::Null => "null",
+                    NixValue::Int(_) => "int",
+                    NixValue::Float(_) => "float",
+                    NixValue::Path(_) => "path",
+                    NixValue::Attrset(_) => "set",
+                    NixValue::Function(_) => "lambda",
+                    NixValue::List(_) => "list",
+                    NixValue::Builtin(_) => "lambda",
+                };
+
+                let value = evaluator.gc_handle.alloc_string(typename)?;
+
+                Ok(NixValue::String(value.into()))
             }
         }
     }
