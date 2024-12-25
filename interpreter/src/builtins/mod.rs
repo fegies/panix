@@ -9,7 +9,10 @@ use parser::{
 
 use crate::{
     evaluator,
-    vm::value::{Attrset, NixValue, Thunk},
+    vm::{
+        opcodes::{ExecutionContext, VmOp},
+        value::{self, Attrset, NixString, NixValue, Thunk},
+    },
     EvaluateError, Evaluator,
 };
 
@@ -132,7 +135,73 @@ impl Builtins for NixBuiltins {
 
                 Ok(NixValue::String(value.into()))
             }
-            BuiltinType::ToString => todo!(),
+            BuiltinType::ToString => Ok(NixValue::String(execute_to_string(argument, evaluator)?)),
         }
     }
+}
+
+fn execute_to_string(
+    argument: GcPointer<Thunk>,
+    evaluator: &mut Evaluator,
+) -> Result<value::NixString, EvaluateError> {
+    let result = match evaluator.force_thunk(argument)? {
+        NixValue::String(s) => s,
+        NixValue::Bool(b) => {
+            let value = if b { "1" } else { "" };
+            evaluator.gc_handle.alloc_string(value)?.into()
+        }
+        NixValue::Null => evaluator.gc_handle.alloc_string("")?.into(),
+        NixValue::Int(int) => {
+            let val = format!("{int}");
+            evaluator.gc_handle.alloc_string(&val)?.into()
+        }
+        NixValue::Float(float) => {
+            let val = format!("{float}");
+            evaluator.gc_handle.alloc_string(&val)?.into()
+        }
+        NixValue::Path(path) => path,
+        NixValue::Attrset(attrset) => {
+            // the cases where the attrset can be stringified is handled by the
+            // nix code in the prelude
+            return Err(EvaluateError::TypeErrorWithMessage {
+                msg: format!("cannot coerce attrset to string"),
+            });
+        }
+        NixValue::List(list) => {
+            let entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
+            if entries.len() == 0 {
+                return Ok(evaluator.gc_handle.alloc_string("")?.into());
+            }
+            if entries.len() == 1 {
+                return execute_to_string(entries.into_iter().next().unwrap(), evaluator);
+            }
+
+            let mut strings = Vec::with_capacity(entries.len() * 2);
+            let separator: NixString = evaluator.gc_handle.alloc_string(" ")?.into();
+            for entry in entries {
+                strings.push(execute_to_string(entry, evaluator)?);
+                strings.push(separator.clone());
+            }
+
+            // we pushed one final separator too much.
+            strings.pop();
+
+            NixString::concat_many(
+                strings.into_iter().map(Ok::<_, EvaluateError>),
+                &mut evaluator.gc_handle,
+            )?
+        }
+        NixValue::Function(_) => {
+            return Err(EvaluateError::TypeErrorWithMessage {
+                msg: format!("connot coerce function to string"),
+            })
+        }
+        NixValue::Builtin(_) => {
+            return Err(EvaluateError::TypeErrorWithMessage {
+                msg: format!("cannot coerce function to string"),
+            })
+        }
+    };
+
+    Ok(result)
 }

@@ -1,6 +1,14 @@
 let
   throw = ___builtin_throw;
-  toString = ___builtin_tostring;
+  toString = arg:
+    if builtins.typeOf arg == "set"
+    then
+      toString (
+        if arg ? __toString
+        then arg.__toString arg
+        else arg.outPath or (throw "cannot coerce a set to a string")
+      )
+    else ___builtin_tostring arg;
   builtins = {
     inherit builtins throw toString;
     true = true;

@@ -45,6 +45,9 @@ pub enum EvaluateError {
 
     #[error("The code threw an exception")]
     Throw { value: String },
+
+    #[error("{msg}")]
+    TypeErrorWithMessage { msg: String },
 }
 
 #[derive(Debug, thiserror::Error)]

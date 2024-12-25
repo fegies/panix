@@ -223,14 +223,27 @@ fn test_attrset_inherit() {
 
 #[test]
 fn test_tostring() {
-    let pairs = &[("\"foo\"", "foo")];
+    let pairs = &[
+        ("\"foo\"", "foo"),
+        ("/foo/bar", "/foo/bar"),
+        ("42", "42"),
+        ("42.1", "42.1"),
+        ("false", ""),
+        ("true", "1"),
+        ("null", ""),
+        ("[42 12 \"foo\"]", "42 12 foo"),
+        ("{outPath = 42;}", "42"),
+        ("{__toString = self: true;}", "1"),
+    ];
 
     for (nix_expr, str_repr) in pairs {
         eval_expr(
             &format!("builtins.toString {nix_expr}"),
             &format!("\"{str_repr}\""),
         );
+        println!("\n---\n");
         // toString should exist in the global scope too
         eval_expr(&format!("toString {nix_expr}"), &format!("\"{str_repr}\""));
+        println!("\n---\n");
     }
 }
