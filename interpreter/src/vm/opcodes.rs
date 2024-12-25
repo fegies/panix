@@ -62,6 +62,9 @@ pub enum VmOp {
     /// loads the provided value from the local Thunk stack
     LoadLocalThunk(u32),
 
+    /// duplicates the thunk from the provided source and pushes it on the stack.
+    DuplicateThunk(ValueSource),
+
     /// pushes the provided immediate value on the stack.
     PushImmediate(GcPointer<NixValue>),
 

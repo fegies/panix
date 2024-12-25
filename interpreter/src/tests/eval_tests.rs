@@ -211,3 +211,22 @@ fn test_typeof() {
         )
     }
 }
+
+#[test]
+fn test_attrset_inherit() {
+    eval_expr("(let b = 42; in {inherit b; a = 12;}).b", "42");
+}
+
+#[test]
+fn test_tostring() {
+    let pairs = &[("\"foo\"", "foo")];
+
+    for (nix_expr, str_repr) in pairs {
+        eval_expr(
+            &format!("builtins.toString {nix_expr}"),
+            &format!("\"{str_repr}\""),
+        );
+        // toString should exist in the global scope too
+        eval_expr(&format!("toString {nix_expr}"), &format!("\"{str_repr}\""));
+    }
+}

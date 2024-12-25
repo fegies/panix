@@ -565,6 +565,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                         let ident_value = self
                             .compiler
                             .alloc_string(KnownNixStringContent::Literal(ident))?;
+
                         let value_source =
                             lookup_scope
                                 .deref_ident(ident)
@@ -572,19 +573,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                                     value: ident.to_string(),
                                     pos,
                                 })?;
-                        let context_build_instructions =
-                            self.compiler.gc_handle.alloc_slice(&[value_source])?;
-                        let alloc_args = self.compiler.gc_handle.alloc(ThunkAllocArgs {
-                            code: inherit_from_0_code.clone(),
-                            context_id: 0,
-                            context_build_instructions,
-                        })?;
 
                         target_buffer.push(VmOp::PushImmediate(ident_value));
-                        target_buffer.push(VmOp::AllocateThunk {
-                            slot: None,
-                            args: alloc_args,
-                        });
+                        target_buffer.push(VmOp::DuplicateThunk(value_source));
                         self.current_thunk_stack_height += 1;
                         number_of_keys += 1;
                     }

@@ -222,6 +222,19 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         }
                     }
 
+                    VmOp::DuplicateThunk(source) => {
+                        let thunk = match source {
+                            crate::vm::opcodes::ValueSource::ContextReference(idx) => {
+                                self.state.context[idx as usize].clone()
+                            }
+                            crate::vm::opcodes::ValueSource::ThunkStackRef(idx) => {
+                                self.state.thunk_stack[idx as usize].clone()
+                            }
+                        };
+
+                        self.state.thunk_stack.push(thunk);
+                    }
+
                     VmOp::Skip(to_skip) => {
                         (&mut code).take(to_skip as usize).for_each(|_| {});
                     }

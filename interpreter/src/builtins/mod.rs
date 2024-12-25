@@ -65,6 +65,7 @@ enum BuiltinType {
     Throw,
     TryEval,
     TypeOf,
+    ToString,
 }
 
 impl Builtins for NixBuiltins {
@@ -76,6 +77,7 @@ impl Builtins for NixBuiltins {
             "___builtin_throw" => BuiltinType::Throw,
             "___builtin_tryeval" => BuiltinType::TryEval,
             "___builtin_typeof" => BuiltinType::TypeOf,
+            "___builtin_tostring" => BuiltinType::ToString,
             _ => return None,
         };
 
@@ -130,6 +132,7 @@ impl Builtins for NixBuiltins {
 
                 Ok(NixValue::String(value.into()))
             }
+            BuiltinType::ToString => todo!(),
         }
     }
 }

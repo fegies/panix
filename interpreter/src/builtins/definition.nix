@@ -1,7 +1,8 @@
 let
   throw = ___builtin_throw;
+  toString = ___builtin_tostring;
   builtins = {
-    inherit builtins throw;
+    inherit builtins throw toString;
     true = true;
     false = false;
     null = null;
