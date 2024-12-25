@@ -9,8 +9,9 @@ let
         else arg.outPath or (throw "cannot coerce a set to a string")
       )
     else ___builtin_tostring arg;
+  map = func: list: ___builtin_map {inherit func list;};
   builtins = {
-    inherit builtins throw toString;
+    inherit builtins throw toString map;
     true = true;
     false = false;
     null = null;

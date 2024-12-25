@@ -247,3 +247,11 @@ fn test_tostring() {
         println!("\n---\n");
     }
 }
+
+#[test]
+fn test_map() {
+    eval_expr(
+        r#"map (x: "foo" + x) [ "bar" "bla" "abc" ]"#,
+        r#"[ "foobar" "foobla" "fooabc" ]"#,
+    );
+}

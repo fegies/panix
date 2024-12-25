@@ -10,8 +10,8 @@ use parser::{
 use crate::{
     evaluator,
     vm::{
-        opcodes::{ExecutionContext, VmOp},
-        value::{self, Attrset, NixString, NixValue, Thunk},
+        opcodes::{ContextReference, ExecutionContext, ValueSource, VmOp},
+        value::{self, Attrset, List, NixString, NixValue, Thunk},
     },
     EvaluateError, Evaluator,
 };
@@ -69,6 +69,7 @@ enum BuiltinType {
     TryEval,
     TypeOf,
     ToString,
+    Map,
 }
 
 impl Builtins for NixBuiltins {
@@ -81,6 +82,7 @@ impl Builtins for NixBuiltins {
             "___builtin_tryeval" => BuiltinType::TryEval,
             "___builtin_typeof" => BuiltinType::TypeOf,
             "___builtin_tostring" => BuiltinType::ToString,
+            "___builtin_map" => BuiltinType::Map,
             _ => return None,
         };
 
@@ -136,7 +138,56 @@ impl Builtins for NixBuiltins {
                 Ok(NixValue::String(value.into()))
             }
             BuiltinType::ToString => Ok(NixValue::String(execute_to_string(argument, evaluator)?)),
+            BuiltinType::Map => execute_map(evaluator, argument),
         }
+    }
+}
+
+fn execute_map(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    if let NixValue::Attrset(argument) = evaluator.force_thunk(argument)? {
+        let list = argument
+            .get_entry_str(&evaluator.gc_handle, "list")
+            .ok_or(EvaluateError::AttrsetKeyNotFound)?;
+        let list = evaluator.force_thunk(list)?.expect_list()?;
+
+        let mut list_entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
+
+        if list_entries.is_empty() {
+            // all empty lists are in principle identical.
+            // no need to allocate anything more here.
+            return Ok(NixValue::List(list));
+        }
+
+        let func = argument
+            .get_entry_str(&evaluator.gc_handle, "func")
+            .ok_or(EvaluateError::AttrsetKeyNotFound)?;
+
+        // since the call op will pop the argument off the context stack,
+        // we only need to ensure that the argument is on top of the stack.
+        let call_code = evaluator.gc_handle.alloc_slice(&[
+            VmOp::LoadContext(ContextReference(0)),
+            VmOp::DuplicateThunk(ValueSource::ContextReference(1)),
+            VmOp::Call,
+        ])?;
+
+        for entry in list_entries.iter_mut() {
+            let context = evaluator
+                .gc_handle
+                .alloc_slice(&[func.clone(), entry.clone()])?;
+            let thunk = evaluator.gc_handle.alloc(Thunk::Deferred {
+                context: ExecutionContext { entries: context },
+                code: call_code.clone(),
+            })?;
+            *entry = thunk;
+        }
+
+        let entries = evaluator.gc_handle.alloc_vec(&mut list_entries)?;
+        Ok(NixValue::List(List { entries }))
+    } else {
+        Err(EvaluateError::TypeError)
     }
 }
 

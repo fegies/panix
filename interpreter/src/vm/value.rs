@@ -103,8 +103,11 @@ pub struct Attrset {
 
 impl Attrset {
     pub fn get_entry(&self, gc_handle: &GcHandle, key: &NixString) -> Option<GcPointer<Thunk>> {
-        let attrset_slice = gc_handle.load(&self.entries).as_ref();
         let key_str = key.load(gc_handle);
+        self.get_entry_str(gc_handle, key_str)
+    }
+    pub fn get_entry_str(&self, gc_handle: &GcHandle, key_str: &str) -> Option<GcPointer<Thunk>> {
+        let attrset_slice = gc_handle.load(&self.entries).as_ref();
 
         attrset_slice
             .binary_search_by_key(&key_str, |(k, _)| k.load(gc_handle))

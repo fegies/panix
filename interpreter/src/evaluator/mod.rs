@@ -734,4 +734,11 @@ impl NixValue {
             _ => Err(EvaluateError::TypeError),
         }
     }
+
+    pub fn expect_list(self) -> Result<value::List, EvaluateError> {
+        match self {
+            NixValue::List(l) => Ok(l),
+            _ => Err(EvaluateError::TypeError),
+        }
+    }
 }
