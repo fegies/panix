@@ -1,7 +1,4 @@
-use std::{
-    collections::{btree_map::Entry, BTreeMap},
-    sync::PoisonError,
-};
+use std::collections::{btree_map::Entry, BTreeMap};
 
 use bumpalo::Bump;
 use parser::ast::{

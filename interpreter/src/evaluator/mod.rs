@@ -1,19 +1,15 @@
 use std::cmp::Ordering;
 
-use gc::{specialized_types::array::Array, GcError, GcHandle, GcPointer};
+use gc::{GcHandle, GcPointer};
 
 use crate::{
-    builtins::{get_builtins, BuiltinTypeToken, Builtins, NixBuiltins},
-    compiler::ValueSource,
-    util::Stackvec,
+    builtins::{get_builtins, Builtins, NixBuiltins},
     vm::{
         opcodes::{ExecutionContext, LambdaAllocArgs, VmOp},
         value::{self, Attrset, Function, List, NixString, NixValue, Thunk},
     },
     EvaluateError,
 };
-
-use super::InterpreterError;
 
 pub struct Evaluator<'gc> {
     pub gc_handle: &'gc mut GcHandle,
@@ -44,7 +40,7 @@ impl<'gc> Evaluator<'gc> {
             builtins: get_builtins(),
         }
     }
-    pub fn eval_expression(&mut self, mut thunk: Thunk) -> Result<NixValue, EvaluateError> {
+    pub fn eval_expression(&mut self, thunk: Thunk) -> Result<NixValue, EvaluateError> {
         let ptr = self.gc_handle.alloc(thunk)?;
         self.force_thunk(ptr)
     }
@@ -453,7 +449,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             .ok_or(EvaluateError::ExecutionStackExhaustedUnexpectedly)
     }
 
-    fn execute_concat_strings(&mut self, mut count: u32) -> Result<(), EvaluateError> {
+    fn execute_concat_strings(&mut self, count: u32) -> Result<(), EvaluateError> {
         let source = core::iter::repeat_with(|| {
             self.state
                 .local_stack
@@ -589,17 +585,6 @@ fn execute_arithmetic_op(
     }
 }
 
-fn bool_op(
-    l: &NixValue,
-    r: &NixValue,
-    op: impl FnOnce(bool, bool) -> bool,
-) -> Result<NixValue, EvaluateError> {
-    match (l, r) {
-        (NixValue::Bool(l), NixValue::Bool(r)) => Ok(NixValue::Bool(op(*l, *r))),
-        _ => Err(EvaluateError::TypeError),
-    }
-}
-
 fn compare_values(
     evaluator: &mut Evaluator,
     l: &NixValue,
@@ -644,7 +629,7 @@ fn compare_attrsets(
         if left.len() != right.len() {
             return Ok(None);
         }
-        if (left.is_empty()) {
+        if left.is_empty() {
             return Ok(Some(Ordering::Equal));
         }
 

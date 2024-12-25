@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, process::id};
+use std::collections::BTreeMap;
 
 use gc::{specialized_types::array::Array, GcError, GcHandle, GcPointer};
 use parser::ast::{
@@ -6,7 +6,7 @@ use parser::ast::{
 };
 
 use crate::{
-    builtins::{BuiltinTypeToken, Builtins},
+    builtins::Builtins,
     compiler::{get_null_expr, lookup_scope::LocalThunkRef},
     vm::{
         opcodes::{
@@ -45,10 +45,6 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             },
             code: self.compiler.gc_handle.alloc_vec(&mut opcode_buf)?,
         })
-    }
-
-    fn clear(&mut self) {
-        self.current_thunk_stack_height = 0;
     }
 
     fn translate_to_ops(
@@ -200,7 +196,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 let total_name = total_name.unwrap_or("<arg>");
                 subscope.push_local_thunkref(total_name, LocalThunkRef(0));
 
-                for (key, default_value) in &args.bindings {
+                for (key, _default_value) in &args.bindings {
                     subscope.push_local_thunkref(key, LocalThunkRef(current_thunk_stack_height));
                     current_thunk_stack_height += 1;
                 }
@@ -521,7 +517,6 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
             let mut current_inherit_source_idx = previous_height;
             sub_code_buf.push(VmOp::LoadContext(ContextReference(0)));
-            let inherit_from_0_code = self.compiler.gc_handle.alloc_vec(&mut sub_code_buf)?;
 
             // and now, actually emit all the inherit entries.
             for entry in attrset.inherit_keys {
@@ -683,7 +678,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         lookup_scope: &mut LookupScope<'src, '_>,
         target_buffer: &mut Vec<VmOp>,
         let_expr: ast::LetInExpr<'src>,
-        pos: SourcePosition,
+        _pos: SourcePosition,
     ) -> Result<(), CompileError> {
         let height_before = self.current_thunk_stack_height;
         let mut added_keys = 0;
@@ -769,7 +764,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         }
 
         // inherit keys done. Now the normal bindings
-        for (ident, body) in let_expr.bindings {
+        for (_ident, body) in let_expr.bindings {
             let args = self.compile_subchunk(
                 lookup_scope,
                 &mut instruction_buf,

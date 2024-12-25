@@ -1,4 +1,4 @@
-use std::{cell::UnsafeCell, mem::MaybeUninit};
+use std::mem::MaybeUninit;
 
 pub struct Stackvec<const N: usize, T> {
     inner: [MaybeUninit<T>; N],

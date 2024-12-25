@@ -137,20 +137,6 @@ pub struct Function {
     pub call_type: LambdaCallType,
 }
 
-#[derive(Debug)]
-pub struct AttrsetFunctionArg {
-    pub name: GcPointer<NixString>,
-    pub default: Option<Thunk>,
-}
-#[derive(Debug, Trace, Clone)]
-pub enum FunctionArgs {
-    Single,
-    AttrsetArgs {
-        entries: GcPointer<Array<AttrsetFunctionArg>>,
-        others_allowed: bool,
-    },
-}
-
 #[derive(Debug, Trace, Clone)]
 pub struct List {
     pub entries: GcPointer<Array<GcPointer<Thunk>>>,

@@ -1,15 +1,12 @@
 use bumpalo::Bump;
 use gc::{GcError, GcHandle, GcPointer};
 use lookup_scope::ScopeBacking;
-use parser::ast::{BasicValue, IfExpr, KnownNixStringContent, NixExpr, NixString, SourcePosition};
+use parser::ast::{KnownNixStringContent, NixExpr, SourcePosition};
 use thunk_compiler::ThunkCompiler;
 
 use crate::{
-    builtins::{get_builtins, get_builtins_expr, NixBuiltins},
-    vm::{
-        opcodes::{ExecutionContext, VmOp},
-        value::{self, NixValue, Thunk},
-    },
+    builtins::{get_builtins, NixBuiltins},
+    vm::value::{self, NixValue, Thunk},
 };
 
 mod lookup_scope;
@@ -23,11 +20,6 @@ fn get_null_expr() -> NixExpr<'static> {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub enum ValueSource {
-    ContextReference(u32),
-    ThunkStackRef(u32),
-}
 #[derive(Debug, thiserror::Error)]
 pub enum CompileError {
     #[error("error when allocating")]

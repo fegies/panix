@@ -1,9 +1,6 @@
-use crate::builtins::BuiltinTypeToken;
-
 use super::value::{self, NixValue, Thunk};
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
-use parser::ast::NixString;
 
 #[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Trace, Debug)]
 pub enum ValueSource {

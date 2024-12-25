@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use gc::{GcHandle, GcPointer};
+use gc::GcPointer;
 use gc_derive::Trace;
 use parser::{
     ast::{Code, LetInExpr, NixExprContent},
@@ -8,7 +8,6 @@ use parser::{
 };
 
 use crate::{
-    evaluator,
     vm::{
         opcodes::{ContextReference, ExecutionContext, ValueSource, VmOp},
         value::{self, Attrset, List, NixString, NixValue, Thunk},
@@ -44,7 +43,7 @@ pub fn get_builtins_expr() -> LetInExpr<'static> {
 }
 
 fn build_builtins_expr() -> LetInExpr<'static> {
-    let mut builtins = parse_nix(include_bytes!("./definition.nix"))
+    let builtins = parse_nix(include_bytes!("./definition.nix"))
         .expect("to be able to parse the static builtin def");
 
     if let NixExprContent::Code(Code::LetInExpr(letexpr)) = builtins.content {
@@ -173,6 +172,8 @@ fn execute_map(
             VmOp::Call,
         ])?;
 
+        // we implement the map by replacing each source thunk pointer by
+        // a newly allocated deferred thunk that models the call.
         for entry in list_entries.iter_mut() {
             let context = evaluator
                 .gc_handle
@@ -211,7 +212,7 @@ fn execute_to_string(
             evaluator.gc_handle.alloc_string(&val)?.into()
         }
         NixValue::Path(path) => path,
-        NixValue::Attrset(attrset) => {
+        NixValue::Attrset(_attrset) => {
             // the cases where the attrset can be stringified is handled by the
             // nix code in the prelude
             return Err(EvaluateError::TypeErrorWithMessage {

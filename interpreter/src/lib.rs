@@ -1,4 +1,3 @@
-#![allow(dead_code, unused)]
 mod compiler;
 pub mod util;
 mod vm;

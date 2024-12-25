@@ -87,7 +87,7 @@ trait Pass<'src> {
         }
     }
 
-    fn inspect_attrset(&mut self, attrset: &mut Attrset<'src>, pos: SourcePosition) {
+    fn inspect_attrset(&mut self, attrset: &mut Attrset<'src>, _pos: SourcePosition) {
         self.descend_attrset(attrset)
     }
     fn descend_attrset(&mut self, attrset: &mut Attrset<'src>) {
