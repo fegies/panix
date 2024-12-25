@@ -214,6 +214,10 @@ fn test_typeof() {
 
 #[test]
 fn test_attrset_inherit() {
+    eval_expr(
+        "(let a = 12; b = 42; f = null; in {inherit a b f; c = 11; \"00\" = 31;}).a",
+        "12",
+    );
     eval_expr("(let b = 42; in {inherit b; a = 12;}).b", "42");
 }
 

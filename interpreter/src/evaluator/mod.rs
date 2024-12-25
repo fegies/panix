@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use gc::{specialized_types::array::Array, GcHandle, GcPointer};
+use gc::{specialized_types::array::Array, GcError, GcHandle, GcPointer};
 
 use crate::{
     builtins::{get_builtins, BuiltinTypeToken, Builtins, NixBuiltins},
@@ -49,7 +49,7 @@ impl<'gc> Evaluator<'gc> {
         self.force_thunk(ptr)
     }
 
-    pub fn force_thunk(&mut self, thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
+    pub fn force_thunk(&mut self, mut thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
         match self.gc_handle.load(&thunk) {
             Thunk::Blackhole => return Err(EvaluateError::BlackholeEvaluated),
             Thunk::Value(v) => return Ok(v.clone()),
@@ -63,7 +63,7 @@ impl<'gc> Evaluator<'gc> {
                     .extend_from_slice(self.gc_handle.load(code).as_ref());
 
                 let blackhole = self.gc_handle.alloc(Thunk::Blackhole)?;
-                self.gc_handle.replace(&thunk, blackhole);
+                thunk = self.gc_handle.replace(&thunk, blackhole);
 
                 let result = ThunkEvaluator {
                     state,
@@ -195,31 +195,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                     }
 
                     VmOp::AllocateThunk { slot, args } => {
-                        let args = self.evaluator.gc_handle.load(&args);
-                        let code = args.code.clone();
-                        let build_instructions = self
-                            .evaluator
-                            .gc_handle
-                            .load(&args.context_build_instructions)
-                            .as_ref();
-                        println!("ctx: {build_instructions:?}");
-
-                        let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
-                        fetch_context_entries(thunk_buf, &self.state, build_instructions);
-                        let context = ExecutionContext {
-                            entries: self.evaluator.gc_handle.alloc_vec(thunk_buf)?,
-                        };
-
-                        let new_thunk = self
-                            .evaluator
-                            .gc_handle
-                            .alloc(Thunk::Deferred { context, code })?;
-                        if let Some(slot) = slot {
-                            let dest_idx = self.state.thunk_stack.len() - 1 - slot as usize;
-                            self.state.thunk_stack[dest_idx] = new_thunk;
-                        } else {
-                            self.state.thunk_stack.push(new_thunk);
-                        }
+                        self.execute_alloc_thunk(args, slot)?;
                     }
 
                     VmOp::DuplicateThunk(source) => {
@@ -432,6 +408,42 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
         println!("thunk evaluated to {result_value:?}");
 
         Ok(result_value)
+    }
+
+    fn execute_alloc_thunk(
+        &mut self,
+        args: GcPointer<crate::vm::opcodes::ThunkAllocArgs>,
+        slot: Option<u16>,
+    ) -> Result<(), EvaluateError> {
+        let args = self.evaluator.gc_handle.load(&args);
+        let code = args.code.clone();
+        let build_instructions = self
+            .evaluator
+            .gc_handle
+            .load(&args.context_build_instructions)
+            .as_ref();
+        println!("ctx: {build_instructions:?}");
+
+        let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
+        fetch_context_entries(thunk_buf, &self.state, build_instructions);
+        let context = ExecutionContext {
+            entries: self.evaluator.gc_handle.alloc_vec(thunk_buf)?,
+        };
+
+        let mut new_thunk = self
+            .evaluator
+            .gc_handle
+            .alloc(Thunk::Deferred { context, code })?;
+        Ok(if let Some(slot) = slot {
+            let dest_idx = self.state.thunk_stack.len() - 1 - slot as usize;
+            let slot = &mut self.state.thunk_stack[dest_idx];
+            // in case the thunk was referenced previously, we need to ensure that
+            // all uses of the old value now point to the newly allocated thunk.
+            new_thunk = self.evaluator.gc_handle.replace(slot, new_thunk);
+            *slot = new_thunk;
+        } else {
+            self.state.thunk_stack.push(new_thunk);
+        })
     }
 
     fn pop(&mut self) -> Result<NixValue, EvaluateError> {

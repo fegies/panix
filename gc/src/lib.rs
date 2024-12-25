@@ -342,7 +342,7 @@ impl GcHandle {
                 .get_heapref()
                 .resolve_mut()
                 .forward_to(new_value.as_ref().get_heapref());
-            new_value.clone()
+            new_value
         } else {
             // the source reference would outlive the replacement value.
             // to ensure this does not happen, we need to promote the value to the generation the source is in.
