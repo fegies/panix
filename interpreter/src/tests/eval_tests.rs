@@ -255,3 +255,27 @@ fn test_map() {
         r#"[ "foobar" "foobla" "fooabc" ]"#,
     );
 }
+
+#[test]
+fn test_split() {
+    eval_expr(r#"builtins.split "\\." "1.2.3""#, r#"["1" [] "2" [] "3"]"#);
+
+    println!("\n---\n");
+
+    eval_expr(r#"builtins.split "(a)b" "abc""#, r#"[ "" [ "a" ] "c" ]"#);
+    println!("\n---\n");
+    eval_expr(
+        r#"builtins.split "([ac])" "abc""#,
+        r#"[ "" [ "a" ] "b" [ "c" ] "" ]"#,
+    );
+    println!("\n---\n");
+    eval_expr(
+        r#"builtins.split "([[:upper:]]+)" " FOO ""#,
+        r#"[ " " [ "FOO" ] " " ]"#,
+    );
+    println!("\n---\n");
+    eval_expr(
+        r#"builtins.split "(a)|(c)" "abc""#,
+        r#"[ "" [ "a" null ] "b" [ null "c" ] "" ]"#,
+    );
+}

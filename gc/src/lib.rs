@@ -65,12 +65,14 @@ impl Ord for Generation {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum GcError {
     #[error("Ran out of free pages when allocating")]
     OutOfPages,
     #[error("The requested object is too big")]
     ObjectBiggerThanPage,
+    #[error("tried to access an object out of the valid range")]
+    AccessOutOfRange,
 }
 pub type GcResult<T> = Result<T, GcError>;
 

@@ -22,3 +22,5 @@ lexer_impedance_matcher = {path = "./lexer_impedance_matcher"}
 
 memchr = "2.6.4"
 thiserror = "1"
+regex = "1"
+

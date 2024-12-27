@@ -11,6 +11,7 @@ pub use evaluator::Evaluator;
 mod tests;
 
 use std::{
+    error::Error,
     fs::File,
     io::{self, Read},
     path::Path,
@@ -44,9 +45,17 @@ pub enum EvaluateError {
 
     #[error("The code threw an exception")]
     Throw { value: String },
+    #[error("evaluation aborted")]
+    Abort { value: String },
 
     #[error("{msg}")]
     TypeErrorWithMessage { msg: String },
+
+    #[error("error while importing {0}")]
+    ImportError(Box<InterpreterError>),
+
+    #[error("other error: {0}")]
+    Misc(Box<dyn Error>),
 }
 
 #[derive(Debug, thiserror::Error)]

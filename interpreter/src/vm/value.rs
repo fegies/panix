@@ -1,10 +1,12 @@
+use std::ops::Range;
+
 use gc::{
     specialized_types::{array::Array, string::SimpleGcString},
     GcError, GcHandle, GcPointer,
 };
 use gc_derive::Trace;
 
-use crate::{builtins::BuiltinTypeToken, util::Stackvec};
+use crate::{builtins::BuiltinTypeToken, util::Stackvec, EvaluateError, Evaluator};
 
 use super::opcodes::{ExecutionContext, LambdaCallType, VmOp};
 
@@ -67,6 +69,15 @@ impl NixString {
 
         Ok(NixString { inner: result })
     }
+
+    pub fn get_substring(
+        &self,
+        gc: &mut GcHandle,
+        range: Range<usize>,
+    ) -> Result<NixString, GcError> {
+        let substring = gc.alloc_substring(&self.inner, range)?;
+        Ok(NixString { inner: substring })
+    }
 }
 impl From<GcPointer<SimpleGcString>> for NixString {
     fn from(value: GcPointer<SimpleGcString>) -> Self {
@@ -113,6 +124,17 @@ impl Attrset {
             .binary_search_by_key(&key_str, |(k, _)| k.load(gc_handle))
             .ok()
             .map(|value_idx| attrset_slice[value_idx].1.clone())
+    }
+
+    pub fn get_and_force_entry_str(
+        &self,
+        evaluator: &mut Evaluator,
+        key_str: &str,
+    ) -> Result<NixValue, EvaluateError> {
+        let entry = self
+            .get_entry_str(&evaluator.gc_handle, key_str)
+            .ok_or(EvaluateError::AttrsetKeyNotFound)?;
+        evaluator.force_thunk(entry)
     }
 
     pub fn keys<'a>(&'a self, gc_handle: &'a GcHandle) -> impl Iterator<Item = &'a str> {

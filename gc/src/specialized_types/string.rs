@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::{
     heap_page::{HeapEntry, Page},
     object::{HeapObject, TraceCallback},
@@ -77,6 +79,7 @@ impl GcHandle {
         })?;
         Ok(ptr.root())
     }
+
     pub fn alloc_string_from_parts(
         &mut self,
         pieces: &[&str],
@@ -94,6 +97,29 @@ impl GcHandle {
                 })
             }
         })?;
+        Ok(ptr.root())
+    }
+
+    pub fn alloc_substring(
+        &mut self,
+        string: &GcPointer<SimpleGcString>,
+        range: Range<usize>,
+    ) -> GcResult<GcPointer<SimpleGcString>> {
+        let strlen = self.load(string).length as usize;
+        if range.end > strlen {
+            return Err(crate::GcError::AccessOutOfRange);
+        }
+        let requested_len = range.len();
+        let ptr = self.with_retry(|gc_handle| {
+            let alloc_page = gc_handle.get_nursery_page();
+            unsafe {
+                alloc_page.try_alloc_with_init(requested_len, |dest| {
+                    let src = gc_handle.load(string).as_ref().as_bytes();
+                    dest.copy_from_slice(&src[range.clone()]);
+                })
+            }
+        })?;
+
         Ok(ptr.root())
     }
 

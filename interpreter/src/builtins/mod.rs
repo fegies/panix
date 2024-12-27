@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{io::Read, sync::LazyLock};
 
 use gc::GcPointer;
 use gc_derive::Trace;
@@ -6,13 +6,15 @@ use parser::{
     ast::{Code, LetInExpr, NixExprContent},
     parse_nix,
 };
+use regex::Regex;
 
 use crate::{
+    compile_source,
     vm::{
         opcodes::{ContextReference, ExecutionContext, ValueSource, VmOp},
         value::{self, Attrset, List, NixString, NixValue, Thunk},
     },
-    EvaluateError, Evaluator,
+    EvaluateError, Evaluator, InterpreterError,
 };
 
 pub trait Builtins {
@@ -65,10 +67,13 @@ pub struct BuiltinTypeToken {
 #[derive(Debug, Clone, Trace, Copy)]
 enum BuiltinType {
     Throw,
+    Abort,
     TryEval,
     TypeOf,
     ToString,
     Map,
+    Import,
+    Split,
 }
 
 impl Builtins for NixBuiltins {
@@ -82,6 +87,9 @@ impl Builtins for NixBuiltins {
             "___builtin_typeof" => BuiltinType::TypeOf,
             "___builtin_tostring" => BuiltinType::ToString,
             "___builtin_map" => BuiltinType::Map,
+            "___builtin_import" => BuiltinType::Import,
+            "___builtin_abort" => BuiltinType::Abort,
+            "___builtin_split" => BuiltinType::Split,
             _ => return None,
         };
 
@@ -96,10 +104,28 @@ impl Builtins for NixBuiltins {
     ) -> Result<NixValue, Self::ExecuteError> {
         match builtin.inner {
             BuiltinType::Throw => Err(EvaluateError::Throw {
-                value: "todo".to_owned(),
+                value: evaluator
+                    .force_thunk(argument)?
+                    .expect_string()?
+                    .load(&evaluator.gc_handle)
+                    .to_owned(),
+            }),
+            BuiltinType::Abort => Err(EvaluateError::Abort {
+                value: evaluator
+                    .force_thunk(argument)?
+                    .expect_string()?
+                    .load(&evaluator.gc_handle)
+                    .to_owned(),
             }),
             BuiltinType::TryEval => {
-                let value = evaluator.force_thunk(argument).ok();
+                let value = match evaluator.force_thunk(argument) {
+                    Ok(val) => Some(val),
+                    e @ Err(EvaluateError::Abort { value: _ }) => {
+                        // we cannot catch aborts.
+                        return e;
+                    }
+                    Err(_) => None,
+                };
                 let success_string = evaluator.gc_handle.alloc_string("success")?.into();
                 let value_string = evaluator.gc_handle.alloc_string("value")?.into();
 
@@ -138,58 +164,205 @@ impl Builtins for NixBuiltins {
             }
             BuiltinType::ToString => Ok(NixValue::String(execute_to_string(argument, evaluator)?)),
             BuiltinType::Map => execute_map(evaluator, argument),
+            BuiltinType::Import => execute_import(evaluator, argument),
+            BuiltinType::Split => execute_split(evaluator, argument),
         }
     }
+}
+
+fn execute_split(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let argument = evaluator.force_thunk(argument)?.expect_attrset()?;
+    let regex = argument
+        .get_and_force_entry_str(evaluator, "regex")?
+        .expect_string()?;
+    let search_str = argument
+        .get_and_force_entry_str(evaluator, "str")?
+        .expect_string()?;
+
+    let regex = Regex::new(regex.load(&evaluator.gc_handle))
+        .map_err(|e| EvaluateError::Misc(Box::new(e)))?;
+
+    let mut entries = if regex.captures_len() == 1 {
+        let mut prev_idx = 0;
+
+        // first, determine the substring locations we have to cut
+        let loaded_str = search_str.load(&evaluator.gc_handle);
+        let string_len = loaded_str.len();
+        let mut ranges = Vec::new();
+        for location in regex.find_iter(loaded_str) {
+            ranges.push(prev_idx..location.start());
+            prev_idx = location.end();
+        }
+
+        // and construct our output.
+        // since there is no output, we can just reuse the same empty list thunk
+        let empty_list = Thunk::Value(NixValue::List(List {
+            entries: evaluator.gc_handle.alloc_slice(&[])?,
+        }));
+        let empty_list = evaluator.gc_handle.alloc(empty_list)?;
+        let mut result = Vec::with_capacity(2 * ranges.len() + 1);
+        for location in ranges {
+            let substring = search_str.get_substring(&mut evaluator.gc_handle, location)?;
+            let substring_thunk = evaluator
+                .gc_handle
+                .alloc(Thunk::Value(NixValue::String(substring)))?;
+            result.push(substring_thunk);
+            result.push(empty_list.clone());
+        }
+        // and the final string piece
+        let substring = search_str.get_substring(&mut evaluator.gc_handle, prev_idx..string_len)?;
+        result.push(
+            evaluator
+                .gc_handle
+                .alloc(Thunk::Value(NixValue::String(substring)))?,
+        );
+
+        result
+    } else {
+        let mut prev_idx = 0;
+        let loaded_str = search_str.load(&evaluator.gc_handle);
+        let string_len = loaded_str.len();
+
+        // again, find the indexes that we need to alloc
+        let mut ranges = Vec::new();
+        for location in regex.captures_iter(loaded_str) {
+            let mut captures = location.iter();
+            let full_match = captures
+                .next()
+                .flatten()
+                .expect("there should always be the full match group");
+
+            let captures: Vec<_> = captures.map(|o| o.map(|m| m.range())).collect();
+
+            ranges.push((prev_idx..full_match.start(), captures));
+            prev_idx = full_match.end();
+        }
+
+        // and construct our result
+        let mut result = Vec::with_capacity(2 * ranges.len() + 1);
+        let mut subgroup_buf = Vec::with_capacity(regex.captures_len() - 1);
+        for (location_before, matchgroups) in ranges {
+            let substring = search_str.get_substring(&mut evaluator.gc_handle, location_before)?;
+            result.push(
+                evaluator
+                    .gc_handle
+                    .alloc(Thunk::Value(NixValue::String(substring)))?,
+            );
+            // and the capture groups
+            let mut cached_null_thunk = None;
+            for matchgroup in matchgroups {
+                if let Some(range) = matchgroup {
+                    let substring = search_str.get_substring(&mut evaluator.gc_handle, range)?;
+                    subgroup_buf.push(
+                        evaluator
+                            .gc_handle
+                            .alloc(Thunk::Value(NixValue::String(substring)))?,
+                    );
+                } else {
+                    let null_thunk = cached_null_thunk
+                        .get_or_insert_with(|| {
+                            evaluator.gc_handle.alloc(Thunk::Value(NixValue::Null))
+                        })
+                        .clone()?;
+                    subgroup_buf.push(null_thunk);
+                };
+            }
+            let group_entries = evaluator.gc_handle.alloc_vec(&mut subgroup_buf)?;
+            result.push(
+                evaluator
+                    .gc_handle
+                    .alloc(Thunk::Value(NixValue::List(List {
+                        entries: group_entries,
+                    })))?,
+            );
+        }
+        // and the final string piece
+        let substring = search_str.get_substring(&mut evaluator.gc_handle, prev_idx..string_len)?;
+        result.push(
+            evaluator
+                .gc_handle
+                .alloc(Thunk::Value(NixValue::String(substring)))?,
+        );
+
+        result
+    };
+
+    let result_list = List {
+        entries: evaluator.gc_handle.alloc_vec(&mut entries)?,
+    };
+    Ok(NixValue::List(result_list))
+}
+
+fn execute_import(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let path_to_import = evaluator.force_thunk(argument)?.expect_string()?;
+    let thunk = import_and_compile(evaluator, path_to_import)
+        .map_err(|e| EvaluateError::ImportError(Box::new(e)))?;
+
+    evaluator.eval_expression(thunk)?;
+    todo!()
+}
+
+fn import_and_compile(
+    evaluator: &mut Evaluator,
+    path_to_import: NixString,
+) -> Result<Thunk, InterpreterError> {
+    let source_filename = path_to_import.load(&evaluator.gc_handle).to_owned();
+    let mut file_content = Vec::new();
+    std::fs::File::open(&source_filename)?.read_to_end(&mut file_content)?;
+
+    compile_source(&mut evaluator.gc_handle, &file_content)
 }
 
 fn execute_map(
     evaluator: &mut Evaluator<'_>,
     argument: GcPointer<Thunk>,
 ) -> Result<NixValue, EvaluateError> {
-    if let NixValue::Attrset(argument) = evaluator.force_thunk(argument)? {
-        let list = argument
-            .get_entry_str(&evaluator.gc_handle, "list")
-            .ok_or(EvaluateError::AttrsetKeyNotFound)?;
-        let list = evaluator.force_thunk(list)?.expect_list()?;
+    let argument = evaluator.force_thunk(argument)?.expect_attrset()?;
+    let list = argument
+        .get_and_force_entry_str(evaluator, "list")?
+        .expect_list()?;
 
-        let mut list_entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
+    let mut list_entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
 
-        if list_entries.is_empty() {
-            // all empty lists are in principle identical.
-            // no need to allocate anything more here.
-            return Ok(NixValue::List(list));
-        }
-
-        let func = argument
-            .get_entry_str(&evaluator.gc_handle, "func")
-            .ok_or(EvaluateError::AttrsetKeyNotFound)?;
-
-        // since the call op will pop the argument off the context stack,
-        // we only need to ensure that the argument is on top of the stack.
-        let call_code = evaluator.gc_handle.alloc_slice(&[
-            VmOp::LoadContext(ContextReference(0)),
-            VmOp::DuplicateThunk(ValueSource::ContextReference(1)),
-            VmOp::Call,
-        ])?;
-
-        // we implement the map by replacing each source thunk pointer by
-        // a newly allocated deferred thunk that models the call.
-        for entry in list_entries.iter_mut() {
-            let context = evaluator
-                .gc_handle
-                .alloc_slice(&[func.clone(), entry.clone()])?;
-            let thunk = evaluator.gc_handle.alloc(Thunk::Deferred {
-                context: ExecutionContext { entries: context },
-                code: call_code.clone(),
-            })?;
-            *entry = thunk;
-        }
-
-        let entries = evaluator.gc_handle.alloc_vec(&mut list_entries)?;
-        Ok(NixValue::List(List { entries }))
-    } else {
-        Err(EvaluateError::TypeError)
+    if list_entries.is_empty() {
+        // all empty lists are in principle identical.
+        // no need to allocate anything more here.
+        return Ok(NixValue::List(list));
     }
+
+    let func = argument
+        .get_entry_str(&evaluator.gc_handle, "func")
+        .ok_or(EvaluateError::AttrsetKeyNotFound)?;
+
+    // since the call op will pop the argument off the context stack,
+    // we only need to ensure that the argument is on top of the stack.
+    let call_code = evaluator.gc_handle.alloc_slice(&[
+        VmOp::LoadContext(ContextReference(0)),
+        VmOp::DuplicateThunk(ValueSource::ContextReference(1)),
+        VmOp::Call,
+    ])?;
+
+    // we implement the map by replacing each source thunk pointer by
+    // a newly allocated deferred thunk that models the call.
+    for entry in list_entries.iter_mut() {
+        let context = evaluator
+            .gc_handle
+            .alloc_slice(&[func.clone(), entry.clone()])?;
+        let thunk = evaluator.gc_handle.alloc(Thunk::Deferred {
+            context: ExecutionContext { entries: context },
+            code: call_code.clone(),
+        })?;
+        *entry = thunk;
+    }
+
+    let entries = evaluator.gc_handle.alloc_vec(&mut list_entries)?;
+    Ok(NixValue::List(List { entries }))
 }
 
 fn execute_to_string(
