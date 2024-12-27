@@ -210,6 +210,8 @@ fn test_typeof() {
             &(format!("\"{type_}\"")),
         )
     }
+
+    eval_expr("builtins.isAttrs {}", "true");
 }
 
 #[test]

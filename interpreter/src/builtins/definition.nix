@@ -12,15 +12,26 @@ let
   map = func: list: ___builtin_map {inherit func list;};
   import = arg: ___builtin_import (toString arg);
   abort = ___builtin_abort;
-  builtins = {
-    inherit builtins throw toString map abort;
+  builtins = let
+    typeOf = ___builtin_typeof;
+  in {
+    inherit builtins throw toString map abort typeOf;
     true = true;
     false = false;
     null = null;
     tryEval = ___builtin_tryeval;
-    typeOf = ___builtin_typeof;
     nixVersion = "2.24.10";
     split = regex: str: ___builtin_split {inherit regex str;};
+    isAttrs = arg: typeOf arg == "set";
+    isBool = arg: typeOf arg == "bool";
+    isFloat = arg: typeOf arg == "float";
+    isFunction = arg: typeOf arg == "lambda";
+    isInt = arg: typeOf arg == "int";
+    isList = arg: typeOf arg == "list";
+    isNull = arg: arg == null;
+    isPath = arg: typeOf arg == "path";
+    isString = arg: typeOf arg == "string";
+    langVersion = 6;
   };
 in
   __body__
