@@ -48,6 +48,9 @@ pub enum EvaluateError {
     #[error("evaluation aborted")]
     Abort { value: String },
 
+    #[error("The index is of of the valid range")]
+    AccessOutOfRange,
+
     #[error("{msg}")]
     TypeErrorWithMessage { msg: String },
 

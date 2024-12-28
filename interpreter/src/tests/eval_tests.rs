@@ -79,6 +79,7 @@ fn test_hasattr() {
     eval_expr("{a = 42;} ? a", "true");
     eval_expr("{a = 42;} ? b", "false");
     eval_expr("12 ? a", "false");
+    eval_expr("let i = \"a\"; in {a = 42;} ? \"${i}\"", "true")
 }
 
 #[test]
@@ -280,4 +281,84 @@ fn test_split() {
         r#"builtins.split "(a)|(c)" "abc""#,
         r#"[ "" [ "a" null ] "b" [ null "c" ] "" ]"#,
     );
+}
+
+#[test]
+fn test_nested_builtin() {
+    eval_expr("builtins.builtins.builtins.null", "null");
+}
+
+#[test]
+fn test_filter() {
+    eval_expr(
+        "builtins.filter builtins.isInt [ \"foo\" 1 2.2 3 4 null ]",
+        "[1 3 4]",
+    );
+}
+
+#[test]
+fn test_split_version() {
+    let res = &[
+        ("1..", "[\"1\"]"),
+        ("1.1", "[\"1\" \"1\"]"),
+        ("1..1", "[\"1\" \"1\"]"),
+    ];
+    for (vers, expected) in res {
+        eval_expr(&format!("builtins.splitVersion \"{vers}\""), expected);
+    }
+}
+
+// #[test]
+// fn test_compare_versions() {
+//     let exprs = &[("0.0.0", "0.0.0", 0)];
+//     for (vers_l, vers_r, res) in exprs {
+//         eval_expr(
+//             &format!("builtins.compareVersions \"{vers_l}\" \"{vers_r}\""),
+//             &format!("{res}"),
+//         );
+//     }
+// }
+
+#[test]
+fn test_list_len() {
+    eval_expr("builtins.length [ 1 null 2 42 ]", "4")
+}
+
+#[test]
+fn test_elemat() {
+    eval_expr("builtins.elemAt [ 1 2 3] 1", "2");
+}
+
+#[test]
+fn test_cat_attrs() {
+    eval_expr(
+        "builtins.catAttrs \"a\" [{a = 1;} {b = 0;} {a = 2;}]",
+        "[1 2]",
+    );
+}
+
+#[test]
+fn test_concat_lists() {
+    eval_expr("builtins.concatLists [ [1] [2] [3] ]", "[1 2 3]");
+}
+
+#[test]
+fn test_from_json() {
+    let res = &[
+        ("null", "null"),
+        ("42", "42"),
+        ("42.42", "42.42"),
+        ("{}", "{}"),
+        ("[]", "[]"),
+        ("[42]", "[42]"),
+        ("[42 , 13]", "[42 13]"),
+        ("\"foo\"", "\"foo\""),
+        (r#""foo \" ""#, r#"''foo " ''"#),
+        (r#"{"a" : 42}"#, "{a = 42;}"),
+        (r#"{"a": 42, "b": "foo"}"#, "{a = 42; b = \"foo\";}"),
+    ];
+    for (json, nix) in res {
+        eval_expr(&format!("builtins.fromJSON ''{json}''"), nix);
+        println!("\n-----\n");
+    }
 }

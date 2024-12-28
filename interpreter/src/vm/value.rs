@@ -10,6 +10,8 @@ use crate::{builtins::BuiltinTypeToken, util::Stackvec, EvaluateError, Evaluator
 
 use super::opcodes::{ExecutionContext, LambdaCallType, VmOp};
 
+pub mod debug;
+
 #[derive(Debug, Trace)]
 pub enum Thunk {
     /// A special kind of null value that is not representable in the nix language
@@ -141,6 +143,31 @@ impl Attrset {
         let slice = gc_handle.load(&self.entries).as_ref();
         slice.iter().map(|nix_str| nix_str.0.load(gc_handle))
     }
+
+    fn iter_entries<'a>(
+        &'a self,
+        gc: &'a GcHandle,
+    ) -> impl Iterator<Item = (&'a str, &'a GcPointer<Thunk>)> + 'a {
+        let entries = gc.load(&self.entries).as_ref();
+        entries.into_iter().map(move |(k, v)| (k.load(&gc), v))
+    }
+
+    pub fn build_from_entries(
+        entries: &mut Vec<(NixString, GcPointer<Thunk>)>,
+        gc_handle: &mut GcHandle,
+    ) -> Result<Attrset, EvaluateError> {
+        let num_keys = entries.len();
+        entries.sort_by(|(a, _), (b, _)| a.load(gc_handle).cmp(b.load(gc_handle)));
+
+        entries.dedup_by(|(a, _), (b, _)| a.load(gc_handle) == b.load(gc_handle));
+
+        if entries.len() < num_keys as usize {
+            return Err(EvaluateError::DuplicateAttrsetKey);
+        }
+
+        let entries = gc_handle.alloc_vec(entries)?;
+        Ok(Attrset { entries })
+    }
 }
 
 impl PartialEq for Attrset {
@@ -162,4 +189,16 @@ pub struct Function {
 #[derive(Debug, Trace, Clone)]
 pub struct List {
     pub entries: GcPointer<Array<GcPointer<Thunk>>>,
+}
+
+impl List {
+    pub fn concat_lists(lists: &[List], gc: &mut GcHandle) -> Result<List, GcError> {
+        let mut result_buf: Vec<_> = lists
+            .iter()
+            .flat_map(|l| gc.load(&l.entries).as_ref())
+            .cloned()
+            .collect();
+        let entries = gc.alloc_vec(&mut result_buf)?;
+        Ok(List { entries })
+    }
 }

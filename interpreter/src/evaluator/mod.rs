@@ -75,6 +75,75 @@ impl<'gc> Evaluator<'gc> {
             }
         }
     }
+
+    pub fn evaluate_call(
+        &mut self,
+        func: value::Function,
+        arg: GcPointer<Thunk>,
+    ) -> Result<NixValue, EvaluateError> {
+        // check that all required keys are present if needed
+        match func.call_type {
+            crate::vm::opcodes::LambdaCallType::Simple => {
+                // nothing to validate here.
+            }
+            crate::vm::opcodes::LambdaCallType::Attrset {
+                keys,
+                includes_rest_pattern,
+            } => {
+                let arg = self.force_thunk(arg.clone())?;
+                let arg = arg.as_attrset()?;
+                let keys = self.gc_handle.load(&keys).as_ref();
+
+                // check that no unexpected args were provided
+                if !includes_rest_pattern {
+                    for key in arg.keys(&self.gc_handle) {
+                        if !keys
+                            .iter()
+                            .any(|(nix_str, _)| nix_str.load(&self.gc_handle) == key)
+                        {
+                            return Err(EvaluateError::CallWithUnexpectedArg {
+                                arg_name: key.to_owned(),
+                            });
+                        }
+                    }
+                }
+
+                // and check that all required args are here.
+                for expected_arg in
+                    keys.iter().filter_map(
+                        |(arg_name, is_required)| {
+                            if *is_required {
+                                Some(arg_name)
+                            } else {
+                                None
+                            }
+                        },
+                    )
+                {
+                    if arg.get_entry(&self.gc_handle, expected_arg).is_none() {
+                        let arg_name = expected_arg.load(&self.gc_handle).to_owned();
+                        return Err(EvaluateError::CallWithMissingArg { arg_name });
+                    }
+                }
+            }
+        }
+
+        let mut sub_state = self.stack_cache.pop().unwrap_or_default();
+        sub_state.thunk_stack.push(arg);
+        sub_state
+            .code_buf
+            .extend_from_slice(self.gc_handle.load(&func.code).as_ref());
+        sub_state
+            .context
+            .extend_from_slice(self.gc_handle.load(&func.context.entries).as_ref());
+
+        ThunkEvaluator {
+            state: sub_state,
+            builtins: self.builtins.clone(),
+            evaluator: self,
+        }
+        .compute_result()
+    }
 }
 
 impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
@@ -86,7 +155,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             let mut code = code_buf.drain(..);
 
             while let Some(opcode) = code.next() {
-                println!("executing: {opcode:?}");
+                println!("executing: {:?}", opcode.debug(&self.evaluator.gc_handle));
                 match opcode {
                     VmOp::AllocList(list_len) => {
                         let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
@@ -130,7 +199,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                     }
 
                     VmOp::BuildAttrset(num_keys) => {
-                        let entries = if num_keys > 0 {
+                        let attrset = if num_keys > 0 {
                             let mut entries = Vec::new();
                             for _ in 0..num_keys {
                                 let key = match self.pop()? {
@@ -144,28 +213,16 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                     .expect("thunk stack exhausted unexpectedly");
                                 entries.push((key, value));
                             }
-                            entries.sort_by(|(a, _), (b, _)| {
-                                a.load(&self.evaluator.gc_handle)
-                                    .cmp(b.load(&self.evaluator.gc_handle))
-                            });
-
-                            entries.dedup_by(|(a, _), (b, _)| {
-                                a.load(&self.evaluator.gc_handle)
-                                    == b.load(&self.evaluator.gc_handle)
-                            });
-
-                            if entries.len() < num_keys as usize {
-                                return Err(EvaluateError::DuplicateAttrsetKey);
-                            }
-
-                            self.evaluator.gc_handle.alloc_vec(&mut entries)?
+                            Attrset::build_from_entries(
+                                &mut entries,
+                                &mut self.evaluator.gc_handle,
+                            )?
                         } else {
-                            self.evaluator.gc_handle.alloc_slice(&[])?
+                            let entries = self.evaluator.gc_handle.alloc_slice(&[])?;
+                            value::Attrset { entries }
                         };
 
-                        self.state
-                            .local_stack
-                            .push(NixValue::Attrset(value::Attrset { entries }));
+                        self.state.local_stack.push(NixValue::Attrset(attrset));
                     }
 
                     VmOp::LoadContext(idx) => {
@@ -279,7 +336,9 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             .pop()
                             .expect("thunk stack exhausted unexpectedly");
                         let result = match self.pop()? {
-                            NixValue::Function(function) => self.execute_call(function, arg),
+                            NixValue::Function(function) => {
+                                self.evaluator.evaluate_call(function, arg)
+                            }
                             NixValue::Builtin(builtin) => {
                                 self.builtins
                                     .execute_builtin(builtin, arg, &mut self.evaluator)
@@ -401,7 +460,10 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
         self.state.code_buf = code_buf;
         let result_value = self.pop()?;
 
-        println!("thunk evaluated to {result_value:?}");
+        println!(
+            "thunk evaluated to {:?}",
+            result_value.debug(&self.evaluator.gc_handle)
+        );
 
         Ok(result_value)
     }
@@ -463,81 +525,6 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
         self.state.local_stack.push(NixValue::String(result));
 
         Ok(())
-    }
-
-    fn execute_call(
-        &mut self,
-        func: value::Function,
-        arg: GcPointer<Thunk>,
-    ) -> Result<NixValue, EvaluateError> {
-        // check that all required keys are present if needed
-        match func.call_type {
-            crate::vm::opcodes::LambdaCallType::Simple => {
-                // nothing to validate here.
-            }
-            crate::vm::opcodes::LambdaCallType::Attrset {
-                keys,
-                includes_rest_pattern,
-            } => {
-                let arg = self.evaluator.force_thunk(arg.clone())?;
-                let arg = arg.as_attrset()?;
-                let keys = self.evaluator.gc_handle.load(&keys).as_ref();
-
-                // check that no unexpected args were provided
-                if !includes_rest_pattern {
-                    for key in arg.keys(&self.evaluator.gc_handle) {
-                        if !keys
-                            .iter()
-                            .any(|(nix_str, _)| nix_str.load(&self.evaluator.gc_handle) == key)
-                        {
-                            return Err(EvaluateError::CallWithUnexpectedArg {
-                                arg_name: key.to_owned(),
-                            });
-                        }
-                    }
-                }
-
-                // and check that all required args are here.
-                for expected_arg in
-                    keys.iter().filter_map(
-                        |(arg_name, is_required)| {
-                            if *is_required {
-                                Some(arg_name)
-                            } else {
-                                None
-                            }
-                        },
-                    )
-                {
-                    if arg
-                        .get_entry(&self.evaluator.gc_handle, expected_arg)
-                        .is_none()
-                    {
-                        let arg_name = expected_arg.load(&self.evaluator.gc_handle).to_owned();
-                        return Err(EvaluateError::CallWithMissingArg { arg_name });
-                    }
-                }
-            }
-        }
-
-        let mut sub_state = self.evaluator.stack_cache.pop().unwrap_or_default();
-        sub_state.thunk_stack.push(arg);
-        sub_state
-            .code_buf
-            .extend_from_slice(self.evaluator.gc_handle.load(&func.code).as_ref());
-        sub_state.context.extend_from_slice(
-            self.evaluator
-                .gc_handle
-                .load(&func.context.entries)
-                .as_ref(),
-        );
-
-        ThunkEvaluator {
-            state: sub_state,
-            builtins: self.builtins.clone(),
-            evaluator: self.evaluator,
-        }
-        .compute_result()
     }
 }
 
@@ -723,6 +710,13 @@ impl NixValue {
     pub fn expect_list(self) -> Result<value::List, EvaluateError> {
         match self {
             NixValue::List(l) => Ok(l),
+            _ => Err(EvaluateError::TypeError),
+        }
+    }
+
+    pub fn expect_int(self) -> Result<i64, EvaluateError> {
+        match self {
+            NixValue::Int(i) => Ok(i),
             _ => Err(EvaluateError::TypeError),
         }
     }

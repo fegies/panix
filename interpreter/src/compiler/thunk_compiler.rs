@@ -587,12 +587,12 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 }
             };
 
+            self.translate_string_value(lookup_scope, target_buffer, key)?;
             let args =
                 self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut context_cache, value)?;
             target_buffer.push(VmOp::AllocateThunk { slot: None, args });
             self.current_thunk_stack_height += 1;
 
-            self.translate_string_value(lookup_scope, target_buffer, key)?;
             number_of_keys += 1;
         }
 

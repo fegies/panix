@@ -2,11 +2,14 @@ use std::{io::Read, sync::LazyLock};
 
 use gc::GcPointer;
 use gc_derive::Trace;
+use json_parser::JsonParser;
 use parser::{
     ast::{Code, LetInExpr, NixExprContent},
     parse_nix,
 };
 use regex::Regex;
+
+mod json_parser;
 
 use crate::{
     compile_source,
@@ -74,6 +77,11 @@ enum BuiltinType {
     Map,
     Import,
     Split,
+    FilterPick,
+    ListLength,
+    ElemAt,
+    ConcatLists,
+    FromJson,
 }
 
 impl Builtins for NixBuiltins {
@@ -90,6 +98,11 @@ impl Builtins for NixBuiltins {
             "___builtin_import" => BuiltinType::Import,
             "___builtin_abort" => BuiltinType::Abort,
             "___builtin_split" => BuiltinType::Split,
+            "___builtin_filter_pick" => BuiltinType::FilterPick,
+            "___builtin_length" => BuiltinType::ListLength,
+            "___builtin_elemat" => BuiltinType::ElemAt,
+            "___builtin_concatLists" => BuiltinType::ConcatLists,
+            "___builtin_fromJSON" => BuiltinType::FromJson,
             _ => return None,
         };
 
@@ -166,8 +179,110 @@ impl Builtins for NixBuiltins {
             BuiltinType::Map => execute_map(evaluator, argument),
             BuiltinType::Import => execute_import(evaluator, argument),
             BuiltinType::Split => execute_split(evaluator, argument),
+            BuiltinType::FilterPick => execute_filter_pick(evaluator, argument),
+            BuiltinType::ListLength => {
+                let lst = evaluator.force_thunk(argument)?.expect_list()?;
+                let len = evaluator.gc_handle.load(&lst.entries).as_ref().len();
+                Ok(NixValue::Int(len as i64))
+            }
+            BuiltinType::ElemAt => {
+                let arg = evaluator.force_thunk(argument)?.expect_attrset()?;
+                let list = arg
+                    .get_and_force_entry_str(evaluator, "list")?
+                    .expect_list()?;
+                let idx: usize = arg
+                    .get_and_force_entry_str(evaluator, "idx")?
+                    .expect_int()?
+                    .try_into()
+                    .map_err(|_| EvaluateError::AccessOutOfRange)?;
+
+                let ptr = evaluator
+                    .gc_handle
+                    .load(&list.entries)
+                    .as_ref()
+                    .get(idx)
+                    .ok_or(EvaluateError::AccessOutOfRange)?
+                    .clone();
+
+                evaluator.force_thunk(ptr)
+            }
+            BuiltinType::ConcatLists => execute_concat_lists(evaluator, argument),
+            BuiltinType::FromJson => execute_fromjson(evaluator, argument),
         }
     }
+}
+
+fn execute_fromjson(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let source = evaluator
+        .force_thunk(argument)?
+        .expect_string()?
+        .load(&evaluator.gc_handle)
+        .to_owned();
+
+    println!("json: {source}");
+
+    JsonParser::new(source.as_bytes(), &mut evaluator.gc_handle)
+        .parse_json()
+        .map_err(|e| EvaluateError::Misc(Box::new(e)))
+}
+
+fn execute_concat_lists(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let nested_list = evaluator.force_thunk(argument)?.expect_list()?;
+    let nested_list = evaluator
+        .gc_handle
+        .load(&nested_list.entries)
+        .as_ref()
+        .to_owned()
+        .into_iter()
+        .map(|ptr| evaluator.force_thunk(ptr)?.expect_list())
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let result = List::concat_lists(&nested_list, &mut evaluator.gc_handle)?;
+    Ok(NixValue::List(result))
+}
+
+fn execute_filter_pick(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let argument = evaluator.force_thunk(argument)?.expect_attrset()?;
+    let list = argument
+        .get_and_force_entry_str(evaluator, "list")?
+        .expect_list()?;
+    let pickset = argument
+        .get_and_force_entry_str(evaluator, "pickSet")?
+        .expect_list()?;
+    let pickset = evaluator
+        .gc_handle
+        .load(&pickset.entries)
+        .as_ref()
+        .to_owned()
+        .into_iter()
+        .map(|ptr| Ok(matches!(evaluator.force_thunk(ptr)?, NixValue::Bool(true))))
+        .collect::<Result<Vec<_>, EvaluateError>>()?;
+
+    let result_count = pickset.iter().filter(|b| **b).count();
+    let mut result_buf = Vec::with_capacity(result_count);
+    let result_iter = evaluator
+        .gc_handle
+        .load(&list.entries)
+        .as_ref()
+        .into_iter()
+        .zip(pickset.into_iter())
+        .filter_map(|(ptr, keep)| if keep { Some(ptr.clone()) } else { None });
+    result_buf.extend(result_iter);
+
+    let result_entries = evaluator.gc_handle.alloc_vec(&mut result_buf)?;
+
+    Ok(NixValue::List(List {
+        entries: result_entries,
+    }))
 }
 
 fn execute_split(

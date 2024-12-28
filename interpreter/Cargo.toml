@@ -12,3 +12,4 @@ gc_derive.workspace = true
 
 thiserror.workspace = true
 regex.workspace = true
+memchr.workspace = true

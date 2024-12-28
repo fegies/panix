@@ -5,6 +5,7 @@ use crate::{
     heap_page::{HeapEntry, Page},
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
+    GcHandle, GcPointer,
 };
 
 pub struct Array<T>
