@@ -308,16 +308,22 @@ fn test_split_version() {
     }
 }
 
-// #[test]
-// fn test_compare_versions() {
-//     let exprs = &[("0.0.0", "0.0.0", 0)];
-//     for (vers_l, vers_r, res) in exprs {
-//         eval_expr(
-//             &format!("builtins.compareVersions \"{vers_l}\" \"{vers_r}\""),
-//             &format!("{res}"),
-//         );
-//     }
-// }
+#[test]
+fn test_compare_versions() {
+    let exprs = &[
+        ("0.0.0", "0.0.0", 0),
+        ("0.0.1", "0.0.0", 1),
+        ("0p1", "0.0.0", -1),
+        ("1.0.54", "0.1.102", 1),
+    ];
+    for (vers_l, vers_r, res) in exprs {
+        eval_expr(
+            &format!("builtins.compareVersions \"{vers_l}\" \"{vers_r}\""),
+            &format!("{res}"),
+        );
+        println!("\n---\n");
+    }
+}
 
 #[test]
 fn test_list_len() {
@@ -361,4 +367,12 @@ fn test_from_json() {
         eval_expr(&format!("builtins.fromJSON ''{json}''"), nix);
         println!("\n-----\n");
     }
+}
+
+#[test]
+fn test_partition() {
+    eval_expr(
+        "builtins.partition (x: x > 10) [1 23 9 3 42]",
+        "{ right = [ 23 42 ]; wrong = [ 1 9 3 ]; }",
+    );
 }
