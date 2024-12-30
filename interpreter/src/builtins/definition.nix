@@ -102,19 +102,29 @@ let
       # a function string -> [string], extension of splitVersion.
       # first splits on the version separators, then splits each item again
       # on leading digits if any available. We do this to match what upstream nix does.
-      deepSplitVersion =
-        # a function string -> [string]
-        let
-          splitOffAlpha = value:
-            if value == ""
-            then [value]
-            else
-              map (v:
-                if typeOf v == "list"
-                then elemAt v 0
-                else v) (filter (v: v != "") (split "^([0-9]+)" value));
-        in
-          input: concatMap splitOffAlpha (splitVersion input);
+      deepSplitVersion = let
+        unpackList = v:
+          if typeOf v == "list"
+          then elemAt v 0
+          else v;
+        # isNotEmptyString: any -> bool
+        isNotEmptyString = v: v != "";
+        # splitLeadingDigits: string -> [string|[string]]
+        splitLeadingDigits = split "^([0-9]+)";
+        # splitOffAlpha: string -> [string]
+        # example: "0123" -> ["0123"]
+        # example: "abc123" -> ["abc123"]
+        # example: "123abc" -> ["123" "abc"]
+        splitOffAlpha = value:
+          if value == ""
+          then [value]
+          else map unpackList (filter isNotEmptyString (splitLeadingDigits value));
+      in let
+        # already partially applied concatMap
+        concatMap_splitOffAlpha = concatMap splitOffAlpha;
+      in
+        input: concatMap_splitOffAlpha (splitVersion input);
+      # simpleCompare: any -> any -> -1|0|1
       simpleCompare = left: right:
         if left < right
         then -1
@@ -128,6 +138,7 @@ let
         if typeOf parsed == "int"
         then parsed
         else null;
+      # compareComponents: string -> string -> -1|0|1
       compareComponents = left: right:
         if left == right
         then 0

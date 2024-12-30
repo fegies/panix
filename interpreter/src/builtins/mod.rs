@@ -222,8 +222,6 @@ fn execute_fromjson(
         .load(&evaluator.gc_handle)
         .to_owned();
 
-    println!("json: {source}");
-
     JsonParser::new(source.as_bytes(), &mut evaluator.gc_handle)
         .parse_json()
         .map_err(|e| EvaluateError::Misc(Box::new(e)))
