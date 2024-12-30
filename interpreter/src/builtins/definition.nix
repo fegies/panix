@@ -121,6 +121,7 @@ let
         else if right < left
         then 1
         else 0;
+      # tryParseInt : string -> int|null
       tryParseInt = value: let
         parsed = (tryEval (fromJSON value)).value;
       in
