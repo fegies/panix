@@ -338,16 +338,14 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             }
             parser::ast::Op::Call { function, arg } => {
                 self.translate_to_ops(lookup_scope, target_buffer, *function)?;
-                let alloc_args = self.compile_subchunk(
+                // the arg thunk
+                target_buffer.push(self.compile_subchunk(
                     lookup_scope,
                     &mut Vec::new(),
                     &mut BTreeMap::new(),
                     *arg,
-                )?;
-                target_buffer.push(VmOp::AllocateThunk {
-                    slot: None,
-                    args: alloc_args,
-                });
+                    None,
+                )?);
                 target_buffer.push(VmOp::Call);
             }
             parser::ast::Op::Binop {
@@ -504,13 +502,14 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             for entry in &mut attrset.inherit_keys {
                 if let Some(src) = entry.source.as_mut() {
                     let src = core::mem::replace(src.as_mut(), get_null_expr());
-                    let args = self.compile_subchunk(
+                    let push_thunk_op = self.compile_subchunk(
                         lookup_scope,
                         &mut sub_code_buf,
                         &mut context_cache,
                         src,
+                        None,
                     )?;
-                    target_buffer.push(VmOp::AllocateThunk { slot: None, args });
+                    target_buffer.push(push_thunk_op);
                     self.current_thunk_stack_height += 1;
                 }
             }
@@ -588,9 +587,14 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             };
 
             self.translate_string_value(lookup_scope, target_buffer, key)?;
-            let args =
-                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut context_cache, value)?;
-            target_buffer.push(VmOp::AllocateThunk { slot: None, args });
+            let push_thunk_op = self.compile_subchunk(
+                lookup_scope,
+                &mut sub_code_buf,
+                &mut context_cache,
+                value,
+                None,
+            )?;
+            target_buffer.push(push_thunk_op);
             self.current_thunk_stack_height += 1;
 
             number_of_keys += 1;
@@ -623,9 +627,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         let mut ctx_cache = BTreeMap::new();
         let mut sub_code_buf = Vec::new();
         for expr in list {
-            let args =
-                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut ctx_cache, expr)?;
-            target_buffer.push(VmOp::AllocateThunk { slot: None, args });
+            let push_thunk_op =
+                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut ctx_cache, expr, None)?;
+            target_buffer.push(push_thunk_op);
         }
         target_buffer.push(VmOp::AllocList(num_entries as u32));
 
@@ -713,17 +717,15 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         for inherit_entry in let_expr.inherit_entries {
             if let Some(source_expr) = inherit_entry.source {
                 // first, set the inherit source thunk....
-                let thunk_args = self.compile_subchunk(
+                slot_id -= 1;
+                let overwrite_thunk_op = self.compile_subchunk(
                     lookup_scope,
                     &mut instruction_buf,
                     &mut cached_context_instructions,
                     *source_expr,
+                    Some(slot_id),
                 )?;
-                slot_id -= 1;
-                target_buffer.push(VmOp::AllocateThunk {
-                    slot: Some(slot_id),
-                    args: thunk_args,
-                });
+                target_buffer.push(overwrite_thunk_op);
             } else {
                 // as this expression did not have a source, we would need to pick the entries
                 // from the context. Since this is a let expression, they would already
@@ -760,17 +762,15 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
         // inherit keys done. Now the normal bindings
         for (_ident, body) in let_expr.bindings {
-            let args = self.compile_subchunk(
+            slot_id -= 1;
+            let overwrite_thunk_op = self.compile_subchunk(
                 lookup_scope,
                 &mut instruction_buf,
                 &mut cached_context_instructions,
                 body,
+                Some(slot_id),
             )?;
-            slot_id -= 1;
-            target_buffer.push(VmOp::AllocateThunk {
-                slot: Some(slot_id),
-                args,
-            });
+            target_buffer.push(overwrite_thunk_op);
         }
 
         // finally, all binding thunks are properly set.
@@ -785,26 +785,45 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         Ok(())
     }
 
+    /// compiles the provided expression.
+    /// returns a vmop that modifies the local thunk stack.
     fn compile_subchunk(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
         opcode_buf: &mut Vec<VmOp>,
         context_cache: &mut BTreeMap<Vec<ValueSource>, (u32, GcPointer<Array<ValueSource>>)>,
         expr: NixExpr<'src>,
-    ) -> Result<GcPointer<ThunkAllocArgs>, CompileError> {
+        slot: Option<u16>,
+    ) -> Result<VmOp, CompileError> {
         let mut subscope = lookup_scope.subscope();
         ThunkCompiler::new(&mut self.compiler).translate_to_ops(&mut subscope, opcode_buf, expr)?;
-        let code = self.compiler.gc_handle.alloc_vec(opcode_buf)?;
         let ctx_ins = subscope.get_inherit_context();
+
+        if let (None, &[VmOp::LoadThunk(ValueSource::ContextReference(0))], &[value_source]) =
+            (slot, opcode_buf.as_slice(), ctx_ins)
+        {
+            // the requested instruction should push a value on the local thunk stack.
+            // the compiled thunk only loads a single value from its context, which we would select
+            // from the allocating context at the time of thunk allocation.
+            //
+            // In this case, we can skip the thunk allocation and just directly
+            // instruct the interpreter to duplicate the source thunk to the top of the stack.
+            return Ok(VmOp::DuplicateThunk(value_source));
+        }
+
+        let code = self.compiler.gc_handle.alloc_vec(opcode_buf)?;
         let (context_id, context_build_instructions) =
             resolve_possibly_cached_context(&mut self.compiler.gc_handle, context_cache, ctx_ins)?;
-        let res = self.compiler.gc_handle.alloc(ThunkAllocArgs {
+        let alloc_args = self.compiler.gc_handle.alloc(ThunkAllocArgs {
             context_id,
             code,
             context_build_instructions,
         })?;
 
-        Ok(res)
+        Ok(VmOp::AllocateThunk {
+            slot,
+            args: alloc_args,
+        })
     }
 }
 

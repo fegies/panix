@@ -123,7 +123,12 @@ fn test_funccall() {
 
 #[test]
 fn test_currying() {
-    eval_expr("let f = a : b : a + b; in f 1 4", "5");
+    eval_expr("let f = a : b : a + b; g = f 1; in g 4", "5");
+}
+
+#[test]
+fn test_from_arg() {
+    eval_expr("let a = 42; in (v: v) a", "42");
 }
 
 #[test]
