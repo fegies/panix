@@ -10,8 +10,8 @@ use crate::{
     compiler::{get_null_expr, lookup_scope::LocalThunkRef},
     vm::{
         opcodes::{
-            CompareMode, ContextReference, ExecutionContext, LambdaAllocArgs, LambdaCallType,
-            ThunkAllocArgs, ValueSource, VmOp,
+            CompareMode, ExecutionContext, LambdaAllocArgs, LambdaCallType, ThunkAllocArgs,
+            ValueSource, VmOp,
         },
         value::{self, NixValue, Thunk},
     },
@@ -230,7 +230,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                             //  even if no code explicitly refers to it
                             subscope.deref_ident(total_name);
 
-                            subcode_buf.push(VmOp::LoadContext(ContextReference(0)));
+                            subcode_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
                             subcode_buf.push(VmOp::GetAttribute { push_error: true });
                             let skip_idx = subcode_buf.len();
                             subcode_buf.push(VmOp::SkipUnless(0));
@@ -252,7 +252,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                             })?
                         } else {
                             // no default, the thunk is just a normal getattr
-                            subcode_buf.push(VmOp::LoadContext(ContextReference(0)));
+                            subcode_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
                             subcode_buf.push(VmOp::GetAttribute { push_error: false });
                             let code = self.compiler.gc_handle.alloc_vec(&mut subcode_buf)?;
                             self.compiler.gc_handle.alloc(ThunkAllocArgs {
@@ -516,7 +516,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             }
 
             let mut current_inherit_source_idx = previous_height;
-            sub_code_buf.push(VmOp::LoadContext(ContextReference(0)));
+            sub_code_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
 
             // and now, actually emit all the inherit entries.
             for entry in attrset.inherit_keys {
@@ -536,7 +536,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
                         sub_code_buf.push(VmOp::PushImmediate(ident_value.clone()));
                         // the source, added to the thunk context
-                        sub_code_buf.push(VmOp::LoadContext(ContextReference(0)));
+                        sub_code_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
                         sub_code_buf.push(VmOp::GetAttribute { push_error: false });
 
                         let code = self.compiler.gc_handle.alloc_vec(&mut sub_code_buf)?;
@@ -640,12 +640,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
         let opcode = if let Some(src) = lookup_scope.deref_ident(ident) {
-            match src {
-                ValueSource::ContextReference(ctxref) => {
-                    VmOp::LoadContext(ContextReference(ctxref))
-                }
-                ValueSource::ThunkStackRef(localref) => VmOp::LoadLocalThunk(localref),
-            }
+            VmOp::LoadThunk(src)
         } else {
             // whatever we tried to look up did not exist in the defined scope.
             // try to see if it is a builtin.
@@ -744,7 +739,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 .alloc_slice(&[ValueSource::ContextReference(context_ref)])?;
 
             for ident in inherit_entry.entries {
-                instruction_buf.push(VmOp::LoadContext(ContextReference(0)));
+                instruction_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
                 instruction_buf.push(VmOp::PushImmediate(
                     self.compiler
                         .alloc_string(KnownNixStringContent::Literal(&ident))?,

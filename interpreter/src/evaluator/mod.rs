@@ -5,7 +5,7 @@ use gc::{GcHandle, GcPointer};
 use crate::{
     builtins::{get_builtins, Builtins, NixBuiltins},
     vm::{
-        opcodes::{ExecutionContext, LambdaAllocArgs, VmOp},
+        opcodes::{ExecutionContext, LambdaAllocArgs, ValueSource, VmOp},
         value::{self, Attrset, Function, List, NixString, NixValue, Thunk},
     },
     EvaluateError,
@@ -225,12 +225,12 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         self.state.local_stack.push(NixValue::Attrset(attrset));
                     }
 
-                    VmOp::LoadContext(idx) => {
-                        let thunk = self.state.context[idx.0 as usize].clone();
+                    VmOp::LoadThunk(ValueSource::ContextReference(idx)) => {
+                        let thunk = self.state.context[idx as usize].clone();
                         let value = self.evaluator.force_thunk(thunk)?;
                         self.state.local_stack.push(value);
                     }
-                    VmOp::LoadLocalThunk(idx) => {
+                    VmOp::LoadThunk(ValueSource::ThunkStackRef(idx)) => {
                         let thunk = self.state.thunk_stack[idx as usize].clone();
                         let value = self.evaluator.force_thunk(thunk)?;
                         self.state.local_stack.push(value);

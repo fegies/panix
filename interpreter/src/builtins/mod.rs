@@ -14,7 +14,7 @@ mod json_parser;
 use crate::{
     compile_source,
     vm::{
-        opcodes::{ContextReference, ExecutionContext, ValueSource, VmOp},
+        opcodes::{ExecutionContext, ValueSource, VmOp},
         value::{self, Attrset, List, NixString, NixValue, Thunk},
     },
     EvaluateError, Evaluator, InterpreterError,
@@ -456,7 +456,7 @@ fn execute_map(
     // since the call op will pop the argument off the context stack,
     // we only need to ensure that the argument is on top of the stack.
     let call_code = evaluator.gc_handle.alloc_slice(&[
-        VmOp::LoadContext(ContextReference(0)),
+        VmOp::LoadThunk(ValueSource::ContextReference(0)),
         VmOp::DuplicateThunk(ValueSource::ContextReference(1)),
         VmOp::Call,
     ])?;

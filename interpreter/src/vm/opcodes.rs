@@ -8,9 +8,6 @@ pub enum ValueSource {
     ThunkStackRef(u32),
 }
 
-#[derive(Debug, Trace, Clone, Copy)]
-pub struct ContextReference(pub u32);
-
 #[derive(Debug, Trace, Clone)]
 pub struct ExecutionContext {
     pub entries: GcPointer<Array<GcPointer<Thunk>>>,
@@ -53,11 +50,9 @@ pub enum VmOp {
     /// builds an attrest from the pairs and pushes the result.
     BuildAttrset(u32),
 
-    /// Loads the provided context item and pushes it on the stack.
-    LoadContext(ContextReference),
-
-    /// loads the provided value from the local Thunk stack
-    LoadLocalThunk(u32),
+    /// loads a value, either from the context or the local thunk stack
+    /// and pushes it onto the value stack.
+    LoadThunk(ValueSource),
 
     /// duplicates the thunk from the provided source and pushes it on the stack.
     DuplicateThunk(ValueSource),
