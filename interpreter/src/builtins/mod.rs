@@ -1,6 +1,6 @@
-use std::{io::Read, sync::LazyLock};
+use std::{cell::RefCell, collections::HashMap, io::Read, sync::LazyLock};
 
-use gc::GcPointer;
+use gc::{GcHandle, GcPointer};
 use gc_derive::Trace;
 use json_parser::JsonParser;
 use parser::{
@@ -40,7 +40,9 @@ pub trait Builtins {
 static BUILTINS_EXPR: LazyLock<LetInExpr<'static>> = LazyLock::new(build_builtins_expr);
 
 pub fn get_builtins() -> NixBuiltins {
-    NixBuiltins { _private: () }
+    NixBuiltins {
+        import_cache: RefCell::new(HashMap::new()),
+    }
 }
 
 pub fn get_builtins_expr() -> LetInExpr<'static> {
@@ -48,7 +50,7 @@ pub fn get_builtins_expr() -> LetInExpr<'static> {
 }
 
 fn build_builtins_expr() -> LetInExpr<'static> {
-    let builtins = parse_nix(include_bytes!("./definition.nix"))
+    let builtins = parse_nix(include_bytes!("./prelude.nix"))
         .expect("to be able to parse the static builtin def");
 
     if let NixExprContent::Code(Code::LetInExpr(letexpr)) = builtins.content {
@@ -60,7 +62,7 @@ fn build_builtins_expr() -> LetInExpr<'static> {
 
 #[derive(Clone)]
 pub struct NixBuiltins {
-    _private: (),
+    import_cache: RefCell<HashMap<String, NixValue>>,
 }
 
 #[derive(Debug, Clone, Trace, Copy)]
@@ -177,7 +179,7 @@ impl Builtins for NixBuiltins {
             }
             BuiltinType::ToString => Ok(NixValue::String(execute_to_string(argument, evaluator)?)),
             BuiltinType::Map => execute_map(evaluator, argument),
-            BuiltinType::Import => execute_import(evaluator, argument),
+            BuiltinType::Import => self.execute_import(evaluator, argument),
             BuiltinType::Split => execute_split(evaluator, argument),
             BuiltinType::FilterPick => execute_filter_pick(evaluator, argument),
             BuiltinType::ListLength => {
@@ -409,27 +411,52 @@ fn execute_split(
     Ok(NixValue::List(result_list))
 }
 
-fn execute_import(
-    evaluator: &mut Evaluator<'_>,
-    argument: GcPointer<Thunk>,
-) -> Result<NixValue, EvaluateError> {
-    let path_to_import = evaluator.force_thunk(argument)?.expect_string()?;
-    let thunk = import_and_compile(evaluator, path_to_import)
-        .map_err(|e| EvaluateError::ImportError(Box::new(e)))?;
+impl NixBuiltins {
+    fn execute_import(
+        &self,
+        evaluator: &mut Evaluator<'_>,
+        argument: GcPointer<Thunk>,
+    ) -> Result<NixValue, EvaluateError> {
+        let path_to_import = match evaluator.force_thunk(argument)? {
+            NixValue::String(s) => s,
+            NixValue::Path(p) => todo!("{p:?}"),
+            _ => return Err(EvaluateError::TypeError),
+        };
 
-    evaluator.eval_expression(thunk)?;
-    todo!()
-}
+        let path_to_import_owned = path_to_import.load(&evaluator.gc_handle).to_owned();
 
-fn import_and_compile(
-    evaluator: &mut Evaluator,
-    path_to_import: NixString,
-) -> Result<Thunk, InterpreterError> {
-    let source_filename = path_to_import.load(&evaluator.gc_handle).to_owned();
-    let mut file_content = Vec::new();
-    std::fs::File::open(&source_filename)?.read_to_end(&mut file_content)?;
+        if let Some(cached) = self.import_cache.borrow().get(&path_to_import_owned) {
+            // we have imported file file previously. Now we can just reuse the cached value.
+            return Ok(cached.clone());
+        }
 
-    compile_source(&mut evaluator.gc_handle, &file_content)
+        let thunk = self
+            .import_and_compile(&mut evaluator.gc_handle, &path_to_import_owned)
+            .map_err(|e| EvaluateError::ImportError(Box::new(e)))?;
+        let result = evaluator.eval_expression(thunk)?;
+
+        // cache the evaluated file content.
+        // most likely it will be a lambda, but all other value types are possible too.
+        self.import_cache
+            .borrow_mut()
+            .insert(path_to_import_owned, result.clone());
+
+        Ok(result)
+    }
+
+    fn import_and_compile(
+        &self,
+        gc_handle: &mut GcHandle,
+        source_filename: &str,
+    ) -> Result<Thunk, InterpreterError> {
+        if source_filename == "<<<___builtins>>>" {
+            compile_source(gc_handle, include_bytes!("./builtins.nix"))
+        } else {
+            let mut file_content = Vec::new();
+            std::fs::File::open(&source_filename)?.read_to_end(&mut file_content)?;
+            compile_source(gc_handle, &file_content)
+        }
+    }
 }
 
 fn execute_map(
