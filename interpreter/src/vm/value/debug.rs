@@ -72,10 +72,11 @@ impl core::fmt::Debug for ValueDebug<'_> {
             NixValue::Int(i) => f.debug_tuple("Int").field(i).finish(),
             NixValue::Float(fl) => f.debug_tuple("Float").field(fl).finish(),
             NixValue::Path(p) => {
-                let p = self.gc.load(&p.raw);
+                let raw = self.gc.load(&p.raw);
                 f.debug_struct("Path")
-                    .field("source_location", &p.sourcefile_location)
-                    .field("value", &p.path_value)
+                    .field("resolved", &p.resolved.load(&self.gc))
+                    .field("source_location", &raw.sourcefile_location.load(&self.gc))
+                    .field("value", &raw.path_value.load(&self.gc))
                     .finish()
             }
             NixValue::Attrset(a) => f
@@ -173,6 +174,10 @@ impl core::fmt::Debug for VmopDebug<'_> {
                         depth: self.depth,
                     },
                 )
+                .finish(),
+            VmOp::CastToPath { source_location } => f
+                .debug_struct("CastToPath")
+                .field("source_location", &source_location.load(&self.gc))
                 .finish(),
             _ => self.op.fmt(f),
         }

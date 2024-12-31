@@ -419,7 +419,7 @@ impl NixBuiltins {
     ) -> Result<NixValue, EvaluateError> {
         let path_to_import = match evaluator.force_thunk(argument)? {
             NixValue::String(s) => s,
-            NixValue::Path(p) => todo!("{p:?}"),
+            NixValue::Path(p) => p.resolved,
             _ => return Err(EvaluateError::TypeError),
         };
 
@@ -427,12 +427,18 @@ impl NixBuiltins {
 
         if let Some(cached) = self.import_cache.borrow().get(&path_to_import_owned) {
             // we have imported file file previously. Now we can just reuse the cached value.
+            println!("using cached value for {path_to_import_owned}");
             return Ok(cached.clone());
         }
+
+        println!("reading and compiling {path_to_import_owned}");
 
         let thunk = self
             .import_and_compile(&mut evaluator.gc_handle, &path_to_import_owned)
             .map_err(|e| EvaluateError::ImportError(Box::new(e)))?;
+
+        println!("evaluating top-level thunk");
+
         let result = evaluator.eval_expression(thunk)?;
 
         // cache the evaluated file content.
