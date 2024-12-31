@@ -239,6 +239,29 @@ fn unquoted_iterpolation() {
 }
 
 #[test]
+fn lt_le() {
+    assert_lex("< =", &[Token::Lt, Token::Whitespace, Token::Eq]);
+    assert_lex("<=", &[Token::Le]);
+}
+
+#[test]
+fn search_path() {
+    assert_lex("<foobar>", &[Token::SearchPath("foobar")]);
+    assert_lex("<foo/bar.baz>", &[Token::SearchPath("foo/bar.baz")]);
+    assert_lex(" <64>", &[Token::Whitespace, Token::SearchPath("64")]);
+    assert_lex(
+        "< foo>",
+        &[Token::Lt, Token::Whitespace, Token::Ident("foo"), Token::Gt],
+    );
+    assert_lex(
+        "<foo >",
+        &[Token::Lt, Token::Ident("foo"), Token::Whitespace, Token::Gt],
+    );
+    assert_lex("<!>", &[Token::Lt, Token::Not, Token::Gt]);
+    assert_lex("<>", &[Token::Lt, Token::Gt]);
+}
+
+#[test]
 fn ident_with_single_quot() {
     let str = "foo' bar";
     assert_lex(

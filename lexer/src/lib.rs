@@ -8,6 +8,7 @@ pub enum Token<'a> {
     Ident(&'a str),
     Float(f64),
     Integer(i64),
+    SearchPath(&'a str),
     At,
     CurlyOpen,
     CurlyClose,

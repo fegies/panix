@@ -61,7 +61,8 @@ impl<'input> LexerInput<'input> {
         found.map(|found| found == str).unwrap_or(false)
     }
 
-    pub(crate) fn slice(&self) -> &[u8] {
+    /// returns all the input that has not been consumed yet.
+    pub(crate) fn slice(&self) -> &'input [u8] {
         &self.slice[self.offset..]
     }
 }

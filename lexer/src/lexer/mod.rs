@@ -147,7 +147,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 b'+' => lookahead!(b'+', Token::DoublePlus, Token::Plus),
                 b'-' => lookahead!(b'>', Token::Implication, Token::Minus),
                 b'=' => lookahead!(b'=', Token::DoubleEq, Token::Eq),
-                b'<' => lookahead!(b'=', Token::Le, Token::Lt),
+                b'<' => self.lex_lt_le_or_searchpath().await,
                 b'>' => lookahead!(b'=', Token::Ge, Token::Gt),
                 b'!' => lookahead!(b'=', Token::Ne, Token::Not),
                 b'"' => self.lex_simple_string().await?,
@@ -233,6 +233,43 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         }
         self.push(Token::EOF).await;
         Ok(())
+    }
+
+    async fn lex_lt_le_or_searchpath(&mut self) {
+        // this one may either start a search path, a lone < or a <=.
+        let remaining = self.input.slice();
+        if let Some(b"<=") = remaining.get(0..2) {
+            self.push(Token::Le).await;
+            self.input.consume(2);
+            return;
+        }
+
+        fn match_searchpath(input: &[u8]) -> Option<&str> {
+            let end_idx = memchr::memchr(b'>', input)?;
+            let candidate_contents = &input[1..end_idx];
+
+            if candidate_contents.is_empty() {
+                return None;
+            }
+
+            if candidate_contents
+                .iter()
+                .copied()
+                .all(|c| matches!(c, b'A'..=b'z' | b'0'..=b'9' | b'-' | b'/' | b'.' | b'+'))
+            {
+                core::str::from_utf8(candidate_contents).ok()
+            } else {
+                None
+            }
+        }
+
+        if let Some(searchpath) = match_searchpath(remaining) {
+            self.push(Token::SearchPath(searchpath)).await;
+            self.input.consume(searchpath.len() + 2);
+        } else {
+            self.push(Token::Lt).await;
+            self.input.consume(1);
+        }
     }
 
     async fn lex_number(&mut self) -> Result<(), LexError> {
