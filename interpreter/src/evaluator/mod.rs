@@ -6,7 +6,7 @@ use crate::{
     builtins::{get_builtins, Builtins, NixBuiltins},
     vm::{
         opcodes::{ExecutionContext, LambdaAllocArgs, ValueSource, VmOp},
-        value::{self, Attrset, Function, List, NixString, NixValue, Thunk},
+        value::{self, Attrset, Function, List, NixString, NixValue, PathValue, Thunk},
     },
     EvaluateError,
 };
@@ -348,14 +348,15 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
                         self.state.local_stack.push(result);
                     }
-                    VmOp::CastToPath => {
-                        let value = if let NixValue::String(s) = self.pop()? {
-                            s
-                        } else {
-                            return Err(EvaluateError::TypeError);
-                        };
+                    VmOp::CastToPath { source_location } => {
+                        let path_value = self.pop()?.expect_string()?;
+                        let path = PathValue::new(
+                            source_location,
+                            path_value,
+                            &mut self.evaluator.gc_handle,
+                        )?;
 
-                        self.state.local_stack.push(NixValue::Path(value));
+                        self.state.local_stack.push(NixValue::Path(path));
                     }
                     VmOp::PushImmediate(imm) => {
                         let imm = self.evaluator.gc_handle.load(&imm);
@@ -591,8 +592,8 @@ fn compare_values(
         (NixValue::Float(l), NixValue::Int(r)) => l.partial_cmp(&(*r as f64)),
         (NixValue::Float(l), NixValue::Float(r)) => l.partial_cmp(&r),
         (NixValue::Path(l), NixValue::Path(r)) => {
-            let l = l.load(gc_handle);
-            let r = r.load(gc_handle);
+            let l = l.resolved.load(gc_handle);
+            let r = r.resolved.load(gc_handle);
             Some(l.cmp(r))
         }
         (NixValue::Attrset(l), NixValue::Attrset(r)) => return compare_attrsets(evaluator, l, r),

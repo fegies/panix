@@ -79,7 +79,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             BasicValue::Float(f) => NixValue::Float(f),
             BasicValue::Path(p) => {
                 self.translate_string_value(lookup_scope, target_buffer, p)?;
-                target_buffer.push(VmOp::CastToPath);
+                target_buffer.push(VmOp::CastToPath {
+                    source_location: self.compiler.source_filename.clone(),
+                });
                 return Ok(());
             }
             BasicValue::String(s) => {

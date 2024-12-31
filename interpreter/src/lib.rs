@@ -76,12 +76,17 @@ pub enum InterpreterError {
 pub fn compile_file(gc_handle: &mut GcHandle, file: &Path) -> Result<Thunk, InterpreterError> {
     let mut content = Vec::new();
     File::open(file)?.read_to_end(&mut content)?;
-    compile_source(gc_handle, &content)
+    let source_filename = file.to_str().unwrap();
+    compile_source(gc_handle, &content, source_filename)
 }
 
-pub fn compile_source(gc_handle: &mut GcHandle, content: &[u8]) -> Result<Thunk, InterpreterError> {
+pub fn compile_source(
+    gc_handle: &mut GcHandle,
+    content: &[u8],
+    source_filename: &str,
+) -> Result<Thunk, InterpreterError> {
     let expr = parser::parse_nix(content)?;
     let bump = Bump::new();
-    let res = compiler::translate_expression(gc_handle, expr, &bump)?;
+    let res = compiler::translate_expression(gc_handle, expr, &bump, source_filename)?;
     Ok(res)
 }

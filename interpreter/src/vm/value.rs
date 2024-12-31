@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, path::Path};
 
 use gc::{
     specialized_types::{array::Array, string::SimpleGcString},
@@ -102,11 +102,57 @@ pub enum NixValue {
     Null,
     Int(i64),
     Float(f64),
-    Path(NixString),
+    Path(PathValue),
     Attrset(Attrset),
     Function(Function),
     List(List),
     Builtin(BuiltinTypeToken),
+}
+
+#[derive(Debug, Trace, Clone)]
+pub struct RawPathValue {
+    pub path_value: NixString,
+    pub sourcefile_location: NixString,
+}
+
+#[derive(Debug, Trace, Clone)]
+pub struct PathValue {
+    pub raw: GcPointer<RawPathValue>,
+    pub resolved: NixString,
+    _private: (),
+}
+
+impl PathValue {
+    pub fn new(
+        sourcefile_location: NixString,
+        path_value: NixString,
+        gc: &mut GcHandle,
+    ) -> Result<Self, EvaluateError> {
+        let resolved_path = Path::new(path_value.load(&gc));
+
+        let resolved = if resolved_path.is_relative() {
+            let source_dir = Path::new(sourcefile_location.load(&gc))
+                .parent()
+                .ok_or(EvaluateError::AccessOutOfRange)?;
+            let resolved = source_dir.join(resolved_path);
+            let resolved = core::str::from_utf8(resolved.as_os_str().as_encoded_bytes())
+                .map_err(|e| EvaluateError::Misc(Box::new(e)))?;
+            gc.alloc_string(resolved)?.into()
+        } else {
+            path_value.clone()
+        };
+
+        let raw = gc.alloc(RawPathValue {
+            path_value,
+            sourcefile_location,
+        })?;
+
+        Ok(Self {
+            raw,
+            resolved,
+            _private: (),
+        })
+    }
 }
 
 #[derive(Debug, Trace, Clone)]

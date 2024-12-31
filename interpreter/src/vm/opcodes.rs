@@ -118,7 +118,7 @@ pub enum VmOp {
     Call,
 
     /// pops a string from the stack, converts it to a apth and pushes the result
-    CastToPath,
+    CastToPath { source_location: value::NixString },
 
     /// pops two values from the stack, performs a comparison and pushes the result
     Compare(CompareMode),

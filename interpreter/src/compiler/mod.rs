@@ -32,11 +32,13 @@ pub fn translate_expression<'src>(
     gc_handle: &mut GcHandle,
     mut expr: NixExpr<'src>,
     bump: &'src Bump,
+    source_filename: &str,
 ) -> Result<Thunk, CompileError> {
     normalize::normalize_ast(&mut expr, bump);
 
     let mut compiler = Compiler {
         cached_values: CachedValues::new(gc_handle)?,
+        source_filename: gc_handle.alloc_string(source_filename)?.into(),
         gc_handle,
         builtins: get_builtins(),
     };
@@ -49,6 +51,7 @@ struct Compiler<'gc> {
     gc_handle: &'gc mut GcHandle,
     cached_values: CachedValues,
     builtins: NixBuiltins,
+    source_filename: value::NixString,
 }
 
 struct CachedValues {

@@ -6,7 +6,7 @@ fn eval_expr(source: &str, expected_source: &str) {
     with_gc(|gc_handle| {
         let full_expr = format!("({source}) == ({expected_source})");
         println!("Evaluating: {full_expr:?}");
-        let thunk = compile_source(gc_handle, full_expr.as_bytes()).unwrap();
+        let thunk = compile_source(gc_handle, full_expr.as_bytes(), "<<inline>>").unwrap();
 
         let eval_value = Evaluator::new(gc_handle).eval_expression(thunk).unwrap();
         if let NixValue::Bool(true) = eval_value {

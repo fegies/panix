@@ -436,7 +436,7 @@ impl NixBuiltins {
         let result = evaluator.eval_expression(thunk)?;
 
         // cache the evaluated file content.
-        // most likely it will be a lambda, but all other value types are possible too.
+        // most likely it will be a lambda, but all other values are possible too.
         self.import_cache
             .borrow_mut()
             .insert(path_to_import_owned, result.clone());
@@ -450,11 +450,11 @@ impl NixBuiltins {
         source_filename: &str,
     ) -> Result<Thunk, InterpreterError> {
         if source_filename == "<<<___builtins>>>" {
-            compile_source(gc_handle, include_bytes!("./builtins.nix"))
+            compile_source(gc_handle, include_bytes!("./builtins.nix"), source_filename)
         } else {
             let mut file_content = Vec::new();
             std::fs::File::open(&source_filename)?.read_to_end(&mut file_content)?;
-            compile_source(gc_handle, &file_content)
+            compile_source(gc_handle, &file_content, source_filename)
         }
     }
 }
@@ -524,7 +524,7 @@ fn execute_to_string(
             let val = format!("{float}");
             evaluator.gc_handle.alloc_string(&val)?.into()
         }
-        NixValue::Path(path) => path,
+        NixValue::Path(path) => path.resolved,
         NixValue::Attrset(_attrset) => {
             // the cases where the attrset can be stringified is handled by the
             // nix code in the prelude
