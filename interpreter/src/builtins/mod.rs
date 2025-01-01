@@ -505,14 +505,14 @@ impl NixBuiltins {
         evaluator: &mut Evaluator<'_>,
         argument: GcPointer<Thunk>,
     ) -> Result<NixValue, EvaluateError> {
-        let path_to_import = match evaluator.force_thunk(argument)? {
+        let mut path_to_import = match evaluator.force_thunk(argument)? {
             NixValue::String(s) => s,
             NixValue::Path(p) => p.resolved,
             _ => return Err(EvaluateError::TypeError),
         };
 
-        fn resolve_path(input: &str) -> Result<PathBuf, io::Error> {
-            if input == "<<<___builtins>>>" {
+        fn resolve_path(input: &Path) -> Result<PathBuf, io::Error> {
+            if input == Path::new("<<<___builtins>>>") {
                 return Ok(Path::new(input).to_owned());
             }
             let mut path = Path::new(input).canonicalize()?;
@@ -523,7 +523,15 @@ impl NixBuiltins {
             Ok(path)
         }
 
-        let path_to_import_owned = resolve_path(path_to_import.load(&evaluator.gc_handle))?;
+        let path_to_import_borrowed = Path::new(path_to_import.load(&evaluator.gc_handle));
+        let path_to_import_owned = resolve_path(path_to_import_borrowed)?;
+        if path_to_import_borrowed != &path_to_import_owned {
+            let string = path_to_import_owned
+                .as_os_str()
+                .to_str()
+                .ok_or(EvaluateError::TypeError)?;
+            path_to_import = evaluator.gc_handle.alloc_string(string)?.into();
+        }
 
         if let Some(cached) = self.import_cache.borrow().get(&path_to_import_owned) {
             // we have imported file file previously. Now we can just reuse the cached value.
