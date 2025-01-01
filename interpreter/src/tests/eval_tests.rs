@@ -385,5 +385,18 @@ fn test_partition() {
 #[test]
 fn test_assert() {
     eval_expr("assert 1 == 1; 42", "42");
-    eval_expr("(builtins.tryEval (assert 1 == 2; 42)).value", "false")
+    eval_expr("(builtins.tryEval (assert 1 == 2; 42)).value", "false");
+}
+
+#[test]
+fn test_remove_attrs() {
+    eval_expr(
+        r#"builtins.removeAttrs { x = 1; y = 2; z = 3; } [ "a" "x" "z" ]"#,
+        "{y = 2;}",
+    );
+    // and again, to assert it is present in global scope.
+    eval_expr(
+        r#"removeAttrs { x = 1; y = 2; z = 3; } [ "a" "x" "z" ]"#,
+        "{y = 2;}",
+    );
 }

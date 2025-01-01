@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{self, Read},
     path::{Path, PathBuf},
     sync::LazyLock,
@@ -89,6 +89,8 @@ enum BuiltinType {
     ElemAt,
     ConcatLists,
     FromJson,
+    RemoveAttrs,
+    DeepSeq,
 }
 
 impl Builtins for NixBuiltins {
@@ -110,6 +112,8 @@ impl Builtins for NixBuiltins {
             "___builtin_elemat" => BuiltinType::ElemAt,
             "___builtin_concatLists" => BuiltinType::ConcatLists,
             "___builtin_fromJSON" => BuiltinType::FromJson,
+            "___builtin_removeAttrs" => BuiltinType::RemoveAttrs,
+            "___builtin_deepSeq" => BuiltinType::DeepSeq,
             _ => return None,
         };
 
@@ -215,8 +219,87 @@ impl Builtins for NixBuiltins {
             }
             BuiltinType::ConcatLists => execute_concat_lists(evaluator, argument),
             BuiltinType::FromJson => execute_fromjson(evaluator, argument),
+            BuiltinType::RemoveAttrs => execute_remove_attrs(evaluator, argument),
+            BuiltinType::DeepSeq => execute_deepseq(evaluator, argument),
         }
     }
+}
+
+fn execute_deepseq(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let [e1, e2] = evaluator
+        .force_thunk(argument)?
+        .expect_list()?
+        .expect_entries(&evaluator.gc_handle)?;
+
+    // deep force the value of e1
+    deep_force(evaluator, e1)?;
+
+    // ... and return the value of arg 2
+    evaluator.force_thunk(e2)
+}
+
+fn deep_force(evaluator: &mut Evaluator, value: GcPointer<Thunk>) -> Result<(), EvaluateError> {
+    match evaluator.force_thunk(value)? {
+        NixValue::List(list) => {
+            let entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
+            for entry in entries {
+                deep_force(evaluator, entry)?;
+            }
+        }
+        NixValue::Attrset(set) => {
+            let entries = evaluator.gc_handle.load(&set.entries).as_ref().to_owned();
+            for (_name, entry) in entries {
+                println!("forcing: {:?}", _name.debug(&evaluator.gc_handle));
+                deep_force(evaluator, entry)?;
+            }
+        }
+        _ => {
+            // all other values need not be forced further
+        }
+    }
+
+    Ok(())
+}
+
+fn execute_remove_attrs(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let [set, list] = evaluator
+        .force_thunk(argument)?
+        .expect_list()?
+        .expect_entries(&evaluator.gc_handle)?;
+    let set = evaluator.force_thunk(set)?.expect_attrset()?;
+    let mut set_entries = evaluator.gc_handle.load(&set.entries).as_ref().to_owned();
+
+    let name_list = evaluator.force_thunk(list)?.expect_list()?;
+
+    let name_list = evaluator
+        .gc_handle
+        .load(&name_list.entries)
+        .as_ref()
+        .to_owned()
+        .into_iter()
+        .map(|ptr| evaluator.force_thunk(ptr)?.expect_string())
+        .collect::<Result<Vec<_>, _>>()?;
+    let name_set: HashSet<_> = name_list
+        .iter()
+        .map(|ptr| ptr.load(&evaluator.gc_handle))
+        .collect();
+
+    set_entries.retain(|(name, _)| {
+        let name = name.load(&evaluator.gc_handle);
+        !name_set.contains(name)
+    });
+
+    let set_entries = evaluator.gc_handle.alloc_vec(&mut set_entries)?;
+
+    Ok(NixValue::Attrset(Attrset {
+        entries: set_entries,
+    }))
 }
 
 fn execute_fromjson(
@@ -462,15 +545,11 @@ impl NixBuiltins {
 
         let result = evaluator.eval_expression(thunk)?;
 
-        println!("inserting into cache");
-
         // cache the evaluated file content.
         // most likely it will be a lambda, but all other values are possible too.
         self.import_cache
             .borrow_mut()
             .insert(path_to_import_owned, result.clone());
-
-        println!("{:?}", self.import_cache.borrow());
 
         Ok(result)
     }

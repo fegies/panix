@@ -152,6 +152,23 @@ impl core::fmt::Debug for FunctionDebug<'_> {
     }
 }
 
+pub struct StringDebug<'a> {
+    value: &'a value::NixString,
+    gc: &'a GcHandle,
+}
+
+impl core::fmt::Debug for StringDebug<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", &self.value.load(self.gc)))
+    }
+}
+
+impl value::NixString {
+    pub fn debug<'a>(&'a self, gc: &'a GcHandle) -> StringDebug<'a> {
+        StringDebug { value: self, gc }
+    }
+}
+
 impl core::fmt::Debug for ValueDebug<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {

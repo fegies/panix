@@ -408,7 +408,14 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             |l, r| l - r,
                         )?);
                     }
-                    VmOp::MergeAttrsets => todo!(),
+                    VmOp::MergeAttrsets => {
+                        let added_set = self.pop()?.expect_attrset()?;
+                        let base_set = self.pop()?.expect_attrset()?;
+
+                        self.state.local_stack.push(NixValue::Attrset(
+                            base_set.merge(added_set, self.evaluator.gc_handle)?,
+                        ));
+                    }
                     VmOp::GetAttribute { push_error } => {
                         let attrset = self.pop()?.expect_attrset()?;
                         let key = self.pop()?.expect_string()?;

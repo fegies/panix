@@ -178,7 +178,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
                 Ok(())
             }
-            parser::ast::Code::AssertExpr(_) => unreachable!("assert should have ben removed by an ast pass"),
+            parser::ast::Code::AssertExpr(_) => {
+                unreachable!("assert should have ben removed by an ast pass")
+            }
         }
     }
 
@@ -520,7 +522,6 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             }
 
             let mut current_inherit_source_idx = previous_height;
-            sub_code_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
 
             // and now, actually emit all the inherit entries.
             for entry in attrset.inherit_keys {
@@ -812,7 +813,11 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             // from the allocating context at the time of thunk allocation.
             //
             // In this case, we can skip the thunk allocation and just directly
-            // instruct the interpreter to duplicate the source thunk to the top of the stack.
+            // instruct the interpreter to duplicate the source thunk to the top of the stack
+            //
+            // Since we are not using anything from the compiled opcodes, we need to ensure
+            // that they do not pollute the next execution (for instance in the case of lists)
+            opcode_buf.clear();
             return Ok(VmOp::DuplicateThunk(value_source));
         }
 

@@ -216,6 +216,88 @@ impl Attrset {
         let entries = gc_handle.alloc_vec(entries)?;
         Ok(Attrset { entries })
     }
+
+    /// creates a new attribute set by merging other into self
+    pub fn merge(self, other: Attrset, gc: &mut GcHandle) -> Result<Attrset, GcError> {
+        let mut left_iter = gc
+            .load(&self.entries)
+            .as_ref()
+            .iter()
+            .map(|(k, v)| (k.load(&gc), (k.clone(), v.clone())));
+        let mut right_iter = gc
+            .load(&other.entries)
+            .as_ref()
+            .iter()
+            .map(|(k, v)| (k.load(&gc), (k.clone(), v.clone())));
+
+        let (mut left_key, mut left_entry) = if let Some(f) = left_iter.next() {
+            f
+        } else {
+            // the left value is completely empty. we can just return the second attrset.
+            return Ok(other);
+        };
+        let (mut right_key, mut right_entry) = if let Some(f) = right_iter.next() {
+            f
+        } else {
+            // the right value is an empty set. this will not change anything about the result.
+            // as such we can just return the input set.
+            return Ok(self);
+        };
+
+        let mut result_buf = Vec::new();
+        loop {
+            match left_key.cmp(right_key) {
+                std::cmp::Ordering::Less => {
+                    // emit the left entry and advance that iterator.
+                    result_buf.push(left_entry);
+                    if let Some(next) = left_iter.next() {
+                        (left_key, left_entry) = next;
+                    } else {
+                        // left iterator exhausted. emit the right one.
+                        result_buf.push(right_entry);
+                        result_buf.extend(right_iter.map(|(_, e)| e));
+                        break;
+                    }
+                }
+                std::cmp::Ordering::Greater => {
+                    // emit the right entry and advance that iterator.
+                    result_buf.push(right_entry);
+                    if let Some(next) = right_iter.next() {
+                        (right_key, right_entry) = next;
+                    } else {
+                        // right iterator exhausted, emit the rest of the left one.
+                        result_buf.push(left_entry);
+                        result_buf.extend(left_iter.map(|t| t.1));
+                        break;
+                    }
+                }
+                std::cmp::Ordering::Equal => {
+                    // an attribute present in both.
+                    // the right side takes precedence in being emitted, but we need to advance
+                    // both iterators.
+                    result_buf.push(right_entry);
+
+                    if let Some(next) = right_iter.next() {
+                        (right_key, right_entry) = next;
+                    } else {
+                        result_buf.push(left_entry);
+                        result_buf.extend(left_iter.map(|t| t.1));
+                        break;
+                    }
+                    if let Some(next) = left_iter.next() {
+                        (left_key, left_entry) = next;
+                    } else {
+                        result_buf.push(right_entry);
+                        result_buf.extend(right_iter.map(|t| t.1));
+                        break;
+                    }
+                }
+            }
+        }
+
+        let entries = gc.alloc_vec(&mut result_buf)?;
+        Ok(Attrset { entries })
+    }
 }
 
 impl PartialEq for Attrset {
@@ -248,5 +330,16 @@ impl List {
             .collect();
         let entries = gc.alloc_vec(&mut result_buf)?;
         Ok(List { entries })
+    }
+
+    pub(crate) fn expect_entries<const N: usize>(
+        &self,
+        gc_handle: &GcHandle,
+    ) -> Result<[GcPointer<Thunk>; N], EvaluateError> {
+        let slice = gc_handle.load(&self.entries).as_ref();
+        let arrayref: &[_; N] = slice
+            .try_into()
+            .map_err(|_| EvaluateError::AccessOutOfRange)?;
+        Ok(arrayref.clone())
     }
 }
