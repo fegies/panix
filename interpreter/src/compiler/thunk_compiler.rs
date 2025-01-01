@@ -718,6 +718,8 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         let mut instruction_buf = Vec::new();
 
         let mut slot_id = added_thunks as u16;
+        let mut source_context_ref = height_before;
+
         // now, emit all the thunk definitions, ensuring they match up with the keys
         // by iterating in the same order.
         for inherit_entry in let_expr.inherit_entries {
@@ -740,18 +742,20 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             }
 
             // and now emit all of the inherit keys as simple attrest refs
-            let context_ref = self.current_thunk_stack_height - slot_id as u32 + 1;
+            let context_ref = source_context_ref;
+            source_context_ref += 1;
+
             let context_build_instructions = self
                 .compiler
                 .gc_handle
-                .alloc_slice(&[ValueSource::ContextReference(context_ref)])?;
+                .alloc_slice(&[ValueSource::ThunkStackRef(context_ref)])?;
 
             for ident in inherit_entry.entries {
-                instruction_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
                 instruction_buf.push(VmOp::PushImmediate(
                     self.compiler
                         .alloc_string(KnownNixStringContent::Literal(&ident))?,
                 ));
+                instruction_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
                 instruction_buf.push(VmOp::GetAttribute { push_error: false });
                 let code = self.compiler.gc_handle.alloc_vec(&mut instruction_buf)?;
                 slot_id -= 1;
@@ -759,7 +763,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                     slot: Some(slot_id),
                     args: self.compiler.gc_handle.alloc(ThunkAllocArgs {
                         code,
-                        context_id: u32::MAX,
+                        context_id: 0,
                         context_build_instructions: context_build_instructions.clone(),
                     })?,
                 });

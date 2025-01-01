@@ -101,6 +101,14 @@ fn test_inherit_from_attrset_to_attrset() {
 }
 
 #[test]
+fn test_inherit_from_attrset() {
+    eval_expr(
+        "let a = {b = 42; c = 14;}; in let inherit(a) b c; in b + c",
+        "56",
+    );
+}
+
+#[test]
 fn test_list_without_spaces() {
     eval_expr("[(1)(2)]", "[1 2]");
 }
