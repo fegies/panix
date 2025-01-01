@@ -7,7 +7,7 @@ use parser::ast::{
 use remove_attrset_rec::RemoveAttrsetRecPass;
 use remove_with_expr::RemoveWithExprPass;
 
-use self::remove_multipath_attrset::RemoveMultipathPass;
+use self::remove_multipath_attrset::RemoveMultipathAndSearchpathPass;
 
 mod add_builtins;
 mod remove_attrset_rec;
@@ -15,10 +15,10 @@ mod remove_multipath_attrset;
 mod remove_with_expr;
 
 pub fn normalize_ast<'src>(ast: &mut NixExpr<'src>, bump: &'src Bump) {
-    add_builtins_def(ast);
-    RemoveMultipathPass::new().inspect_expr(ast);
+    RemoveMultipathAndSearchpathPass::new().inspect_expr(ast);
     RemoveAttrsetRecPass::new().inspect_expr(ast);
     RemoveWithExprPass::new(bump).inspect_expr(ast);
+    add_builtins_def(ast);
 }
 
 trait Pass<'src> {
@@ -44,6 +44,7 @@ trait Pass<'src> {
             BasicValue::Int(_) => {}
             BasicValue::Float(_) => {}
             BasicValue::Path(path) => self.inspect_nix_string(path),
+            BasicValue::SearchPath(_) => {}
         }
     }
 
@@ -55,6 +56,10 @@ trait Pass<'src> {
     }
 
     fn inspect_code(&mut self, code: &mut Code<'src>) {
+        self.descend_code(code)
+    }
+
+    fn descend_code(&mut self, code: &mut Code<'src>) {
         match code {
             Code::LetInExpr(letexpr) => self.inspect_let_expr(letexpr),
             Code::ValueReference { ident } => self.inspect_value_ref(ident),

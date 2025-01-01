@@ -56,6 +56,9 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 NixExprContent::BasicValue(BasicValue::String(self.parse_multiline_string()?))
             }
             Token::PathBegin => NixExprContent::BasicValue(BasicValue::Path(self.parse_path()?)),
+            Token::SearchPath(searchpath) => {
+                NixExprContent::BasicValue(BasicValue::SearchPath(searchpath))
+            }
             Token::Not | Token::Minus => {
                 let (r_bp, opcode) = match t.token {
                     Token::Not => (RIGHT_BINDING_POWER_BOOL_NOT, MonopOpcode::BinaryNot),
@@ -374,6 +377,7 @@ fn could_start_expression(token: &Token) -> bool {
             | Token::KwWith
             | Token::RoundOpen
             | Token::SquareOpen
+            | Token::SearchPath(_)
     )
 }
 

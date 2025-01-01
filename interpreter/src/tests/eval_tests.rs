@@ -381,3 +381,9 @@ fn test_partition() {
         "{ right = [ 23 42 ]; wrong = [ 1 9 3 ]; }",
     );
 }
+
+#[test]
+fn test_assert() {
+    eval_expr("assert 1 == 1; 42", "42");
+    eval_expr("(builtins.tryEval (assert 1 == 2; 42)).value", "false")
+}

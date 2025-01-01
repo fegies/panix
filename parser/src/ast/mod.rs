@@ -37,6 +37,7 @@ pub enum BasicValue<'a> {
     Int(i64),
     Float(f64),
     Path(NixString<'a>),
+    SearchPath(&'a str),
 }
 
 /// This is the key to an attribute set.
@@ -110,7 +111,7 @@ pub struct Lambda<'a> {
     pub body: Box<NixExpr<'a>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq,) ]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinopOpcode {
     Add,
     ListConcat,

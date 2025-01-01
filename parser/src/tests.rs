@@ -119,3 +119,13 @@ fn test_list_without_spaces() {
     let value = parse_nix("[(1)(2)]".as_bytes()).unwrap();
     assert_eq!(expected, value);
 }
+
+#[test]
+fn test_search_path() {
+    let expected = NixExpr {
+        position: SourcePosition { line: 1, column: 1 },
+        content: crate::ast::NixExprContent::BasicValue(BasicValue::SearchPath("foo/bar.baz")),
+    };
+    let value = parse_nix("<foo/bar.baz>".as_bytes()).unwrap();
+    assert_eq!(expected, value);
+}

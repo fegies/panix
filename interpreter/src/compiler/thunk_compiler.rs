@@ -87,6 +87,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             BasicValue::String(s) => {
                 return self.translate_string_value(lookup_scope, target_buffer, s);
             }
+            BasicValue::SearchPath(_) => {
+                unreachable!("search paths should have been removed by an ast pass")
+            }
         };
         target_buffer.push(VmOp::PushImmediate(self.compiler.gc_handle.alloc(value)?));
         Ok(())
@@ -175,7 +178,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
 
                 Ok(())
             }
-            parser::ast::Code::AssertExpr(_) => todo!(),
+            parser::ast::Code::AssertExpr(_) => unreachable!("assert should have ben removed by an ast pass"),
         }
     }
 
