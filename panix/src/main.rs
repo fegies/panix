@@ -17,7 +17,8 @@ fn process_file(file: &Path) {
     with_gc(|handle| {
         let thunk = interpreter::compile_file(handle, file).unwrap();
         let result = Evaluator::new(handle).eval_expression(thunk);
-        println!("{result:?}");
+
+        println!("\n\n------\nevaluation finished\n\n{result:?}");
     })
     .unwrap();
 

@@ -1,8 +1,11 @@
 use gc::GcHandle;
 
-use crate::vm::opcodes::{ThunkAllocArgs, VmOp};
+use crate::vm::{
+    opcodes::{LambdaCallType, ThunkAllocArgs, VmOp},
+    value,
+};
 
-use super::{Attrset, List, NixValue, Thunk};
+use super::{Attrset, Function, List, NixValue, Thunk};
 
 pub struct ThunkDebug<'a> {
     thunk: &'a Thunk,
@@ -63,6 +66,92 @@ pub struct ValueDebug<'a> {
     depth: u32,
 }
 
+struct FunctionDebug<'a> {
+    value: &'a Function,
+    gc: &'a GcHandle,
+    depth: u32,
+}
+
+impl core::fmt::Debug for FunctionDebug<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        struct ArgDebug<'a> {
+            value: &'a LambdaCallType,
+            gc: &'a GcHandle,
+        }
+        struct KeyDebug<'a> {
+            key: &'a value::NixString,
+            gc: &'a GcHandle,
+            is_required: bool,
+        }
+        impl core::fmt::Debug for KeyDebug<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct("Arg")
+                    .field("key", &self.key.load(&self.gc))
+                    .field("is_required", &self.is_required)
+                    .finish()
+            }
+        }
+        struct ArgsListDebug<'a> {
+            args: &'a [(value::NixString, bool)],
+            gc: &'a GcHandle,
+        }
+        impl core::fmt::Debug for ArgsListDebug<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_list()
+                    .entries(self.args.iter().map(|(key, is_required)| KeyDebug {
+                        gc: self.gc,
+                        key,
+                        is_required: *is_required,
+                    }))
+                    .finish()
+            }
+        }
+
+        impl core::fmt::Debug for ArgDebug<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self.value {
+                    LambdaCallType::Simple => f.debug_tuple("Simple").finish(),
+                    LambdaCallType::Attrset {
+                        keys,
+                        includes_rest_pattern,
+                    } => {
+                        let keys = self.gc.load(keys).as_ref();
+                        f.debug_struct("AttrsetArgs")
+                            .field("allow_default", includes_rest_pattern)
+                            .field(
+                                "keys",
+                                &ArgsListDebug {
+                                    args: keys,
+                                    gc: &self.gc,
+                                },
+                            )
+                            .finish()
+                    }
+                }
+            }
+        }
+
+        f.debug_struct("Function")
+            .field(
+                "args",
+                &ArgDebug {
+                    value: &self.value.call_type,
+                    gc: self.gc,
+                },
+            )
+            .field("context", &"<<elided>>")
+            .field(
+                "code",
+                &CodeDebug {
+                    code: self.gc.load(&self.value.code).as_ref(),
+                    gc: self.gc,
+                    depth: self.depth + 1,
+                },
+            )
+            .finish()
+    }
+}
+
 impl core::fmt::Debug for ValueDebug<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.value {
@@ -87,7 +176,14 @@ impl core::fmt::Debug for ValueDebug<'_> {
                     depth: self.depth,
                 })
                 .finish(),
-            NixValue::Function(l) => f.debug_tuple("Function").field(l).finish(),
+            NixValue::Function(l) => f
+                .debug_tuple("Function")
+                .field(&FunctionDebug {
+                    value: l,
+                    gc: self.gc,
+                    depth: self.depth + 1,
+                })
+                .finish(),
             NixValue::List(l) => f
                 .debug_tuple("List")
                 .field(&ListDebug {
@@ -196,23 +292,6 @@ impl core::fmt::Debug for ThunkArgsDebug<'_> {
             return f.write_str("<<elided>>");
         }
 
-        struct CodeDebug<'a> {
-            code: &'a [VmOp],
-            gc: &'a GcHandle,
-            depth: u32,
-        }
-        impl core::fmt::Debug for CodeDebug<'_> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_list()
-                    .entries(
-                        self.code
-                            .iter()
-                            .map(|op| op.debug_depth(&self.gc, self.depth)),
-                    )
-                    .finish()
-            }
-        }
-
         f.debug_struct("ThunkAllocArgs")
             .field("context_id", &self.val.context_id)
             .field(
@@ -226,6 +305,23 @@ impl core::fmt::Debug for ThunkArgsDebug<'_> {
                     code: self.gc.load(&self.val.code).as_ref(),
                     depth: self.depth + 1,
                 },
+            )
+            .finish()
+    }
+}
+
+struct CodeDebug<'a> {
+    code: &'a [VmOp],
+    gc: &'a GcHandle,
+    depth: u32,
+}
+impl core::fmt::Debug for CodeDebug<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(
+                self.code
+                    .iter()
+                    .map(|op| op.debug_depth(&self.gc, self.depth)),
             )
             .finish()
     }

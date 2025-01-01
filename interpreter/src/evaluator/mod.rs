@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, rc::Rc};
 
 use gc::{GcHandle, GcPointer};
 
@@ -15,7 +15,7 @@ pub struct Evaluator<'gc> {
     pub gc_handle: &'gc mut GcHandle,
     stack_cache: Vec<ThunkEvalState>,
     thunk_alloc_buffer: Vec<GcPointer<Thunk>>,
-    builtins: NixBuiltins,
+    builtins: Rc<NixBuiltins>,
 }
 #[derive(Default, Debug)]
 struct ThunkEvalState {
@@ -27,7 +27,6 @@ struct ThunkEvalState {
 
 struct ThunkEvaluator<'eval, 'gc> {
     state: ThunkEvalState,
-    builtins: NixBuiltins,
     evaluator: &'eval mut Evaluator<'gc>,
 }
 
@@ -37,7 +36,7 @@ impl<'gc> Evaluator<'gc> {
             gc_handle,
             stack_cache: Vec::new(),
             thunk_alloc_buffer: Vec::new(),
-            builtins: get_builtins(),
+            builtins: Rc::new(get_builtins()),
         }
     }
     pub fn eval_expression(&mut self, thunk: Thunk) -> Result<NixValue, EvaluateError> {
@@ -63,7 +62,6 @@ impl<'gc> Evaluator<'gc> {
 
                 let result = ThunkEvaluator {
                     state,
-                    builtins: self.builtins.clone(),
                     evaluator: self,
                 }
                 .compute_result()?;
@@ -139,7 +137,6 @@ impl<'gc> Evaluator<'gc> {
 
         ThunkEvaluator {
             state: sub_state,
-            builtins: self.builtins.clone(),
             evaluator: self,
         }
         .compute_result()
@@ -339,10 +336,11 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             NixValue::Function(function) => {
                                 self.evaluator.evaluate_call(function, arg)
                             }
-                            NixValue::Builtin(builtin) => {
-                                self.builtins
-                                    .execute_builtin(builtin, arg, &mut self.evaluator)
-                            }
+                            NixValue::Builtin(builtin) => self
+                                .evaluator
+                                .builtins
+                                .clone()
+                                .execute_builtin(builtin, arg, &mut self.evaluator),
                             _ => Err(EvaluateError::TypeError),
                         }?;
 
@@ -427,7 +425,9 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                 self.state.local_stack.push(NixValue::Bool(true));
                             }
                         } else {
-                            let val = value.ok_or_else(|| EvaluateError::AttrsetKeyNotFound)?;
+                            let val = value.ok_or_else(|| EvaluateError::AttrsetKeyNotFound {
+                                attr_name: key.load(&self.evaluator.gc_handle).to_owned(),
+                            })?;
                             self.state
                                 .local_stack
                                 .push(self.evaluator.force_thunk(val)?);

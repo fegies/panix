@@ -1,4 +1,10 @@
-use std::{cell::RefCell, collections::HashMap, io::Read, sync::LazyLock};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    io::{self, Read},
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use gc::{GcHandle, GcPointer};
 use gc_derive::Trace;
@@ -12,7 +18,7 @@ use regex::Regex;
 mod json_parser;
 
 use crate::{
-    compile_source,
+    compile_source_with_nix_filename,
     vm::{
         opcodes::{ExecutionContext, ValueSource, VmOp},
         value::{self, Attrset, List, NixString, NixValue, Thunk},
@@ -60,9 +66,8 @@ fn build_builtins_expr() -> LetInExpr<'static> {
     }
 }
 
-#[derive(Clone)]
 pub struct NixBuiltins {
-    import_cache: RefCell<HashMap<String, NixValue>>,
+    import_cache: RefCell<HashMap<PathBuf, NixValue>>,
 }
 
 #[derive(Debug, Clone, Trace, Copy)]
@@ -423,23 +428,41 @@ impl NixBuiltins {
             _ => return Err(EvaluateError::TypeError),
         };
 
-        let path_to_import_owned = path_to_import.load(&evaluator.gc_handle).to_owned();
+        fn resolve_path(input: &str) -> Result<PathBuf, io::Error> {
+            if input == "<<<___builtins>>>" {
+                return Ok(Path::new(input).to_owned());
+            }
+            let mut path = Path::new(input).canonicalize()?;
+            if path.is_dir() {
+                path.push("default.nix");
+            }
+
+            Ok(path)
+        }
+
+        let path_to_import_owned = resolve_path(path_to_import.load(&evaluator.gc_handle))?;
 
         if let Some(cached) = self.import_cache.borrow().get(&path_to_import_owned) {
             // we have imported file file previously. Now we can just reuse the cached value.
-            println!("using cached value for {path_to_import_owned}");
+            println!("using cached value for {path_to_import_owned:?}");
             return Ok(cached.clone());
         }
 
-        println!("reading and compiling {path_to_import_owned}");
+        println!("reading and compiling {path_to_import_owned:?}");
 
         let thunk = self
-            .import_and_compile(&mut evaluator.gc_handle, &path_to_import_owned)
+            .import_and_compile(
+                &mut evaluator.gc_handle,
+                path_to_import,
+                &path_to_import_owned,
+            )
             .map_err(|e| EvaluateError::ImportError(Box::new(e)))?;
 
         println!("evaluating top-level thunk");
 
         let result = evaluator.eval_expression(thunk)?;
+
+        println!("inserting into cache");
 
         // cache the evaluated file content.
         // most likely it will be a lambda, but all other values are possible too.
@@ -447,20 +470,27 @@ impl NixBuiltins {
             .borrow_mut()
             .insert(path_to_import_owned, result.clone());
 
+        println!("{:?}", self.import_cache.borrow());
+
         Ok(result)
     }
 
     fn import_and_compile(
         &self,
         gc_handle: &mut GcHandle,
-        source_filename: &str,
+        source_filename: NixString,
+        source_path: &Path,
     ) -> Result<Thunk, InterpreterError> {
-        if source_filename == "<<<___builtins>>>" {
-            compile_source(gc_handle, include_bytes!("./builtins.nix"), source_filename)
+        if source_path == Path::new("<<<___builtins>>>") {
+            compile_source_with_nix_filename(
+                gc_handle,
+                include_bytes!("./builtins.nix"),
+                source_filename,
+            )
         } else {
             let mut file_content = Vec::new();
-            std::fs::File::open(&source_filename)?.read_to_end(&mut file_content)?;
-            compile_source(gc_handle, &file_content, source_filename)
+            std::fs::File::open(source_path)?.read_to_end(&mut file_content)?;
+            compile_source_with_nix_filename(gc_handle, &file_content, source_filename)
         }
     }
 }
@@ -484,7 +514,9 @@ fn execute_map(
 
     let func = argument
         .get_entry_str(&evaluator.gc_handle, "func")
-        .ok_or(EvaluateError::AttrsetKeyNotFound)?;
+        .ok_or_else(|| EvaluateError::AttrsetKeyNotFound {
+            attr_name: "func".to_owned(),
+        })?;
 
     // since the call op will pop the argument off the context stack,
     // we only need to ensure that the argument is on top of the stack.

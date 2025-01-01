@@ -35,7 +35,7 @@ pub enum EvaluateError {
     #[error("Key conflict in attribute set")]
     DuplicateAttrsetKey,
     #[error("the provided attrest key could not be found")]
-    AttrsetKeyNotFound,
+    AttrsetKeyNotFound { attr_name: String },
 
     #[error("Lambda called with unexpected argument: `{arg_name}`")]
     CallWithUnexpectedArg { arg_name: String },
@@ -59,6 +59,9 @@ pub enum EvaluateError {
 
     #[error("other error: {0}")]
     Misc(Box<dyn Error>),
+
+    #[error("error performing io: {0}")]
+    IO(#[from] std::io::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -80,13 +83,25 @@ pub fn compile_file(gc_handle: &mut GcHandle, file: &Path) -> Result<Thunk, Inte
     compile_source(gc_handle, &content, source_filename)
 }
 
-pub fn compile_source(
+fn compile_source_with_nix_filename(
     gc_handle: &mut GcHandle,
     content: &[u8],
-    source_filename: &str,
+    source_filename: crate::vm::value::NixString,
 ) -> Result<Thunk, InterpreterError> {
     let expr = parser::parse_nix(content)?;
     let bump = Bump::new();
     let res = compiler::translate_expression(gc_handle, expr, &bump, source_filename)?;
     Ok(res)
+}
+
+pub fn compile_source(
+    gc_handle: &mut GcHandle,
+    content: &[u8],
+    source_filename: &str,
+) -> Result<Thunk, InterpreterError> {
+    let source_filename = gc_handle
+        .alloc_string(source_filename)
+        .map_err(|e| CompileError::Gc(e))?
+        .into();
+    compile_source_with_nix_filename(gc_handle, content, source_filename)
 }

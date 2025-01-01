@@ -181,7 +181,9 @@ impl Attrset {
     ) -> Result<NixValue, EvaluateError> {
         let entry = self
             .get_entry_str(&evaluator.gc_handle, key_str)
-            .ok_or(EvaluateError::AttrsetKeyNotFound)?;
+            .ok_or_else(|| EvaluateError::AttrsetKeyNotFound {
+                attr_name: key_str.to_owned(),
+            })?;
         evaluator.force_thunk(entry)
     }
 
