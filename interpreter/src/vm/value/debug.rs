@@ -276,17 +276,13 @@ impl core::fmt::Debug for VmopDebug<'_> {
                 .debug_tuple("PushImmediate")
                 .field(&self.gc.load(imm).debug_depth(&self.gc, self.depth))
                 .finish(),
-            VmOp::AllocateThunk { slot, args } => f
-                .debug_struct("AllocateThunk")
-                .field("slot", slot)
-                .field(
-                    "args",
-                    &ThunkArgsDebug {
-                        gc: &self.gc,
-                        val: self.gc.load(args),
-                        depth: self.depth,
-                    },
-                )
+            VmOp::AllocateThunk(args) => f
+                .debug_tuple("AllocateThunk")
+                .field(&ThunkArgsDebug {
+                    gc: &self.gc,
+                    val: self.gc.load(args),
+                    depth: self.depth,
+                })
                 .finish(),
             VmOp::CastToPath { source_location } => f
                 .debug_struct("CastToPath")

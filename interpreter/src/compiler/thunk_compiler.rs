@@ -220,7 +220,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                         .alloc_slice(&[ValueSource::ThunkStackRef(0)])?;
 
                     let mut subcode_buf = Vec::new();
-                    let mut current_slot = added_keys;
+                    let mut current_slot = 1;
                     for (key, default_value) in args.bindings {
                         let key_ptr: value::NixString =
                             self.compiler.gc_handle.alloc_string(key)?.into();
@@ -269,11 +269,11 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                             })?
                         };
 
-                        current_slot -= 1;
-                        code_buf.push(VmOp::AllocateThunk {
-                            slot: Some(current_slot as u16),
-                            args,
+                        code_buf.push(VmOp::AllocateThunk(args));
+                        code_buf.push(VmOp::OverwriteThunk {
+                            stackref: current_slot,
                         });
+                        current_slot += 1;
                     }
                 }
 
@@ -351,7 +351,6 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                     &mut Vec::new(),
                     &mut BTreeMap::new(),
                     *arg,
-                    None,
                 )?);
                 target_buffer.push(VmOp::Call);
             }
@@ -514,7 +513,6 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                         &mut sub_code_buf,
                         &mut context_cache,
                         src,
-                        None,
                     )?;
                     target_buffer.push(push_thunk_op);
                     self.current_thunk_stack_height += 1;
@@ -552,10 +550,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                         })?;
 
                         target_buffer.push(VmOp::PushImmediate(ident_value));
-                        target_buffer.push(VmOp::AllocateThunk {
-                            slot: None,
-                            args: alloc_args,
-                        });
+                        target_buffer.push(VmOp::AllocateThunk(alloc_args));
                         self.current_thunk_stack_height += 1;
                         number_of_keys += 1;
                     }
@@ -593,13 +588,8 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             };
 
             self.translate_string_value(lookup_scope, target_buffer, key)?;
-            let push_thunk_op = self.compile_subchunk(
-                lookup_scope,
-                &mut sub_code_buf,
-                &mut context_cache,
-                value,
-                None,
-            )?;
+            let push_thunk_op =
+                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut context_cache, value)?;
             target_buffer.push(push_thunk_op);
             self.current_thunk_stack_height += 1;
 
@@ -634,7 +624,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         let mut sub_code_buf = Vec::new();
         for expr in list {
             let push_thunk_op =
-                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut ctx_cache, expr, None)?;
+                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut ctx_cache, expr)?;
             target_buffer.push(push_thunk_op);
         }
         target_buffer.push(VmOp::AllocList(num_entries as u32));
@@ -717,7 +707,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         let mut cached_context_instructions = BTreeMap::new();
         let mut instruction_buf = Vec::new();
 
-        let mut slot_id = added_thunks as u16;
+        let mut slot_to_overwrite = height_before;
         let mut source_context_ref = height_before;
 
         // now, emit all the thunk definitions, ensuring they match up with the keys
@@ -725,15 +715,17 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         for inherit_entry in let_expr.inherit_entries {
             if let Some(source_expr) = inherit_entry.source {
                 // first, set the inherit source thunk....
-                slot_id -= 1;
-                let overwrite_thunk_op = self.compile_subchunk(
+                let create_thunk_op = self.compile_subchunk(
                     lookup_scope,
                     &mut instruction_buf,
                     &mut cached_context_instructions,
                     *source_expr,
-                    Some(slot_id),
                 )?;
-                target_buffer.push(overwrite_thunk_op);
+                target_buffer.push(create_thunk_op);
+                target_buffer.push(VmOp::OverwriteThunk {
+                    stackref: slot_to_overwrite,
+                });
+                slot_to_overwrite += 1;
             } else {
                 // as this expression did not have a source, we would need to pick the entries
                 // from the context. Since this is a let expression, they would already
@@ -751,36 +743,42 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                 .alloc_slice(&[ValueSource::ThunkStackRef(context_ref)])?;
 
             for ident in inherit_entry.entries {
-                instruction_buf.push(VmOp::PushImmediate(
-                    self.compiler
-                        .alloc_string(KnownNixStringContent::Literal(&ident))?,
-                ));
-                instruction_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
-                instruction_buf.push(VmOp::GetAttribute { push_error: false });
-                let code = self.compiler.gc_handle.alloc_vec(&mut instruction_buf)?;
-                slot_id -= 1;
-                target_buffer.push(VmOp::AllocateThunk {
-                    slot: Some(slot_id),
-                    args: self.compiler.gc_handle.alloc(ThunkAllocArgs {
+                let ident = self
+                    .compiler
+                    .alloc_string(KnownNixStringContent::Literal(ident))?;
+                let code = self.compiler.gc_handle.alloc_slice(&[
+                    VmOp::PushImmediate(ident),
+                    VmOp::LoadThunk(ValueSource::ContextReference(0)),
+                    VmOp::GetAttribute { push_error: false },
+                ])?;
+
+                target_buffer.push(VmOp::AllocateThunk(self.compiler.gc_handle.alloc(
+                    ThunkAllocArgs {
                         code,
                         context_id: 0,
                         context_build_instructions: context_build_instructions.clone(),
-                    })?,
+                    },
+                )?));
+                target_buffer.push(VmOp::OverwriteThunk {
+                    stackref: slot_to_overwrite,
                 });
+                slot_to_overwrite += 1;
             }
         }
 
         // inherit keys done. Now the normal bindings
         for (_ident, body) in let_expr.bindings {
-            slot_id -= 1;
-            let overwrite_thunk_op = self.compile_subchunk(
+            let push_thunk_op = self.compile_subchunk(
                 lookup_scope,
                 &mut instruction_buf,
                 &mut cached_context_instructions,
                 body,
-                Some(slot_id),
             )?;
-            target_buffer.push(overwrite_thunk_op);
+            target_buffer.push(push_thunk_op);
+            target_buffer.push(VmOp::OverwriteThunk {
+                stackref: slot_to_overwrite,
+            });
+            slot_to_overwrite += 1;
         }
 
         // finally, all binding thunks are properly set.
@@ -803,14 +801,13 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         opcode_buf: &mut Vec<VmOp>,
         context_cache: &mut BTreeMap<Vec<ValueSource>, (u32, GcPointer<Array<ValueSource>>)>,
         expr: NixExpr<'src>,
-        slot: Option<u16>,
     ) -> Result<VmOp, CompileError> {
         let mut subscope = lookup_scope.subscope();
         ThunkCompiler::new(&mut self.compiler).translate_to_ops(&mut subscope, opcode_buf, expr)?;
         let ctx_ins = subscope.get_inherit_context();
 
-        if let (None, &[VmOp::LoadThunk(ValueSource::ContextReference(0))], &[value_source]) =
-            (slot, opcode_buf.as_slice(), ctx_ins)
+        if let (&[VmOp::LoadThunk(ValueSource::ContextReference(0))], &[value_source]) =
+            (opcode_buf.as_slice(), ctx_ins)
         {
             // the requested instruction should push a value on the local thunk stack.
             // the compiled thunk only loads a single value from its context, which we would select
@@ -834,10 +831,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             context_build_instructions,
         })?;
 
-        Ok(VmOp::AllocateThunk {
-            slot,
-            args: alloc_args,
-        })
+        Ok(VmOp::AllocateThunk(alloc_args))
     }
 }
 

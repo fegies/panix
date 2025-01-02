@@ -244,8 +244,8 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         thunkstack.truncate(new_len);
                     }
 
-                    VmOp::AllocateThunk { slot, args } => {
-                        self.execute_alloc_thunk(args, slot)?;
+                    VmOp::AllocateThunk(args) => {
+                        self.execute_alloc_thunk(args)?;
                     }
 
                     VmOp::DuplicateThunk(source) => {
@@ -461,6 +461,13 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                     VmOp::ConcatStrings(num) => {
                         self.execute_concat_strings(num)?;
                     }
+                    VmOp::OverwriteThunk { stackref } => {
+                        let mut new_thunk =
+                            self.state.thunk_stack.pop().expect("a thunk to be present");
+                        let target_thunk = &mut self.state.thunk_stack[stackref as usize];
+                        new_thunk = self.evaluator.gc_handle.replace(&target_thunk, new_thunk);
+                        *target_thunk = new_thunk;
+                    }
                 }
             }
         }
@@ -479,7 +486,6 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
     fn execute_alloc_thunk(
         &mut self,
         args: GcPointer<crate::vm::opcodes::ThunkAllocArgs>,
-        slot: Option<u16>,
     ) -> Result<(), EvaluateError> {
         let args = self.evaluator.gc_handle.load(&args);
         let code = args.code.clone();
@@ -496,20 +502,13 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             entries: self.evaluator.gc_handle.alloc_vec(thunk_buf)?,
         };
 
-        let mut new_thunk = self
+        let new_thunk = self
             .evaluator
             .gc_handle
             .alloc(Thunk::Deferred { context, code })?;
-        Ok(if let Some(slot) = slot {
-            let dest_idx = self.state.thunk_stack.len() - 1 - slot as usize;
-            let slot = &mut self.state.thunk_stack[dest_idx];
-            // in case the thunk was referenced previously, we need to ensure that
-            // all uses of the old value now point to the newly allocated thunk.
-            new_thunk = self.evaluator.gc_handle.replace(slot, new_thunk);
-            *slot = new_thunk;
-        } else {
-            self.state.thunk_stack.push(new_thunk);
-        })
+
+        self.state.thunk_stack.push(new_thunk);
+        Ok(())
     }
 
     fn pop(&mut self) -> Result<NixValue, EvaluateError> {

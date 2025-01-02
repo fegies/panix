@@ -413,6 +413,6 @@ fn test_remove_attrs() {
 fn test_inherit_rec() {
     eval_expr(
         "let b = {a = 42;}; in rec {inherit (b) a; c = a;}",
-        "{a = 42; b = 42;}",
+        "{a = 42; c = 42;}",
     );
 }
