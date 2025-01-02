@@ -6,5 +6,6 @@ let
   abort = ___builtin_abort;
   builtins = import "<<<___builtins>>>";
   removeAttrs = builtins.removeAttrs;
+  isNull = builtins.isNull;
 in
   __body__

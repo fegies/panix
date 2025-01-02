@@ -25,10 +25,19 @@ impl Pass<'_> for RemoveAttrsetRecPass {
             attrs,
         })) = &mut expr.content
         {
-            let parent_let_inherit_entries = core::mem::take(inherit_keys);
-
             let mut attrset_attrs = Vec::new();
             let mut attrset_inherit_keys = Vec::new();
+
+            let mut parent_let_inherit_entries = Vec::new();
+            for attrset_inherit_entry in core::mem::take(inherit_keys) {
+                // ensure that the attrset retains all inherit entries
+                attrset_inherit_keys.extend(&attrset_inherit_entry.entries);
+
+                // entries with source will need to go to the let too.
+                if attrset_inherit_entry.source.is_some() {
+                    parent_let_inherit_entries.push(attrset_inherit_entry);
+                }
+            }
 
             let mut bindings = BTreeMap::new();
 
