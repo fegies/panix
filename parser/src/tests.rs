@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use lexer::SourcePosition;
 
 use crate::{
@@ -146,7 +144,10 @@ fn test_attrset_lambda_trailing_comma() {
                 },
             },
             body: Box::new(NixExpr {
-                position: SourcePosition { line: 1, column: 20 },
+                position: SourcePosition {
+                    line: 1,
+                    column: 20,
+                },
                 content: crate::ast::NixExprContent::BasicValue(BasicValue::Int(42)),
             }),
         })),

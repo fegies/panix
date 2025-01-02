@@ -273,7 +273,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             return Err(EvaluateError::TypeError);
                         }
                     }
-                    VmOp::ConcatLists(_) => todo!(),
+                    VmOp::ConcatLists(count) => self.execute_concat_lists(count)?,
                     VmOp::Add => {
                         let right = self.pop()?;
                         let left = self.pop()?;
@@ -531,6 +531,22 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
         self.state.local_stack.push(NixValue::String(result));
 
+        Ok(())
+    }
+
+    fn execute_concat_lists(&mut self, count: u32) -> Result<(), EvaluateError> {
+        let result = if count == 2 {
+            let left = self.pop()?.expect_list()?;
+            let right = self.pop()?.expect_list()?;
+            List::concat_lists(&[left, right], &mut self.evaluator.gc_handle)?
+        } else {
+            let lists = core::iter::repeat_with(|| self.pop()?.expect_list())
+                .take(count as usize)
+                .collect::<Result<Vec<_>, _>>()?;
+            List::concat_lists(&lists, &mut self.evaluator.gc_handle)?
+        };
+
+        self.state.local_stack.push(NixValue::List(result));
         Ok(())
     }
 }
