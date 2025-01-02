@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
+
 use lexer::SourcePosition;
 
 use crate::{
     ast::{
-        Attrset, BasicValue, BinopOpcode, Code, CompoundValue, InheritEntry, NixExpr, NixString, Op,
+        Attrset, BasicValue, BinopOpcode, Code, CompoundValue, InheritEntry, Lambda,
+        LambdaAttrsetArgs, NixExpr, NixString, Op,
     },
     parse_nix,
 };
@@ -127,5 +130,27 @@ fn test_search_path() {
         content: crate::ast::NixExprContent::BasicValue(BasicValue::SearchPath("foo/bar.baz")),
     };
     let value = parse_nix("<foo/bar.baz>".as_bytes()).unwrap();
+    assert_eq!(expected, value);
+}
+
+#[test]
+fn test_attrset_lambda_trailing_comma() {
+    let expected = NixExpr {
+        position: SourcePosition { line: 1, column: 1 },
+        content: crate::ast::NixExprContent::Code(Code::Lambda(Lambda {
+            args: crate::ast::LambdaArgs::AttrsetBinding {
+                total_name: Some("args"),
+                args: LambdaAttrsetArgs {
+                    bindings: [("a", None), ("foo", None)].into_iter().collect(),
+                    includes_rest_pattern: false,
+                },
+            },
+            body: Box::new(NixExpr {
+                position: SourcePosition { line: 1, column: 20 },
+                content: crate::ast::NixExprContent::BasicValue(BasicValue::Int(42)),
+            }),
+        })),
+    };
+    let value = parse_nix("{a, foo, }@args: 42".as_bytes()).unwrap();
     assert_eq!(expected, value);
 }

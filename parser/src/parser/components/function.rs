@@ -113,6 +113,11 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 Token::TripleDot if !includes_rest_pattern => {
                     includes_rest_pattern = true;
                 }
+                Token::CurlyClose => {
+                    // it is valid for the attrset args to end with a trailing
+                    // comma before the closing curly.
+                    break;
+                }
                 _ => return unexpected(t),
             }
         }
