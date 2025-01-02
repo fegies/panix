@@ -91,6 +91,7 @@ enum BuiltinType {
     FromJson,
     RemoveAttrs,
     DeepSeq,
+    Seq,
 }
 
 impl Builtins for NixBuiltins {
@@ -114,6 +115,7 @@ impl Builtins for NixBuiltins {
             "___builtin_fromJSON" => BuiltinType::FromJson,
             "___builtin_removeAttrs" => BuiltinType::RemoveAttrs,
             "___builtin_deepSeq" => BuiltinType::DeepSeq,
+            "___builtin_seq" => BuiltinType::Seq,
             _ => return None,
         };
 
@@ -221,6 +223,15 @@ impl Builtins for NixBuiltins {
             BuiltinType::FromJson => execute_fromjson(evaluator, argument),
             BuiltinType::RemoveAttrs => execute_remove_attrs(evaluator, argument),
             BuiltinType::DeepSeq => execute_deepseq(evaluator, argument),
+            BuiltinType::Seq => {
+                let [e1, e2] = evaluator
+                    .force_thunk(argument)?
+                    .expect_list()?
+                    .expect_entries(&evaluator.gc_handle)?;
+
+                evaluator.force_thunk(e1)?;
+                evaluator.force_thunk(e2)
+            }
         }
     }
 }

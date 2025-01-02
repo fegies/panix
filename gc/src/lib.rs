@@ -215,6 +215,9 @@ impl GcHandle {
         }
     }
     fn run_gc(&mut self) {
+        if std::env::var("ALLOW_GC").is_err() {
+            panic!("gc triggered");
+        }
         println!("gc triggered!");
         let target_generation = self.alloc_pages.get_fresh_allocpages();
 

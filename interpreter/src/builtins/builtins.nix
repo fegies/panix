@@ -22,6 +22,7 @@ let
   fromJSON = ___builtin_fromJSON;
   tryEval = ___builtin_tryeval;
   concatMap = f: list: concatLists (map f list);
+  seq = e1: e2: ___builtin_seq [e1 e2];
   deepSeq = e1: e2: ___builtin_deepSeq [e1 e2];
   toString = arg:
     if ___builtin_typeof arg == "set"
@@ -50,6 +51,7 @@ let
       splitVersion
       fromJSON
       concatLists
+      seq
       tryEval
       length
       ;
@@ -185,6 +187,84 @@ let
               else compare_iter (idx + 1);
         in
           compare_iter 0;
+
+    genList = let
+      # we go with radix 8 to improve perf a little and reduce recursion depth.
+      # we could go wider, but the cases would need to be hardcoded, or there would be little benefit over just recursing one level deeper.
+      genListInner = generator: length: let
+        iter = length: offset:
+        # seq the offset to avoid a deep thunk chain being carried onto the generated list
+          seq offset
+          ( # the 0 length case is handled by the outer function already.
+            if length <= 8
+            then
+              ( # base cases.
+                if length <= 4 # it is 1 or 2
+                then
+                  (
+                    if length <= 2
+                    then
+                      (
+                        if length == 1
+                        then [(generator offset)]
+                        else [(generator offset) (generator (offset + 1))] # length 2
+                      )
+                    else # it must be > 2 and <= 4
+                      (
+                        if length == 3
+                        then [(generator offset) (generator (offset + 1)) (generator (offset + 2))]
+                        else #length 4
+                          [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3))]
+                      )
+                  )
+                else
+                  ( # we know it is > 4 and <= 8
+                    if length <= 6
+                    then
+                      (
+                        if length == 5
+                        then [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4))]
+                        else # length 6
+                          [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5))]
+                      )
+                    else # > 6 and <= 8
+                      (
+                        if length == 7
+                        then [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5)) (generator (offset + 6))]
+                        else #length 8
+                          [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5)) (generator (offset + 6)) (generator (offset + 7))]
+                      )
+                  )
+              )
+            else let
+              # recursion....
+              step_size = length / 8;
+              iter_step_size = iter step_size;
+            in
+              concatLists [
+                (iter_step_size offset)
+                (iter_step_size (offset + step_size))
+                (iter_step_size (offset + 2 * step_size))
+                (iter_step_size (offset + 3 * step_size))
+                (iter_step_size (offset + 4 * step_size))
+                (iter_step_size (offset + 5 * step_size))
+                (iter_step_size (offset + 6 * step_size))
+                # the last one may have a slightly smaller step
+                (iter (length - 7 * step_size) (offset + 7 * step_size))
+              ]
+          );
+      in
+        iter length 0;
+    in
+      # force the materialization of the inner
+      seq genListInner (
+        generator: length:
+          if length == 0
+          then []
+          else if typeOf length == "int"
+          then genListInner generator length
+          else throw "genList: length must be an integer"
+      );
   };
 in
   # avoid carrying around the thunks for all of our builtins lambdas.

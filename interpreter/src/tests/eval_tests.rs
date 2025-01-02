@@ -416,3 +416,12 @@ fn test_inherit_rec() {
         "{a = 42; c = 42;}",
     );
 }
+
+#[test]
+fn test_gen_list() {
+    eval_expr("builtins.genList (a: a) 0", "[]");
+    eval_expr(
+        "builtins.genList (x: x * x) 10",
+        "[ 0 1 4 9 16 25 36 49 64 81]",
+    );
+}
