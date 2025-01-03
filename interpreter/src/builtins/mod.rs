@@ -94,6 +94,9 @@ enum BuiltinType {
     Seq,
     Match,
     MapAttrs,
+    ConcatStrings,
+    StringLength,
+    Substring,
 }
 
 impl Builtins for NixBuiltins {
@@ -120,6 +123,9 @@ impl Builtins for NixBuiltins {
             "___builtin_seq" => BuiltinType::Seq,
             "___builtin_match" => BuiltinType::Match,
             "___builtin_mapAttrs" => BuiltinType::MapAttrs,
+            "___builtin_concatStrings" => BuiltinType::ConcatStrings,
+            "___builtin_stringLength" => BuiltinType::StringLength,
+            "___builtin_substring" => BuiltinType::Substring,
             _ => return None,
         };
 
@@ -238,8 +244,59 @@ impl Builtins for NixBuiltins {
             }
             BuiltinType::Match => execute_match(evaluator, argument),
             BuiltinType::MapAttrs => execute_map_attrs(evaluator, argument),
+            BuiltinType::ConcatStrings => execute_concat_strings(evaluator, argument),
+            BuiltinType::StringLength => {
+                let len = evaluator
+                    .force_thunk(argument)?
+                    .expect_string()?
+                    .load(&evaluator.gc_handle)
+                    .len();
+                Ok(NixValue::Int(len as i64))
+            }
+            BuiltinType::Substring => execute_substring(evaluator, argument),
         }
     }
+}
+
+fn execute_substring(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let [start, len, string] = evaluator
+        .force_thunk(argument)?
+        .expect_list()?
+        .expect_entries(&evaluator.gc_handle)?;
+
+    let start = evaluator.force_thunk(start)?.expect_int()? as usize;
+    let len = evaluator.force_thunk(len)?.expect_int()? as usize;
+
+    let range = start..(start + len);
+
+    let result = evaluator
+        .force_thunk(string)?
+        .expect_string()?
+        .get_substring(&mut evaluator.gc_handle, range)?;
+
+    Ok(NixValue::String(result))
+}
+
+fn execute_concat_strings(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let strings = evaluator.force_thunk(argument)?.expect_list()?;
+    let strings = evaluator
+        .gc_handle
+        .load(&strings.entries)
+        .as_ref()
+        .to_owned()
+        .into_iter()
+        .map(|ptr| evaluator.force_thunk(ptr)?.expect_string())
+        .collect::<Vec<_>>();
+
+    let result = NixString::concat_many(strings.into_iter(), &mut evaluator.gc_handle)?;
+
+    Ok(NixValue::String(result))
 }
 
 fn execute_map_attrs(

@@ -25,6 +25,20 @@ let
   concatMap = f: list: concatLists (map f list);
   seq = e1: e2: ___builtin_seq [e1 e2];
   deepSeq = e1: e2: ___builtin_deepSeq [e1 e2];
+
+  foldl' = op: nul: list: let
+    max_len = length list;
+    elem_at_list = elemAt list;
+    iter = acc: idx:
+      if idx == max_len
+      then acc
+      else let
+        new_acc = op acc (elem_at_list idx);
+      in
+        seq new_acc (iter new_acc (idx + 1));
+  in
+    iter nul 0;
+
   toString = arg:
     if ___builtin_typeof arg == "set"
     then
@@ -45,6 +59,7 @@ let
       typeOf
       match
       isInt
+      foldl'
       filter
       split
       isString
@@ -104,6 +119,32 @@ let
 
     mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
 
+    replaceStrings = patterns: replacements: string: let
+      pattern_len = length patterns;
+      replace_step = idx: string: let
+        next_idx = idx + 1;
+        replacement = elemAt replacements idx;
+        map_fn =
+          if next_idx == pattern_len
+          then
+            # terminal case. just replace all occurences of matches with the replacement
+            val:
+              if val == []
+              then replacement
+              else val
+          else
+            # recursive case. replace all matches with the replacement and call replace recursively on strings.
+            val:
+              if val == []
+              then replacement
+              else replace_step next_idx val;
+      in
+        ___builtin_concatStrings (map map_fn (split (elemAt patterns idx) string));
+    in
+      if pattern_len == 0
+      then string
+      else replace_step 0 string;
+
     partition = predicate: list: let
       pickSetRight = map predicate list;
     in {
@@ -129,6 +170,10 @@ let
         else throw "lessThan: e1 must be a number";
 
     removeAttrs = set: list: ___builtin_removeAttrs [set list];
+
+    stringLength = ___builtin_stringLength;
+
+    substring = start: len: string: ___builtin_substring [start len string];
 
     compareVersions = let
       unpackList = v:

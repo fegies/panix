@@ -470,3 +470,26 @@ fn test_dirof() {
         println!("\n\n---\n\n");
     }
 }
+
+#[test]
+fn test_stringlen() {
+    eval_expr("builtins.stringLength \"foo\"", "3");
+}
+
+#[test]
+fn test_substring() {
+    eval_expr(r#"builtins.substring 0 3 "nixos""#, "\"nix\"");
+}
+
+#[test]
+fn test_replace_strings() {
+    eval_expr(
+        r#"builtins.replaceStrings ["oo" "a"] ["a" "i"] "foobar""#,
+        r#""fabir""#,
+    );
+}
+
+#[test]
+fn test_foldl() {
+    eval_expr("builtins.foldl' (x: y: x + y) 0 [1 2 3]", "6");
+}
