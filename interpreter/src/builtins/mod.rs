@@ -93,6 +93,7 @@ enum BuiltinType {
     DeepSeq,
     Seq,
     Match,
+    MapAttrs,
 }
 
 impl Builtins for NixBuiltins {
@@ -118,6 +119,7 @@ impl Builtins for NixBuiltins {
             "___builtin_deepSeq" => BuiltinType::DeepSeq,
             "___builtin_seq" => BuiltinType::Seq,
             "___builtin_match" => BuiltinType::Match,
+            "___builtin_mapAttrs" => BuiltinType::MapAttrs,
             _ => return None,
         };
 
@@ -235,8 +237,58 @@ impl Builtins for NixBuiltins {
                 evaluator.force_thunk(e2)
             }
             BuiltinType::Match => execute_match(evaluator, argument),
+            BuiltinType::MapAttrs => execute_map_attrs(evaluator, argument),
         }
     }
+}
+
+fn execute_map_attrs(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let [func, attrset] = evaluator
+        .force_thunk(argument)?
+        .expect_list()?
+        .expect_entries(&evaluator.gc_handle)?;
+
+    let attrset = evaluator.force_thunk(attrset)?.expect_attrset()?;
+    let mut attrset_entries = evaluator
+        .gc_handle
+        .load(&attrset.entries)
+        .as_ref()
+        .to_owned();
+
+    if attrset_entries.is_empty() {
+        // for an empty attrset we do not need to map anything
+        return Ok(NixValue::Attrset(attrset));
+    }
+
+    let call_code = evaluator.gc_handle.alloc_slice(&[
+        VmOp::LoadThunk(ValueSource::ContextReference(0)), // function to be called
+        VmOp::DuplicateThunk(ValueSource::ContextReference(1)), // entry name
+        VmOp::Call,
+        VmOp::DuplicateThunk(ValueSource::ContextReference(2)), // entry value
+        VmOp::Call,
+    ])?;
+
+    for (attr_name, attr_value) in &mut attrset_entries {
+        let name_thunk = evaluator
+            .gc_handle
+            .alloc(Thunk::Value(NixValue::String(attr_name.clone())))?;
+        let context =
+            evaluator
+                .gc_handle
+                .alloc_slice(&[func.clone(), name_thunk, attr_value.clone()])?;
+        *attr_value = evaluator.gc_handle.alloc(Thunk::Deferred {
+            context: ExecutionContext { entries: context },
+            code: call_code.clone(),
+        })?;
+    }
+
+    let attrset_entries = evaluator.gc_handle.alloc_vec(&mut attrset_entries)?;
+    Ok(NixValue::Attrset(Attrset {
+        entries: attrset_entries,
+    }))
 }
 
 fn execute_match(

@@ -89,6 +89,9 @@ let
           then [set."${attr}"]
           else []
       );
+
+    mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
+
     partition = predicate: list: let
       pickSetRight = map predicate list;
     in {

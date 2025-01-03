@@ -446,3 +446,11 @@ fn test_match() {
         "[\"FOO\"]",
     );
 }
+
+#[test]
+fn test_map_attrs() {
+    eval_expr(
+        "builtins.mapAttrs (name: value: value * 10) { a = 1; b = 2; }",
+        "{ a = 10; b = 20; }",
+    );
+}
