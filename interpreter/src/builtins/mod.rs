@@ -92,6 +92,7 @@ enum BuiltinType {
     RemoveAttrs,
     DeepSeq,
     Seq,
+    Match,
 }
 
 impl Builtins for NixBuiltins {
@@ -116,6 +117,7 @@ impl Builtins for NixBuiltins {
             "___builtin_removeAttrs" => BuiltinType::RemoveAttrs,
             "___builtin_deepSeq" => BuiltinType::DeepSeq,
             "___builtin_seq" => BuiltinType::Seq,
+            "___builtin_match" => BuiltinType::Match,
             _ => return None,
         };
 
@@ -232,6 +234,74 @@ impl Builtins for NixBuiltins {
                 evaluator.force_thunk(e1)?;
                 evaluator.force_thunk(e2)
             }
+            BuiltinType::Match => execute_match(evaluator, argument),
+        }
+    }
+}
+
+fn execute_match(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let [regex, string] = evaluator
+        .force_thunk(argument)?
+        .expect_list()?
+        .expect_entries(&evaluator.gc_handle)?;
+
+    let regex = {
+        let regex = evaluator.force_thunk(regex)?.expect_string()?;
+        let regex = regex.load(&evaluator.gc_handle);
+        if regex.starts_with('^') && regex.ends_with('$') {
+            Regex::new(regex)
+        } else {
+            let mut re_buffer = String::with_capacity(regex.len() + 2);
+            if !regex.starts_with('^') {
+                re_buffer.push('^');
+            }
+            re_buffer.push_str(regex);
+            if !regex.ends_with('$') {
+                re_buffer.push('$');
+            }
+            Regex::new(&re_buffer)
+        }
+        .map_err(|e| EvaluateError::Misc(Box::new(e)))?
+    };
+
+    let string = evaluator.force_thunk(string)?.expect_string()?;
+    if regex.captures_len() == 0 {
+        // no capture groups
+        if regex.is_match(string.load(&evaluator.gc_handle)) {
+            Ok(NixValue::List(List {
+                entries: evaluator.gc_handle.alloc_slice(&[])?,
+            }))
+        } else {
+            Ok(NixValue::Null)
+        }
+    } else {
+        // capture groups present.
+        if let Some(re_match) = regex.captures(string.load(&evaluator.gc_handle)) {
+            let ranges = re_match
+                .iter()
+                .skip(1) // skip the initial full match
+                .map(|capture| capture.map(|m| m.range()))
+                .collect::<Vec<_>>();
+            core::mem::drop(re_match);
+            let mut substrings = ranges
+                .into_iter()
+                .map(|range| {
+                    let value = if let Some(range) = range {
+                        NixValue::String(string.get_substring(&mut evaluator.gc_handle, range)?)
+                    } else {
+                        NixValue::Null
+                    };
+                    evaluator.gc_handle.alloc(Thunk::Value(value))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let entries = evaluator.gc_handle.alloc_vec(&mut substrings)?;
+            Ok(NixValue::List(List { entries }))
+        } else {
+            // not a match
+            Ok(NixValue::Null)
         }
     }
 }

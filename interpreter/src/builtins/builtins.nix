@@ -21,6 +21,7 @@ let
   concatLists = ___builtin_concatLists;
   fromJSON = ___builtin_fromJSON;
   tryEval = ___builtin_tryeval;
+  match = regex: str: ___builtin_match [regex str];
   concatMap = f: list: concatLists (map f list);
   seq = e1: e2: ___builtin_seq [e1 e2];
   deepSeq = e1: e2: ___builtin_deepSeq [e1 e2];
@@ -42,6 +43,7 @@ let
       deepSeq
       abort
       typeOf
+      match
       isInt
       filter
       split
@@ -68,6 +70,14 @@ let
     langVersion = 6;
     hasAttr = s: set: set ? "${s}";
     getAttr = s: set: set."${s}";
+
+    baseNameOf = name: let
+      matchResult = match "^.*?([^/]*)/?$" name;
+    in
+      if matchResult == null
+      then name
+      else elemAt matchResult 0;
+
     catAttrs = attr:
       concatMap (
         set:

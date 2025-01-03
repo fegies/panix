@@ -7,5 +7,6 @@ let
   builtins = import "<<<___builtins>>>";
   removeAttrs = builtins.removeAttrs;
   isNull = builtins.isNull;
+  baseNameOf = builtins.baseNameOf;
 in
   __body__

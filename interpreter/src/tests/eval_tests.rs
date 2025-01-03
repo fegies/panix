@@ -425,3 +425,24 @@ fn test_gen_list() {
         "[ 0 1 4 9 16 25 36 49 64 81]",
     );
 }
+
+#[test]
+fn test_basenameof() {
+    eval_expr("baseNameOf \"abc/def\"", "\"def\"");
+    eval_expr("baseNameOf \"def\"", "\"def\"");
+    eval_expr("baseNameOf \"\"", "\"\"");
+    eval_expr("baseNameOf \"foo/\"", "\"foo\"");
+    eval_expr("baseNameOf \"foo/bar/\"", "\"bar\"");
+    eval_expr("baseNameOf \"/\"", "\"\"");
+}
+
+#[test]
+fn test_match() {
+    eval_expr("builtins.match \"ab\" \"abc\"", "null");
+    eval_expr("builtins.match \"abc\" \"abc\"", "[]");
+    eval_expr("builtins.match \"a(b)(c)\" \"abc\"", "[\"b\" \"c\"]");
+    eval_expr(
+        r#"builtins.match "[[:space:]]+([[:upper:]]+)[[:space:]]+" "  FOO   ""#,
+        "[\"FOO\"]",
+    );
+}
