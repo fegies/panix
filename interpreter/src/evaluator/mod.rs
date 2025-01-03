@@ -79,61 +79,8 @@ impl<'gc> Evaluator<'gc> {
         func: value::Function,
         arg: GcPointer<Thunk>,
     ) -> Result<NixValue, EvaluateError> {
-        // check that all required keys are present if needed
-        match func.call_type {
-            crate::vm::opcodes::LambdaCallType::Simple => {
-                // nothing to validate here.
-            }
-            crate::vm::opcodes::LambdaCallType::Attrset {
-                keys,
-                includes_rest_pattern,
-            } => {
-                let arg = self.force_thunk(arg.clone())?;
-                let arg = arg.as_attrset()?;
-                let keys = self.gc_handle.load(&keys).as_ref();
-
-                // check that no unexpected args were provided
-                if !includes_rest_pattern {
-                    for key in arg.keys(&self.gc_handle) {
-                        if !keys
-                            .iter()
-                            .any(|(nix_str, _)| nix_str.load(&self.gc_handle) == key)
-                        {
-                            return Err(EvaluateError::CallWithUnexpectedArg {
-                                arg_name: key.to_owned(),
-                            });
-                        }
-                    }
-                }
-
-                // and check that all required args are here.
-                for expected_arg in
-                    keys.iter().filter_map(
-                        |(arg_name, is_required)| {
-                            if *is_required {
-                                Some(arg_name)
-                            } else {
-                                None
-                            }
-                        },
-                    )
-                {
-                    if arg.get_entry(&self.gc_handle, expected_arg).is_none() {
-                        let arg_name = expected_arg.load(&self.gc_handle).to_owned();
-                        return Err(EvaluateError::CallWithMissingArg { arg_name });
-                    }
-                }
-            }
-        }
-
         let mut sub_state = self.stack_cache.pop().unwrap_or_default();
-        sub_state.thunk_stack.push(arg);
-        sub_state
-            .code_buf
-            .extend_from_slice(self.gc_handle.load(&func.code).as_ref());
-        sub_state
-            .context
-            .extend_from_slice(self.gc_handle.load(&func.context.entries).as_ref());
+        sub_state.initialize_for_call(func, arg, self)?;
 
         ThunkEvaluator {
             state: sub_state,
@@ -145,342 +92,377 @@ impl<'gc> Evaluator<'gc> {
 
 impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
     fn compute_result(mut self) -> Result<NixValue, EvaluateError> {
-        let mut code_buf = core::mem::take(&mut self.state.code_buf);
+        'outer: loop {
+            println!("forcing thunk...");
+            let mut code_buf = core::mem::take(&mut self.state.code_buf);
+            {
+                let mut code = code_buf.drain(..);
 
-        println!("forcing thunk...");
-        {
-            let mut code = code_buf.drain(..);
-
-            while let Some(opcode) = code.next() {
-                println!("executing: {:?}", opcode.debug(&self.evaluator.gc_handle));
-                match opcode {
-                    VmOp::AllocList(list_len) => {
-                        let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
-                        let end = self.state.thunk_stack.len();
-                        let start = end - list_len as usize;
-                        thunk_buf.extend(self.state.thunk_stack.drain(start..end));
-                        let entries = self.evaluator.gc_handle.alloc_vec(thunk_buf)?;
-                        self.state
-                            .local_stack
-                            .push(NixValue::List(value::List { entries }));
-                    }
-
-                    VmOp::AllocLambda(args) => {
-                        let LambdaAllocArgs {
-                            code,
-                            context_build_instructions,
-                            call_requirements,
-                        } = self.evaluator.gc_handle.load(&args);
-
-                        let code = code.clone();
-                        let call_requirements = call_requirements.clone();
-
-                        let alloc_buf = &mut self.evaluator.thunk_alloc_buffer;
-                        fetch_context_entries(
-                            alloc_buf,
-                            &self.state,
-                            self.evaluator
-                                .gc_handle
-                                .load(context_build_instructions)
-                                .as_ref(),
-                        );
-                        let context = ExecutionContext {
-                            entries: self.evaluator.gc_handle.alloc_vec(alloc_buf)?,
-                        };
-
-                        self.state.local_stack.push(NixValue::Function(Function {
-                            context,
-                            code,
-                            call_type: call_requirements,
-                        }));
-                    }
-
-                    VmOp::BuildAttrset(num_keys) => {
-                        let attrset = if num_keys > 0 {
-                            let mut entries = Vec::new();
-                            for _ in 0..num_keys {
-                                let key = match self.pop()? {
-                                    NixValue::String(key) => key,
-                                    _ => return Err(EvaluateError::TypeError),
-                                };
-                                let value = self
-                                    .state
-                                    .thunk_stack
-                                    .pop()
-                                    .expect("thunk stack exhausted unexpectedly");
-                                entries.push((key, value));
-                            }
-                            Attrset::build_from_entries(
-                                &mut entries,
-                                &mut self.evaluator.gc_handle,
-                            )?
-                        } else {
-                            let entries = self.evaluator.gc_handle.alloc_slice(&[])?;
-                            value::Attrset { entries }
-                        };
-
-                        self.state.local_stack.push(NixValue::Attrset(attrset));
-                    }
-
-                    VmOp::LoadThunk(ValueSource::ContextReference(idx)) => {
-                        let thunk = self.state.context[idx as usize].clone();
-                        let value = self.evaluator.force_thunk(thunk)?;
-                        self.state.local_stack.push(value);
-                    }
-                    VmOp::LoadThunk(ValueSource::ThunkStackRef(idx)) => {
-                        let thunk = self.state.thunk_stack[idx as usize].clone();
-                        let value = self.evaluator.force_thunk(thunk)?;
-                        self.state.local_stack.push(value);
-                    }
-                    VmOp::PushBlackholes(count) => {
-                        for _ in 0..count {
-                            let blackhole = self.evaluator.gc_handle.alloc(Thunk::Blackhole)?;
-                            self.state.thunk_stack.push(blackhole);
+                while let Some(opcode) = code.next() {
+                    println!("executing: {:?}", opcode.debug(&self.evaluator.gc_handle));
+                    match opcode {
+                        VmOp::AllocList(list_len) => {
+                            let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
+                            let end = self.state.thunk_stack.len();
+                            let start = end - list_len as usize;
+                            thunk_buf.extend(self.state.thunk_stack.drain(start..end));
+                            let entries = self.evaluator.gc_handle.alloc_vec(thunk_buf)?;
+                            self.state
+                                .local_stack
+                                .push(NixValue::List(value::List { entries }));
                         }
-                    }
-                    VmOp::DropThunks(count) => {
-                        let thunkstack = &mut self.state.thunk_stack;
-                        let new_len = thunkstack.len() - count as usize;
-                        thunkstack.truncate(new_len);
-                    }
 
-                    VmOp::AllocateThunk(args) => {
-                        self.execute_alloc_thunk(args)?;
-                    }
+                        VmOp::AllocLambda(args) => {
+                            let LambdaAllocArgs {
+                                code,
+                                context_build_instructions,
+                                call_requirements,
+                            } = self.evaluator.gc_handle.load(&args);
 
-                    VmOp::DuplicateThunk(source) => {
-                        let thunk = match source {
-                            crate::vm::opcodes::ValueSource::ContextReference(idx) => {
-                                self.state.context[idx as usize].clone()
-                            }
-                            crate::vm::opcodes::ValueSource::ThunkStackRef(idx) => {
-                                self.state.thunk_stack[idx as usize].clone()
-                            }
-                        };
+                            let code = code.clone();
+                            let call_requirements = call_requirements.clone();
 
-                        self.state.thunk_stack.push(thunk);
-                    }
+                            let alloc_buf = &mut self.evaluator.thunk_alloc_buffer;
+                            fetch_context_entries(
+                                alloc_buf,
+                                &self.state,
+                                self.evaluator
+                                    .gc_handle
+                                    .load(context_build_instructions)
+                                    .as_ref(),
+                            );
+                            let context = ExecutionContext {
+                                entries: self.evaluator.gc_handle.alloc_vec(alloc_buf)?,
+                            };
 
-                    VmOp::Skip(to_skip) => {
-                        (&mut code).take(to_skip as usize).for_each(|_| {});
-                    }
-                    VmOp::SkipUnless(to_skip) => {
-                        if let NixValue::Bool(execute_next_insn) = self.pop()? {
-                            if !execute_next_insn {
-                                (&mut code).take(to_skip as usize).for_each(|_| {});
-                            }
-                        } else {
-                            return Err(EvaluateError::TypeError);
+                            self.state.local_stack.push(NixValue::Function(Function {
+                                context,
+                                code,
+                                call_type: call_requirements,
+                            }));
                         }
-                    }
-                    VmOp::ConcatLists(count) => self.execute_concat_lists(count)?,
-                    VmOp::Add => {
-                        let right = self.pop()?;
-                        let left = self.pop()?;
 
-                        if let NixValue::String(left) = left {
-                            let right = right.expect_string()?;
-                            let result = left.concat(right, self.evaluator.gc_handle)?;
-                            self.state.local_stack.push(NixValue::String(result));
-                        } else {
+                        VmOp::BuildAttrset(num_keys) => {
+                            let attrset = if num_keys > 0 {
+                                let mut entries = Vec::new();
+                                for _ in 0..num_keys {
+                                    let key = match self.pop()? {
+                                        NixValue::String(key) => key,
+                                        _ => return Err(EvaluateError::TypeError),
+                                    };
+                                    let value = self
+                                        .state
+                                        .thunk_stack
+                                        .pop()
+                                        .expect("thunk stack exhausted unexpectedly");
+                                    entries.push((key, value));
+                                }
+                                Attrset::build_from_entries(
+                                    &mut entries,
+                                    &mut self.evaluator.gc_handle,
+                                )?
+                            } else {
+                                let entries = self.evaluator.gc_handle.alloc_slice(&[])?;
+                                value::Attrset { entries }
+                            };
+
+                            self.state.local_stack.push(NixValue::Attrset(attrset));
+                        }
+
+                        VmOp::LoadThunk(ValueSource::ContextReference(idx)) => {
+                            let thunk = self.state.context[idx as usize].clone();
+                            let value = self.evaluator.force_thunk(thunk)?;
+                            self.state.local_stack.push(value);
+                        }
+                        VmOp::LoadThunk(ValueSource::ThunkStackRef(idx)) => {
+                            let thunk = self.state.thunk_stack[idx as usize].clone();
+                            let value = self.evaluator.force_thunk(thunk)?;
+                            self.state.local_stack.push(value);
+                        }
+                        VmOp::PushBlackholes(count) => {
+                            for _ in 0..count {
+                                let blackhole = self.evaluator.gc_handle.alloc(Thunk::Blackhole)?;
+                                self.state.thunk_stack.push(blackhole);
+                            }
+                        }
+                        VmOp::DropThunks(count) => {
+                            let thunkstack = &mut self.state.thunk_stack;
+                            let new_len = thunkstack.len() - count as usize;
+                            thunkstack.truncate(new_len);
+                        }
+
+                        VmOp::AllocateThunk(args) => {
+                            self.execute_alloc_thunk(args)?;
+                        }
+
+                        VmOp::DuplicateThunk(source) => {
+                            let thunk = match source {
+                                crate::vm::opcodes::ValueSource::ContextReference(idx) => {
+                                    self.state.context[idx as usize].clone()
+                                }
+                                crate::vm::opcodes::ValueSource::ThunkStackRef(idx) => {
+                                    self.state.thunk_stack[idx as usize].clone()
+                                }
+                            };
+
+                            self.state.thunk_stack.push(thunk);
+                        }
+
+                        VmOp::Skip(to_skip) => {
+                            (&mut code).take(to_skip as usize).for_each(|_| {});
+                        }
+                        VmOp::SkipUnless(to_skip) => {
+                            if let NixValue::Bool(execute_next_insn) = self.pop()? {
+                                if !execute_next_insn {
+                                    (&mut code).take(to_skip as usize).for_each(|_| {});
+                                }
+                            } else {
+                                return Err(EvaluateError::TypeError);
+                            }
+                        }
+                        VmOp::ConcatLists(count) => self.execute_concat_lists(count)?,
+                        VmOp::Add => {
+                            let right = self.pop()?;
+                            let left = self.pop()?;
+
+                            if let NixValue::String(left) = left {
+                                let right = right.expect_string()?;
+                                let result = left.concat(right, self.evaluator.gc_handle)?;
+                                self.state.local_stack.push(NixValue::String(result));
+                            } else {
+                                self.state.local_stack.push(execute_arithmetic_op(
+                                    left,
+                                    right,
+                                    |l, r| l + r,
+                                    |l, r| l + r,
+                                )?);
+                            }
+                        }
+                        VmOp::Mul => {
+                            let right = self.pop()?;
+                            let left = self.pop()?;
                             self.state.local_stack.push(execute_arithmetic_op(
                                 left,
                                 right,
-                                |l, r| l + r,
-                                |l, r| l + r,
+                                |l, r| l * r,
+                                |l, r| l * r,
                             )?);
                         }
-                    }
-                    VmOp::Mul => {
-                        let right = self.pop()?;
-                        let left = self.pop()?;
-                        self.state.local_stack.push(execute_arithmetic_op(
-                            left,
-                            right,
-                            |l, r| l * r,
-                            |l, r| l * r,
-                        )?);
-                    }
-                    VmOp::Div => {
-                        let right = self.pop()?;
-                        let left = self.pop()?;
-                        self.state.local_stack.push(execute_arithmetic_op(
-                            left,
-                            right,
-                            |l, r| l / r,
-                            |l, r| l / r,
-                        )?);
-                    }
-                    VmOp::NumericNegate => {
-                        let result = match self.pop()? {
-                            NixValue::Int(i) => NixValue::Int(-i),
-                            NixValue::Float(f) => NixValue::Float(-f),
-                            _ => return Err(EvaluateError::TypeError),
-                        };
-                        self.state.local_stack.push(result);
-                    }
-                    VmOp::BinaryNot => {
-                        let result = match self.pop()? {
-                            NixValue::Bool(b) => NixValue::Bool(!b),
-                            _ => return Err(EvaluateError::TypeError),
-                        };
-                        self.state.local_stack.push(result);
-                    }
-                    VmOp::Call => {
-                        let arg = self
-                            .state
-                            .thunk_stack
-                            .pop()
-                            .expect("thunk stack exhausted unexpectedly");
-                        let result = match self.pop()? {
-                            NixValue::Function(function) => {
-                                self.evaluator.evaluate_call(function, arg)
+                        VmOp::Div => {
+                            let right = self.pop()?;
+                            let left = self.pop()?;
+                            self.state.local_stack.push(execute_arithmetic_op(
+                                left,
+                                right,
+                                |l, r| l / r,
+                                |l, r| l / r,
+                            )?);
+                        }
+                        VmOp::NumericNegate => {
+                            let result = match self.pop()? {
+                                NixValue::Int(i) => NixValue::Int(-i),
+                                NixValue::Float(f) => NixValue::Float(-f),
+                                _ => return Err(EvaluateError::TypeError),
+                            };
+                            self.state.local_stack.push(result);
+                        }
+                        VmOp::BinaryNot => {
+                            let result = match self.pop()? {
+                                NixValue::Bool(b) => NixValue::Bool(!b),
+                                _ => return Err(EvaluateError::TypeError),
+                            };
+                            self.state.local_stack.push(result);
+                        }
+
+                        VmOp::Call => {
+                            let arg = self
+                                .state
+                                .thunk_stack
+                                .pop()
+                                .expect("thunk stack exhausted unexpectedly");
+                            let result = match self.pop()? {
+                                NixValue::Function(function) => {
+                                    self.evaluator.evaluate_call(function, arg)
+                                }
+                                NixValue::Builtin(builtin) => self
+                                    .evaluator
+                                    .builtins
+                                    .clone()
+                                    .execute_builtin(builtin, arg, &mut self.evaluator),
+                                _ => Err(EvaluateError::TypeError),
+                            }?;
+
+                            self.state.local_stack.push(result);
+                        }
+                        VmOp::TailCall => {
+                            // Tail call! first save the argument, then clear all state
+                            let arg = self
+                                .state
+                                .thunk_stack
+                                .pop()
+                                .expect("thunk stack exhausted unexpectedly");
+                            let func = self.pop()?;
+                            // clear all our state.
+                            core::mem::drop(code);
+                            self.state.code_buf = code_buf;
+                            self.state.clear();
+                            match func {
+                                NixValue::Builtin(builtin) => {
+                                    // a builtin does not really need to use our stack frame.
+                                    // Instead just return straight from here.
+                                    return self.evaluator.builtins.clone().execute_builtin(
+                                        builtin,
+                                        arg,
+                                        &mut self.evaluator,
+                                    );
+                                }
+                                NixValue::Function(func) => {
+                                    // reinitialize our context and continue from the top.
+                                    self.state.initialize_for_call(func, arg, self.evaluator)?;
+                                    continue 'outer;
+                                }
+                                _ => return Err(EvaluateError::TypeError),
                             }
-                            NixValue::Builtin(builtin) => self
-                                .evaluator
-                                .builtins
-                                .clone()
-                                .execute_builtin(builtin, arg, &mut self.evaluator),
-                            _ => Err(EvaluateError::TypeError),
-                        }?;
+                        }
 
-                        self.state.local_stack.push(result);
-                    }
-                    VmOp::CastToPath { source_location } => {
-                        let path_value = self.pop()?.expect_string()?;
-                        let path = PathValue::new(
-                            source_location,
-                            path_value,
-                            &mut self.evaluator.gc_handle,
-                        )?;
+                        VmOp::CastToPath { source_location } => {
+                            let path_value = self.pop()?.expect_string()?;
+                            let path = PathValue::new(
+                                source_location,
+                                path_value,
+                                &mut self.evaluator.gc_handle,
+                            )?;
 
-                        self.state.local_stack.push(NixValue::Path(path));
-                    }
-                    VmOp::PushImmediate(imm) => {
-                        let imm = self.evaluator.gc_handle.load(&imm);
-                        self.state.local_stack.push(imm.clone());
-                    }
-                    VmOp::Compare(compare_mode) => {
-                        let right = self.pop()?;
-                        let left = self.pop()?;
+                            self.state.local_stack.push(NixValue::Path(path));
+                        }
+                        VmOp::PushImmediate(imm) => {
+                            let imm = self.evaluator.gc_handle.load(&imm);
+                            self.state.local_stack.push(imm.clone());
+                        }
+                        VmOp::Compare(compare_mode) => {
+                            let right = self.pop()?;
+                            let left = self.pop()?;
 
-                        let result = match (
-                            compare_mode,
-                            compare_values(&mut self.evaluator, &left, &right)?,
-                        ) {
-                            (crate::vm::opcodes::CompareMode::Equal, Some(Ordering::Equal)) => true,
-                            (crate::vm::opcodes::CompareMode::Equal, _) => false,
-                            (crate::vm::opcodes::CompareMode::NotEqual, Some(Ordering::Equal)) => {
-                                false
-                            }
-                            (crate::vm::opcodes::CompareMode::NotEqual, _) => true,
-                            (
-                                crate::vm::opcodes::CompareMode::LessThanStrict,
-                                Some(Ordering::Less),
-                            ) => true,
-                            (crate::vm::opcodes::CompareMode::LessThanStrict, _) => false,
-                            (
-                                crate::vm::opcodes::CompareMode::LessThanOrEqual,
-                                Some(Ordering::Less | Ordering::Equal),
-                            ) => true,
-                            (crate::vm::opcodes::CompareMode::LessThanOrEqual, _) => false,
-                            (
-                                crate::vm::opcodes::CompareMode::GreaterThanStrict,
-                                Some(Ordering::Greater),
-                            ) => true,
-                            (crate::vm::opcodes::CompareMode::GreaterThanStrict, _) => false,
-                            (
-                                crate::vm::opcodes::CompareMode::GreaterOrEqual,
-                                Some(Ordering::Greater | Ordering::Equal),
-                            ) => true,
-                            (crate::vm::opcodes::CompareMode::GreaterOrEqual, _) => false,
-                        };
+                            let result = match (
+                                compare_mode,
+                                compare_values(&mut self.evaluator, &left, &right)?,
+                            ) {
+                                (crate::vm::opcodes::CompareMode::Equal, Some(Ordering::Equal)) => {
+                                    true
+                                }
+                                (crate::vm::opcodes::CompareMode::Equal, _) => false,
+                                (
+                                    crate::vm::opcodes::CompareMode::NotEqual,
+                                    Some(Ordering::Equal),
+                                ) => false,
+                                (crate::vm::opcodes::CompareMode::NotEqual, _) => true,
+                                (
+                                    crate::vm::opcodes::CompareMode::LessThanStrict,
+                                    Some(Ordering::Less),
+                                ) => true,
+                                (crate::vm::opcodes::CompareMode::LessThanStrict, _) => false,
+                                (
+                                    crate::vm::opcodes::CompareMode::LessThanOrEqual,
+                                    Some(Ordering::Less | Ordering::Equal),
+                                ) => true,
+                                (crate::vm::opcodes::CompareMode::LessThanOrEqual, _) => false,
+                                (
+                                    crate::vm::opcodes::CompareMode::GreaterThanStrict,
+                                    Some(Ordering::Greater),
+                                ) => true,
+                                (crate::vm::opcodes::CompareMode::GreaterThanStrict, _) => false,
+                                (
+                                    crate::vm::opcodes::CompareMode::GreaterOrEqual,
+                                    Some(Ordering::Greater | Ordering::Equal),
+                                ) => true,
+                                (crate::vm::opcodes::CompareMode::GreaterOrEqual, _) => false,
+                            };
 
-                        self.state.local_stack.push(NixValue::Bool(result));
-                    }
-                    VmOp::Sub => {
-                        let right = self.pop()?;
-                        let left = self.pop()?;
-                        self.state.local_stack.push(execute_arithmetic_op(
-                            left,
-                            right,
-                            |l, r| l - r,
-                            |l, r| l - r,
-                        )?);
-                    }
-                    VmOp::MergeAttrsets => {
-                        let added_set = self.pop()?.expect_attrset()?;
-                        let base_set = self.pop()?.expect_attrset()?;
+                            self.state.local_stack.push(NixValue::Bool(result));
+                        }
+                        VmOp::Sub => {
+                            let right = self.pop()?;
+                            let left = self.pop()?;
+                            self.state.local_stack.push(execute_arithmetic_op(
+                                left,
+                                right,
+                                |l, r| l - r,
+                                |l, r| l - r,
+                            )?);
+                        }
+                        VmOp::MergeAttrsets => {
+                            let added_set = self.pop()?.expect_attrset()?;
+                            let base_set = self.pop()?.expect_attrset()?;
 
-                        self.state.local_stack.push(NixValue::Attrset(
-                            base_set.merge(added_set, self.evaluator.gc_handle)?,
-                        ));
-                    }
-                    VmOp::GetAttribute { push_error } => {
-                        let attrset = self.pop()?.expect_attrset()?;
-                        let key = self.pop()?.expect_string()?;
+                            self.state.local_stack.push(NixValue::Attrset(
+                                base_set.merge(added_set, self.evaluator.gc_handle)?,
+                            ));
+                        }
+                        VmOp::GetAttribute { push_error } => {
+                            let attrset = self.pop()?.expect_attrset()?;
+                            let key = self.pop()?.expect_string()?;
 
-                        let value = attrset.get_entry(&self.evaluator.gc_handle, &key);
+                            let value = attrset.get_entry(&self.evaluator.gc_handle, &key);
 
-                        if push_error {
-                            if let Some(val) = value {
+                            if push_error {
+                                if let Some(val) = value {
+                                    self.state
+                                        .local_stack
+                                        .push(self.evaluator.force_thunk(val)?);
+                                    self.state.local_stack.push(NixValue::Bool(false));
+                                } else {
+                                    self.state.local_stack.push(NixValue::Bool(true));
+                                }
+                            } else {
+                                let val =
+                                    value.ok_or_else(|| EvaluateError::AttrsetKeyNotFound {
+                                        attr_name: key.load(&self.evaluator.gc_handle).to_owned(),
+                                    })?;
                                 self.state
                                     .local_stack
                                     .push(self.evaluator.force_thunk(val)?);
-                                self.state.local_stack.push(NixValue::Bool(false));
-                            } else {
-                                self.state.local_stack.push(NixValue::Bool(true));
                             }
-                        } else {
-                            let val = value.ok_or_else(|| EvaluateError::AttrsetKeyNotFound {
-                                attr_name: key.load(&self.evaluator.gc_handle).to_owned(),
-                            })?;
-                            self.state
-                                .local_stack
-                                .push(self.evaluator.force_thunk(val)?);
                         }
-                    }
-                    VmOp::HasAttribute => {
-                        let result = match (self.pop()?, self.pop()?) {
-                            (NixValue::Attrset(attrset), NixValue::String(key)) => {
-                                let attrset_slice =
-                                    self.evaluator.gc_handle.load(&attrset.entries).as_ref();
-                                let key_str = key.load(&self.evaluator.gc_handle);
+                        VmOp::HasAttribute => {
+                            let result = match (self.pop()?, self.pop()?) {
+                                (NixValue::Attrset(attrset), NixValue::String(key)) => {
+                                    let attrset_slice =
+                                        self.evaluator.gc_handle.load(&attrset.entries).as_ref();
+                                    let key_str = key.load(&self.evaluator.gc_handle);
 
-                                attrset_slice
-                                    .binary_search_by_key(&key_str, |(k, _)| {
-                                        k.load(&self.evaluator.gc_handle)
-                                    })
-                                    .is_ok()
-                            }
-                            _ => false,
-                        };
+                                    attrset_slice
+                                        .binary_search_by_key(&key_str, |(k, _)| {
+                                            k.load(&self.evaluator.gc_handle)
+                                        })
+                                        .is_ok()
+                                }
+                                _ => false,
+                            };
 
-                        self.state.local_stack.push(NixValue::Bool(result));
-                    }
-                    VmOp::ConcatStrings(num) => {
-                        self.execute_concat_strings(num)?;
-                    }
-                    VmOp::OverwriteThunk { stackref } => {
-                        let mut new_thunk =
-                            self.state.thunk_stack.pop().expect("a thunk to be present");
-                        let target_thunk = &mut self.state.thunk_stack[stackref as usize];
-                        new_thunk = self.evaluator.gc_handle.replace(&target_thunk, new_thunk);
-                        *target_thunk = new_thunk;
+                            self.state.local_stack.push(NixValue::Bool(result));
+                        }
+                        VmOp::ConcatStrings(num) => {
+                            self.execute_concat_strings(num)?;
+                        }
+                        VmOp::OverwriteThunk { stackref } => {
+                            let mut new_thunk =
+                                self.state.thunk_stack.pop().expect("a thunk to be present");
+                            let target_thunk = &mut self.state.thunk_stack[stackref as usize];
+                            new_thunk = self.evaluator.gc_handle.replace(&target_thunk, new_thunk);
+                            *target_thunk = new_thunk;
+                        }
                     }
                 }
             }
+
+            self.state.code_buf = code_buf;
+            let result_value = self.pop()?;
+            println!(
+                "thunk evaluated to {:?}",
+                result_value.debug(&self.evaluator.gc_handle)
+            );
+            return Ok(result_value);
         }
-
-        self.state.code_buf = code_buf;
-        let result_value = self.pop()?;
-
-        println!(
-            "thunk evaluated to {:?}",
-            result_value.debug(&self.evaluator.gc_handle)
-        );
-
-        Ok(result_value)
     }
 
     fn execute_alloc_thunk(
@@ -553,9 +535,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
 impl Drop for ThunkEvaluator<'_, '_> {
     fn drop(&mut self) {
-        self.state.context.clear();
-        self.state.local_stack.clear();
-        self.state.thunk_stack.clear();
+        self.state.clear();
         self.evaluator
             .stack_cache
             .push(core::mem::take(&mut self.state));
@@ -742,5 +722,76 @@ impl NixValue {
             NixValue::Int(i) => Ok(i),
             _ => Err(EvaluateError::TypeError),
         }
+    }
+}
+
+impl ThunkEvalState {
+    pub fn clear(&mut self) {
+        self.context.clear();
+        self.local_stack.clear();
+        self.thunk_stack.clear();
+        self.code_buf.clear();
+    }
+
+    pub fn initialize_for_call(
+        &mut self,
+        func: value::Function,
+        arg: GcPointer<Thunk>,
+        evaluator: &mut Evaluator,
+    ) -> Result<(), EvaluateError> {
+        // check that all required keys are present if needed
+        match func.call_type {
+            crate::vm::opcodes::LambdaCallType::Simple => {
+                // nothing to validate here.
+            }
+            crate::vm::opcodes::LambdaCallType::Attrset {
+                keys,
+                includes_rest_pattern,
+            } => {
+                let arg = evaluator.force_thunk(arg.clone())?;
+                let arg = arg.as_attrset()?;
+                let keys = evaluator.gc_handle.load(&keys).as_ref();
+
+                // check that no unexpected args were provided
+                if !includes_rest_pattern {
+                    for key in arg.keys(&evaluator.gc_handle) {
+                        if !keys
+                            .iter()
+                            .any(|(nix_str, _)| nix_str.load(&evaluator.gc_handle) == key)
+                        {
+                            return Err(EvaluateError::CallWithUnexpectedArg {
+                                arg_name: key.to_owned(),
+                            });
+                        }
+                    }
+                }
+
+                // and check that all required args are here.
+                for expected_arg in
+                    keys.iter().filter_map(
+                        |(arg_name, is_required)| {
+                            if *is_required {
+                                Some(arg_name)
+                            } else {
+                                None
+                            }
+                        },
+                    )
+                {
+                    if arg.get_entry(&evaluator.gc_handle, expected_arg).is_none() {
+                        let arg_name = expected_arg.load(&evaluator.gc_handle).to_owned();
+                        return Err(EvaluateError::CallWithMissingArg { arg_name });
+                    }
+                }
+            }
+        }
+
+        self.thunk_stack.push(arg);
+        self.code_buf
+            .extend_from_slice(evaluator.gc_handle.load(&func.code).as_ref());
+        self.context
+            .extend_from_slice(evaluator.gc_handle.load(&func.context.entries).as_ref());
+
+        Ok(())
     }
 }

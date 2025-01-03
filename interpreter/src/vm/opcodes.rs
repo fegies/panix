@@ -115,6 +115,13 @@ pub enum VmOp {
     /// the function is evaluated with the thunk as argument and the result pushed to the stack
     Call,
 
+    /// pops a value from the stack. this is the function to be called.
+    /// then pops a thunk from the stack and uses it as the argument.
+    ///
+    /// then the current stack frame and context are cleared, all remaining instructions ignored
+    /// and reinitialized as if the current function was the function to be tail called.
+    TailCall,
+
     /// pops a string from the stack, converts it to a apth and pushes the result
     CastToPath { source_location: value::NixString },
 

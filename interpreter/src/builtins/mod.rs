@@ -268,7 +268,7 @@ fn execute_map_attrs(
         VmOp::DuplicateThunk(ValueSource::ContextReference(1)), // entry name
         VmOp::Call,
         VmOp::DuplicateThunk(ValueSource::ContextReference(2)), // entry value
-        VmOp::Call,
+        VmOp::TailCall,
     ])?;
 
     for (attr_name, attr_value) in &mut attrset_entries {
@@ -743,7 +743,7 @@ fn execute_map(
     let call_code = evaluator.gc_handle.alloc_slice(&[
         VmOp::LoadThunk(ValueSource::ContextReference(0)),
         VmOp::DuplicateThunk(ValueSource::ContextReference(1)),
-        VmOp::Call,
+        VmOp::TailCall,
     ])?;
 
     // we implement the map by replacing each source thunk pointer by
