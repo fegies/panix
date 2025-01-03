@@ -82,6 +82,18 @@ let
     in
       seq matcher result;
 
+    dirOf = name: let
+      matchResult = match "^(.*)/[^/]*$" name;
+    in
+      if matchResult == null
+      then "." # it did not contain a slash
+      else let
+        unpacked = elemAt matchResult 0;
+      in
+        if unpacked == ""
+        then "/" # it was just a single slash
+        else unpacked;
+
     catAttrs = attr:
       concatMap (
         set:

@@ -8,5 +8,6 @@ let
   removeAttrs = builtins.removeAttrs;
   isNull = builtins.isNull;
   baseNameOf = builtins.baseNameOf;
+  dirOf = builtins.dirOf;
 in
   __body__

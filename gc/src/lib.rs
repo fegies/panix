@@ -215,11 +215,9 @@ impl GcHandle {
         }
     }
     fn run_gc(&mut self) {
-        if std::env::var("ALLOW_GC").is_err() {
-            panic!("gc triggered");
-        }
         println!("gc triggered!");
         let target_generation = self.alloc_pages.get_fresh_allocpages();
+        println!("collecting gen {}", target_generation.0);
 
         let mut handle = CollectionHandle {
             pages: &mut self.alloc_pages,
@@ -231,9 +229,13 @@ impl GcHandle {
             handle.scavenge_pending_set.entries[gen].push_back(handle.pages.pages[gen].clone());
         }
 
+        let mut num_roots = 0;
         inspect_roots(|root| {
+            num_roots += 1;
             scavenge_heap_pointer(&mut handle, root, target_generation);
         });
+
+        println!("traced {num_roots} roots");
 
         for gen in 1..=target_generation.next_higher().0 {
             while let Some(next_page) =
@@ -250,6 +252,7 @@ impl GcHandle {
             .lock()
             .unwrap()
             .rotate_used_pages_to_generation(target_generation);
+        println!("gc done.");
     }
 
     pub fn force_collect(&mut self) {

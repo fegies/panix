@@ -454,3 +454,19 @@ fn test_map_attrs() {
         "{ a = 10; b = 20; }",
     );
 }
+
+#[test]
+fn test_dirof() {
+    let pairs = &[
+        ("", "."),
+        ("foo", "."),
+        ("/", "/"),
+        ("abc/def", "abc"),
+        ("/foo", "/"),
+        ("abc/", "abc"),
+    ];
+    for (input, expected) in pairs {
+        eval_expr(&format!("dirOf \"{input}\""), &format!("\"{expected}\""));
+        println!("\n\n---\n\n");
+    }
+}
