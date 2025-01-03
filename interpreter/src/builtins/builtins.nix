@@ -71,12 +71,16 @@ let
     hasAttr = s: set: set ? "${s}";
     getAttr = s: set: set."${s}";
 
-    baseNameOf = name: let
-      matchResult = match "^.*?([^/]*)/?$" name;
+    baseNameOf = let
+      matcher = match "^.*?([^/]*)/?$";
+      result = name: let
+        matchResult = matcher name;
+      in
+        if matchResult == null
+        then name
+        else elemAt matchResult 0;
     in
-      if matchResult == null
-      then name
-      else elemAt matchResult 0;
+      seq matcher result;
 
     catAttrs = attr:
       concatMap (
