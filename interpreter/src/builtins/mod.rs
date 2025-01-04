@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     io::{self, Read},
+    ops::Range,
     path::{Path, PathBuf},
     sync::LazyLock,
 };
@@ -97,6 +98,7 @@ enum BuiltinType {
     ConcatStrings,
     StringLength,
     Substring,
+    ReplaceStrings,
 }
 
 impl Builtins for NixBuiltins {
@@ -126,6 +128,7 @@ impl Builtins for NixBuiltins {
             "___builtin_concatStrings" => BuiltinType::ConcatStrings,
             "___builtin_stringLength" => BuiltinType::StringLength,
             "___builtin_substring" => BuiltinType::Substring,
+            "___builtin_replaceStrings" => BuiltinType::ReplaceStrings,
             _ => return None,
         };
 
@@ -254,8 +257,86 @@ impl Builtins for NixBuiltins {
                 Ok(NixValue::Int(len as i64))
             }
             BuiltinType::Substring => execute_substring(evaluator, argument),
+            BuiltinType::ReplaceStrings => execute_replace_strings(evaluator, argument),
         }
     }
+}
+
+fn execute_replace_strings(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let [patterns, replacements, string] = evaluator
+        .force_thunk(argument)?
+        .expect_list()?
+        .expect_entries(&evaluator.gc_handle)?;
+
+    let patterns = {
+        let p = evaluator.force_thunk(patterns)?.expect_list()?.entries;
+        let thunks = evaluator.gc_handle.load(&p).as_ref();
+        if thunks.is_empty() {
+            // an empty patterns list means that we can just return the input unchanged.
+            return evaluator.force_thunk(string);
+        }
+        thunks
+            .to_owned()
+            .into_iter()
+            .map(|thunk| evaluator.force_thunk(thunk)?.expect_string())
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    let string = evaluator.force_thunk(string)?.expect_string()?;
+    let loaded_string = string.load(&evaluator.gc_handle);
+    let mut piece_source_buffer = Vec::new();
+    let mut piece_target_buffer = Vec::new();
+    enum BufferEntry {
+        StringPiece(Range<usize>),
+        Replacement(usize),
+    }
+    piece_source_buffer.push(BufferEntry::StringPiece(0..loaded_string.len()));
+    for (pattern_idx, pattern) in patterns.into_iter().enumerate() {
+        let pattern = pattern.load(&evaluator.gc_handle);
+        let finder = memchr::memmem::Finder::new(pattern);
+        for previous_entry in piece_source_buffer.drain(..) {
+            match previous_entry {
+                BufferEntry::StringPiece(mut range) => {
+                    while let Some(match_idx) =
+                        finder.find(&loaded_string[range.clone()].as_bytes())
+                    {
+                        piece_target_buffer.push(BufferEntry::StringPiece(
+                            range.start..(range.start + match_idx),
+                        ));
+                        range = (range.start + match_idx + pattern.len())..range.end;
+                        piece_target_buffer.push(BufferEntry::Replacement(pattern_idx));
+                    }
+                    piece_target_buffer.push(BufferEntry::StringPiece(range));
+                }
+                r @ BufferEntry::Replacement(_) => piece_target_buffer.push(r),
+            }
+        }
+        core::mem::swap(&mut piece_source_buffer, &mut piece_target_buffer);
+    }
+
+    let replacements = evaluator.force_thunk(replacements)?.expect_list()?.entries;
+
+    // now the source buffer contains the computed result pieces and replacements.
+    // we need to transform this into a buffer of strings that can be concatted.
+    let resolved_pieces = piece_source_buffer
+        .into_iter()
+        .map(|entry| match entry {
+            BufferEntry::StringPiece(range) => {
+                Ok(string.get_substring(&mut evaluator.gc_handle, range)?)
+            }
+            BufferEntry::Replacement(idx) => {
+                let ptr = evaluator.gc_handle.load(&replacements).as_ref()[idx].clone();
+                evaluator.force_thunk(ptr)?.expect_string()
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let result = NixString::concat_many(resolved_pieces.into_iter(), &mut evaluator.gc_handle)?;
+
+    Ok(NixValue::String(result))
 }
 
 fn execute_substring(

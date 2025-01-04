@@ -119,31 +119,12 @@ let
 
     mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
 
-    replaceStrings = patterns: replacements: string: let
-      pattern_len = length patterns;
-      replace_step = idx: string: let
-        next_idx = idx + 1;
-        replacement = elemAt replacements idx;
-        map_fn =
-          if next_idx == pattern_len
-          then
-            # terminal case. just replace all occurences of matches with the replacement
-            val:
-              if val == []
-              then replacement
-              else val
-          else
-            # recursive case. replace all matches with the replacement and call replace recursively on strings.
-            val:
-              if val == []
-              then replacement
-              else replace_step next_idx val;
-      in
-        ___builtin_concatStrings (map map_fn (split (elemAt patterns idx) string));
-    in
-      if pattern_len == 0
-      then string
-      else replace_step 0 string;
+    replaceStrings = patterns: replacements: string:
+      ___builtin_replaceStrings [
+        patterns
+        replacements
+        string
+      ];
 
     partition = predicate: list: let
       pickSetRight = map predicate list;

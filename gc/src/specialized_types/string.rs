@@ -109,7 +109,14 @@ impl GcHandle {
         if range.end > strlen {
             return Err(crate::GcError::AccessOutOfRange);
         }
+
         let requested_len = range.len();
+        if requested_len == strlen && range.start == 0 {
+            // the full range of the string was requested.
+            // we can just reuse the previous string.
+            return Ok(string.root());
+        }
+
         let ptr = self.with_retry(|gc_handle| {
             let alloc_page = gc_handle.get_nursery_page();
             unsafe {
