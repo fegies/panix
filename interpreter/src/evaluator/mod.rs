@@ -16,6 +16,8 @@ pub struct Evaluator<'gc> {
     stack_cache: Vec<ThunkEvalState>,
     thunk_alloc_buffer: Vec<GcPointer<Thunk>>,
     builtins: Rc<NixBuiltins>,
+
+    error_message_printed: bool,
 }
 #[derive(Default, Debug)]
 struct ThunkEvalState {
@@ -23,6 +25,10 @@ struct ThunkEvalState {
     local_stack: Vec<NixValue>,
     thunk_stack: Vec<GcPointer<Thunk>>,
     code_buf: Vec<VmOp>,
+
+    // a buffer that is filled with the filenames for
+    // tail recursion calls to allow us to recover the correct stacktrace.
+    tailcall_trace_buf: Vec<NixString>,
 }
 
 struct ThunkEvaluator<'eval, 'gc> {
@@ -39,6 +45,7 @@ impl<'gc> Evaluator<'gc> {
             stack_cache: Vec::new(),
             thunk_alloc_buffer: Vec::new(),
             builtins: Rc::new(builtins),
+            error_message_printed: false,
         })
     }
     pub fn eval_expression(&mut self, thunk: Thunk) -> Result<NixValue, EvaluateError> {
@@ -68,12 +75,7 @@ impl<'gc> Evaluator<'gc> {
                     evaluator: self,
                     source_filename: source_filename.clone(),
                 }
-                .compute_result();
-
-                if result.is_err() {
-                    println!("error at: {:?}", source_filename.debug(&self.gc_handle));
-                }
-                let result = result?;
+                .compute_result()?;
 
                 let result_ptr = self.gc_handle.alloc(Thunk::Value(result.clone()))?;
                 self.gc_handle.replace(&thunk, result_ptr);
@@ -103,6 +105,29 @@ impl<'gc> Evaluator<'gc> {
 
 impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
     fn compute_result(mut self) -> Result<NixValue, EvaluateError> {
+        let res = self.compute_result_inner();
+
+        // print the stack trace....
+        if let Err(e) = &res {
+            if !self.evaluator.error_message_printed {
+                println!("\n\nError: {e:?}\n\n");
+                self.evaluator.error_message_printed = true;
+            }
+
+            println!(
+                "at {}",
+                self.source_filename.load(&self.evaluator.gc_handle)
+            );
+
+            // print the tailcall entries if present
+            for entry in self.state.tailcall_trace_buf.iter().rev() {
+                println!("at {} (tailcall)", entry.load(&self.evaluator.gc_handle));
+            }
+        }
+
+        res
+    }
+    fn compute_result_inner(&mut self) -> Result<NixValue, EvaluateError> {
         'outer: loop {
             println!("forcing thunk...");
             let mut code_buf = core::mem::take(&mut self.state.code_buf);
@@ -330,6 +355,12 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                     );
                                 }
                                 NixValue::Function(func) => {
+                                    // stash the location in the tailcall buffer.
+                                    self.state.tailcall_trace_buf.push(core::mem::replace(
+                                        &mut self.source_filename,
+                                        func.context.source_filename.clone(),
+                                    ));
+
                                     // reinitialize our context and continue from the top.
                                     self.state.initialize_for_call(func, arg, self.evaluator)?;
                                     continue 'outer;
@@ -745,6 +776,7 @@ impl ThunkEvalState {
         self.local_stack.clear();
         self.thunk_stack.clear();
         self.code_buf.clear();
+        self.tailcall_trace_buf.clear();
     }
 
     pub fn initialize_for_call(

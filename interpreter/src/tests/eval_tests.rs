@@ -501,3 +501,11 @@ fn test_replace_strings() {
 fn test_foldl() {
     eval_expr("builtins.foldl' (x: y: x + y) 0 [1 2 3]", "6");
 }
+
+#[test]
+fn test_sort() {
+    eval_expr(
+        "builtins.sort builtins.lessThan [ 483 249 526 147 42 77 ]",
+        "[ 42 77 147 249 483 526 ]",
+    );
+}
