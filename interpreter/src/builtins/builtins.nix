@@ -26,6 +26,84 @@ let
   seq = e1: e2: ___builtin_seq [e1 e2];
   deepSeq = e1: e2: ___builtin_deepSeq [e1 e2];
 
+  genList = let
+    # we go with radix 8 to improve perf a little and reduce recursion depth.
+    # we could go wider, but the cases would need to be hardcoded, or there would be little benefit over just recursing one level deeper.
+    genListInner = generator: length: let
+      iter = length: offset:
+      # seq the offset to avoid a deep thunk chain being carried onto the generated list
+        seq offset
+        ( # the 0 length case is handled by the outer function already.
+          if length <= 8
+          then
+            ( # base cases.
+              if length <= 4 # it is 1 or 2
+              then
+                (
+                  if length <= 2
+                  then
+                    (
+                      if length == 1
+                      then [(generator offset)]
+                      else [(generator offset) (generator (offset + 1))] # length 2
+                    )
+                  else # it must be > 2 and <= 4
+                    (
+                      if length == 3
+                      then [(generator offset) (generator (offset + 1)) (generator (offset + 2))]
+                      else #length 4
+                        [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3))]
+                    )
+                )
+              else
+                ( # we know it is > 4 and <= 8
+                  if length <= 6
+                  then
+                    (
+                      if length == 5
+                      then [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4))]
+                      else # length 6
+                        [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5))]
+                    )
+                  else # > 6 and <= 8
+                    (
+                      if length == 7
+                      then [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5)) (generator (offset + 6))]
+                      else #length 8
+                        [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5)) (generator (offset + 6)) (generator (offset + 7))]
+                    )
+                )
+            )
+          else let
+            # recursion....
+            step_size = length / 8;
+            iter_step_size = iter step_size;
+          in
+            concatLists [
+              (iter_step_size offset)
+              (iter_step_size (offset + step_size))
+              (iter_step_size (offset + 2 * step_size))
+              (iter_step_size (offset + 3 * step_size))
+              (iter_step_size (offset + 4 * step_size))
+              (iter_step_size (offset + 5 * step_size))
+              (iter_step_size (offset + 6 * step_size))
+              # the last one may have a slightly smaller step
+              (iter (length - 7 * step_size) (offset + 7 * step_size))
+            ]
+        );
+    in
+      iter length 0;
+  in
+    # force the materialization of the inner
+    seq genListInner (
+      generator: length:
+        if length == 0
+        then []
+        else if typeOf length == "int"
+        then genListInner generator length
+        else throw "genList: length must be an integer"
+    );
+
   foldl' = op: nul: list: let
     max_len = length list;
     elem_at_list = elemAt list;
@@ -58,6 +136,7 @@ let
       abort
       typeOf
       match
+      genList
       isInt
       foldl'
       filter
@@ -147,7 +226,7 @@ let
         if isNum e1
         then
           e2:
-            if isNum e1
+            if isNum e2
             then e1 < e2
             else throw "lessThan: e2 must be a number"
         else throw "lessThan: e1 must be a number";
@@ -245,83 +324,66 @@ let
         in
           compare_iter 0;
 
-    genList = let
-      # we go with radix 8 to improve perf a little and reduce recursion depth.
-      # we could go wider, but the cases would need to be hardcoded, or there would be little benefit over just recursing one level deeper.
-      genListInner = generator: length: let
-        iter = length: offset:
-        # seq the offset to avoid a deep thunk chain being carried onto the generated list
-          seq offset
-          ( # the 0 length case is handled by the outer function already.
-            if length <= 8
-            then
-              ( # base cases.
-                if length <= 4 # it is 1 or 2
-                then
-                  (
-                    if length <= 2
-                    then
-                      (
-                        if length == 1
-                        then [(generator offset)]
-                        else [(generator offset) (generator (offset + 1))] # length 2
-                      )
-                    else # it must be > 2 and <= 4
-                      (
-                        if length == 3
-                        then [(generator offset) (generator (offset + 1)) (generator (offset + 2))]
-                        else #length 4
-                          [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3))]
-                      )
-                  )
-                else
-                  ( # we know it is > 4 and <= 8
-                    if length <= 6
-                    then
-                      (
-                        if length == 5
-                        then [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4))]
-                        else # length 6
-                          [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5))]
-                      )
-                    else # > 6 and <= 8
-                      (
-                        if length == 7
-                        then [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5)) (generator (offset + 6))]
-                        else #length 8
-                          [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3)) (generator (offset + 4)) (generator (offset + 5)) (generator (offset + 6)) (generator (offset + 7))]
-                      )
-                  )
-              )
-            else let
-              # recursion....
-              step_size = length / 8;
-              iter_step_size = iter step_size;
+    sort = comparator: list: let
+      pick = elemAt list;
+      list_len = length list;
+      # merge 2 cons lists, producing a cons list in order.
+      merge = left: right:
+        if left == null
+        then right # left exhausted.
+        else if right == null
+        then left # left empty
+        else # both not empty
+          (
+            let
+              left_head = left.head;
+              right_head = right.head;
             in
-              concatLists [
-                (iter_step_size offset)
-                (iter_step_size (offset + step_size))
-                (iter_step_size (offset + 2 * step_size))
-                (iter_step_size (offset + 3 * step_size))
-                (iter_step_size (offset + 4 * step_size))
-                (iter_step_size (offset + 5 * step_size))
-                (iter_step_size (offset + 6 * step_size))
-                # the last one may have a slightly smaller step
-                (iter (length - 7 * step_size) (offset + 7 * step_size))
-              ]
+              if comparator left_head right_head
+              then # left is smaller
+                {
+                  head = right_head;
+                  tail = merge left (right.tail);
+                }
+              else # right is smaller or equal
+                {
+                  head = left_head;
+                  tail = merge (left.tail) right;
+                }
           );
-      in
-        iter length 0;
+      # generates a sorted cons list covering the requested range.
+      cons_inner_sort = start_idx: len:
+        if len == 1
+        then {
+          head = pick start_idx;
+          tail = null;
+        }
+        else let
+          left_len = len / 2;
+          right_len = len - left_len;
+        in
+          merge (cons_inner_sort start_idx left_len) (cons_inner_sort (start_idx + left_len) right_len);
+      # convert a cons list into a nix list
+      cons_skip = len: list:
+        if len == 0
+        then list
+        else cons_skip (len - 1) list.tail;
+      # converts a cons list of the specified length to a nix list
+      decons = len: lst:
+        if len == 1
+        then let
+          head = lst.head;
+        in
+          ___builtin_seq [head [lst.head]]
+        else let
+          left_len = len / 2;
+          right_len = len - left_len;
+        in
+          (decons left_len lst) ++ (decons right_len (cons_skip left_len lst));
     in
-      # force the materialization of the inner
-      seq genListInner (
-        generator: length:
-          if length == 0
-          then []
-          else if typeOf length == "int"
-          then genListInner generator length
-          else throw "genList: length must be an integer"
-      );
+      if list_len <= 1
+      then list
+      else decons list_len (cons_inner_sort 0 list_len);
   };
 in
   # avoid carrying around the thunks for all of our builtins lambdas.
