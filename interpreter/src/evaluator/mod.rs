@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, rc::Rc};
 
-use gc::{GcHandle, GcPointer};
+use gc::{GcError, GcHandle, GcPointer};
 
 use crate::{
     builtins::{get_builtins, Builtins, NixBuiltins},
@@ -28,16 +28,18 @@ struct ThunkEvalState {
 struct ThunkEvaluator<'eval, 'gc> {
     state: ThunkEvalState,
     evaluator: &'eval mut Evaluator<'gc>,
+    source_filename: NixString,
 }
 
 impl<'gc> Evaluator<'gc> {
-    pub fn new(gc_handle: &'gc mut GcHandle) -> Self {
-        Self {
+    pub fn new(gc_handle: &'gc mut GcHandle) -> Result<Self, GcError> {
+        let builtins = get_builtins(gc_handle)?;
+        Ok(Self {
             gc_handle,
             stack_cache: Vec::new(),
             thunk_alloc_buffer: Vec::new(),
-            builtins: Rc::new(get_builtins()),
-        }
+            builtins: Rc::new(builtins),
+        })
     }
     pub fn eval_expression(&mut self, thunk: Thunk) -> Result<NixValue, EvaluateError> {
         let ptr = self.gc_handle.alloc(thunk)?;
@@ -56,6 +58,7 @@ impl<'gc> Evaluator<'gc> {
                 state
                     .code_buf
                     .extend_from_slice(self.gc_handle.load(code).as_ref());
+                let source_filename = context.source_filename.clone();
 
                 let blackhole = self.gc_handle.alloc(Thunk::Blackhole)?;
                 thunk = self.gc_handle.replace(&thunk, blackhole);
@@ -63,8 +66,14 @@ impl<'gc> Evaluator<'gc> {
                 let result = ThunkEvaluator {
                     state,
                     evaluator: self,
+                    source_filename: source_filename.clone(),
                 }
-                .compute_result()?;
+                .compute_result();
+
+                if result.is_err() {
+                    println!("error at: {:?}", source_filename.debug(&self.gc_handle));
+                }
+                let result = result?;
 
                 let result_ptr = self.gc_handle.alloc(Thunk::Value(result.clone()))?;
                 self.gc_handle.replace(&thunk, result_ptr);
@@ -80,11 +89,13 @@ impl<'gc> Evaluator<'gc> {
         arg: GcPointer<Thunk>,
     ) -> Result<NixValue, EvaluateError> {
         let mut sub_state = self.stack_cache.pop().unwrap_or_default();
+        let source_filename = func.context.source_filename.clone();
         sub_state.initialize_for_call(func, arg, self)?;
 
         ThunkEvaluator {
             state: sub_state,
             evaluator: self,
+            source_filename,
         }
         .compute_result()
     }
@@ -117,6 +128,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                 code,
                                 context_build_instructions,
                                 call_requirements,
+                                source_file: _,
                             } = self.evaluator.gc_handle.load(&args);
 
                             let code = code.clone();
@@ -133,6 +145,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             );
                             let context = ExecutionContext {
                                 entries: self.evaluator.gc_handle.alloc_vec(alloc_buf)?,
+                                source_filename: self.source_filename.clone(),
                             };
 
                             self.state.local_stack.push(NixValue::Function(Function {
@@ -482,6 +495,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
         fetch_context_entries(thunk_buf, &self.state, build_instructions);
         let context = ExecutionContext {
             entries: self.evaluator.gc_handle.alloc_vec(thunk_buf)?,
+            source_filename: self.source_filename.clone(),
         };
 
         let new_thunk = self

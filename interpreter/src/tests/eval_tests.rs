@@ -8,7 +8,10 @@ fn eval_expr(source: &str, expected_source: &str) {
         println!("Evaluating: {full_expr:?}");
         let thunk = compile_source(gc_handle, full_expr.as_bytes(), "<<inline>>").unwrap();
 
-        let eval_value = Evaluator::new(gc_handle).eval_expression(thunk).unwrap();
+        let eval_value = Evaluator::new(gc_handle)
+            .unwrap()
+            .eval_expression(thunk)
+            .unwrap();
         if let NixValue::Bool(true) = eval_value {
             println!("successfully evaluated to true");
         } else {

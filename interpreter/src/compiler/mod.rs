@@ -5,7 +5,7 @@ use parser::ast::{KnownNixStringContent, NixExpr, SourcePosition};
 use thunk_compiler::ThunkCompiler;
 
 use crate::{
-    builtins::{get_builtins, NixBuiltins},
+    builtins::NixBuiltins,
     vm::value::{self, NixValue, Thunk},
 };
 
@@ -33,6 +33,7 @@ pub fn translate_expression<'src>(
     mut expr: NixExpr<'src>,
     bump: &'src Bump,
     source_filename: value::NixString,
+    builtins: &NixBuiltins,
 ) -> Result<Thunk, CompileError> {
     normalize::normalize_ast(&mut expr, bump);
 
@@ -40,17 +41,17 @@ pub fn translate_expression<'src>(
         cached_values: CachedValues::new(gc_handle)?,
         source_filename,
         gc_handle,
-        builtins: get_builtins(),
+        builtins,
     };
     let mut scope_backing = ScopeBacking::new();
 
     ThunkCompiler::new(&mut compiler).translate_to_thunk(scope_backing.build_scope(), expr)
 }
 
-struct Compiler<'gc> {
+struct Compiler<'gc, 'builtins> {
     gc_handle: &'gc mut GcHandle,
     cached_values: CachedValues,
-    builtins: NixBuiltins,
+    builtins: &'builtins NixBuiltins,
     source_filename: value::NixString,
 }
 
@@ -73,7 +74,7 @@ impl CachedValues {
     }
 }
 
-impl<'gc> Compiler<'gc> {
+impl<'gc, 'builtins> Compiler<'gc, 'builtins> {
     fn alloc_string(
         &mut self,
         str: KnownNixStringContent<'_>,

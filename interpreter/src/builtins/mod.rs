@@ -7,7 +7,7 @@ use std::{
     sync::LazyLock,
 };
 
-use gc::{GcHandle, GcPointer};
+use gc::{GcError, GcHandle, GcPointer};
 use gc_derive::Trace;
 use json_parser::JsonParser;
 use parser::{
@@ -46,10 +46,12 @@ pub trait Builtins {
 
 static BUILTINS_EXPR: LazyLock<LetInExpr<'static>> = LazyLock::new(build_builtins_expr);
 
-pub fn get_builtins() -> NixBuiltins {
-    NixBuiltins {
+pub fn get_builtins(handle: &mut GcHandle) -> Result<NixBuiltins, GcError> {
+    let native_name = handle.alloc_string("<<native>>")?.into();
+    Ok(NixBuiltins {
         import_cache: RefCell::new(HashMap::new()),
-    }
+        native_name,
+    })
 }
 
 pub fn get_builtins_expr() -> LetInExpr<'static> {
@@ -69,6 +71,7 @@ fn build_builtins_expr() -> LetInExpr<'static> {
 
 pub struct NixBuiltins {
     import_cache: RefCell<HashMap<PathBuf, NixValue>>,
+    native_name: NixString,
 }
 
 #[derive(Debug, Clone, Trace, Copy)]
@@ -204,7 +207,7 @@ impl Builtins for NixBuiltins {
                 Ok(NixValue::String(value.into()))
             }
             BuiltinType::ToString => Ok(NixValue::String(execute_to_string(argument, evaluator)?)),
-            BuiltinType::Map => execute_map(evaluator, argument),
+            BuiltinType::Map => execute_map(evaluator, argument, self.native_name.clone()),
             BuiltinType::Import => self.execute_import(evaluator, argument),
             BuiltinType::Split => execute_split(evaluator, argument),
             BuiltinType::FilterPick => execute_filter_pick(evaluator, argument),
@@ -248,7 +251,9 @@ impl Builtins for NixBuiltins {
                 evaluator.force_thunk(e2)
             }
             BuiltinType::Match => execute_match(evaluator, argument),
-            BuiltinType::MapAttrs => execute_map_attrs(evaluator, argument),
+            BuiltinType::MapAttrs => {
+                execute_map_attrs(evaluator, argument, self.native_name.clone())
+            }
             BuiltinType::ConcatStrings => execute_concat_strings(evaluator, argument),
             BuiltinType::StringLength => {
                 let len = evaluator
@@ -404,6 +409,7 @@ fn execute_concat_strings(
 fn execute_map_attrs(
     evaluator: &mut Evaluator<'_>,
     argument: GcPointer<Thunk>,
+    native_name: NixString,
 ) -> Result<NixValue, EvaluateError> {
     let [func, attrset] = evaluator
         .force_thunk(argument)?
@@ -439,7 +445,10 @@ fn execute_map_attrs(
                 .gc_handle
                 .alloc_slice(&[func.clone(), name_thunk, attr_value.clone()])?;
         *attr_value = evaluator.gc_handle.alloc(Thunk::Deferred {
-            context: ExecutionContext { entries: context },
+            context: ExecutionContext {
+                entries: context,
+                source_filename: native_name.clone(),
+            },
             code: call_code.clone(),
         })?;
     }
@@ -865,11 +874,12 @@ impl NixBuiltins {
                 gc_handle,
                 include_bytes!("./builtins.nix"),
                 source_filename,
+                self,
             )
         } else {
             let mut file_content = Vec::new();
             std::fs::File::open(source_path)?.read_to_end(&mut file_content)?;
-            compile_source_with_nix_filename(gc_handle, &file_content, source_filename)
+            compile_source_with_nix_filename(gc_handle, &file_content, source_filename, self)
         }
     }
 }
@@ -877,6 +887,7 @@ impl NixBuiltins {
 fn execute_map(
     evaluator: &mut Evaluator<'_>,
     argument: GcPointer<Thunk>,
+    native_name: NixString,
 ) -> Result<NixValue, EvaluateError> {
     let argument = evaluator.force_thunk(argument)?.expect_attrset()?;
     let list = argument
@@ -912,7 +923,10 @@ fn execute_map(
             .gc_handle
             .alloc_slice(&[func.clone(), entry.clone()])?;
         let thunk = evaluator.gc_handle.alloc(Thunk::Deferred {
-            context: ExecutionContext { entries: context },
+            context: ExecutionContext {
+                entries: context,
+                source_filename: native_name.clone(),
+            },
             code: call_code.clone(),
         })?;
         *entry = thunk;

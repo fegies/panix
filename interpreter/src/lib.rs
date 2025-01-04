@@ -4,6 +4,7 @@ mod vm;
 
 mod builtins;
 pub mod evaluator;
+use builtins::{get_builtins, NixBuiltins};
 use bumpalo::Bump;
 pub use evaluator::Evaluator;
 
@@ -87,10 +88,11 @@ fn compile_source_with_nix_filename(
     gc_handle: &mut GcHandle,
     content: &[u8],
     source_filename: crate::vm::value::NixString,
+    builtins: &NixBuiltins,
 ) -> Result<Thunk, InterpreterError> {
     let expr = parser::parse_nix(content)?;
     let bump = Bump::new();
-    let res = compiler::translate_expression(gc_handle, expr, &bump, source_filename)?;
+    let res = compiler::translate_expression(gc_handle, expr, &bump, source_filename, builtins)?;
     Ok(res)
 }
 
@@ -103,5 +105,8 @@ pub fn compile_source(
         .alloc_string(source_filename)
         .map_err(|e| CompileError::Gc(e))?
         .into();
-    compile_source_with_nix_filename(gc_handle, content, source_filename)
+
+    let builtins = get_builtins(gc_handle).map_err(|e| CompileError::Gc(e))?;
+
+    compile_source_with_nix_filename(gc_handle, content, source_filename, &builtins)
 }

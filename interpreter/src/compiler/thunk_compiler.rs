@@ -19,13 +19,13 @@ use crate::{
 
 use super::{lookup_scope::LookupScope, CompileError, Compiler};
 
-pub struct ThunkCompiler<'compiler, 'gc> {
-    compiler: &'compiler mut Compiler<'gc>,
+pub struct ThunkCompiler<'compiler, 'gc, 'builtins> {
+    compiler: &'compiler mut Compiler<'gc, 'builtins>,
     current_thunk_stack_height: u32,
 }
 
-impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
-    pub fn new(compiler: &'compiler mut Compiler<'gc>) -> Self {
+impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
+    pub fn new(compiler: &'compiler mut Compiler<'gc, 'builtins>) -> Self {
         Self {
             compiler,
             current_thunk_stack_height: 0,
@@ -42,6 +42,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
         Ok(Thunk::Deferred {
             context: ExecutionContext {
                 entries: self.compiler.gc_handle.alloc_slice(&[])?,
+                source_filename: self.compiler.source_filename.clone(),
             },
             code: self.compiler.gc_handle.alloc_vec(&mut opcode_buf)?,
         })
@@ -256,6 +257,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                                 code,
                                 context_id: ctx_id,
                                 context_build_instructions: ctx_insn,
+                                source_file: self.compiler.source_filename.clone(),
                             })?
                         } else {
                             // no default, the thunk is just a normal getattr
@@ -266,6 +268,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                                 code,
                                 context_id: 0,
                                 context_build_instructions: first_item_ctx.clone(),
+                                source_file: self.compiler.source_filename.clone(),
                             })?
                         };
 
@@ -303,6 +306,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             code,
             context_build_instructions,
             call_requirements,
+            source_file: self.compiler.source_filename.clone(),
         })?;
 
         target_buffer.push(VmOp::AllocLambda(args));
@@ -547,6 +551,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                             context_id,
                             code,
                             context_build_instructions: context_insn.clone(),
+                            source_file: self.compiler.source_filename.clone(),
                         })?;
 
                         target_buffer.push(VmOp::PushImmediate(ident_value));
@@ -757,6 +762,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
                         code,
                         context_id: 0,
                         context_build_instructions: context_build_instructions.clone(),
+                        source_file: self.compiler.source_filename.clone(),
                     },
                 )?));
                 target_buffer.push(VmOp::OverwriteThunk {
@@ -832,6 +838,7 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             context_id,
             code,
             context_build_instructions,
+            source_file: self.compiler.source_filename.clone(),
         })?;
 
         Ok(VmOp::AllocateThunk(alloc_args))

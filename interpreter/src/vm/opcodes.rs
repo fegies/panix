@@ -1,4 +1,4 @@
-use super::value::{self, NixValue, Thunk};
+use super::value::{self, NixString, NixValue, Thunk};
 use gc::{specialized_types::array::Array, GcPointer};
 use gc_derive::Trace;
 
@@ -11,6 +11,7 @@ pub enum ValueSource {
 #[derive(Debug, Trace, Clone)]
 pub struct ExecutionContext {
     pub entries: GcPointer<Array<GcPointer<Thunk>>>,
+    pub source_filename: NixString,
 }
 
 #[derive(Debug, Trace)]
@@ -18,6 +19,7 @@ pub struct ThunkAllocArgs {
     pub code: GcPointer<Array<VmOp>>,
     pub context_id: u32,
     pub context_build_instructions: GcPointer<Array<ValueSource>>,
+    pub source_file: value::NixString,
 }
 
 #[derive(Debug, Trace)]
@@ -25,6 +27,7 @@ pub struct LambdaAllocArgs {
     pub code: GcPointer<Array<VmOp>>,
     pub context_build_instructions: GcPointer<Array<ValueSource>>,
     pub call_requirements: LambdaCallType,
+    pub source_file: value::NixString,
 }
 
 #[derive(Debug, Trace, Clone)]
