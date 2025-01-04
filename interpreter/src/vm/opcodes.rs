@@ -14,6 +14,12 @@ pub struct SourcePosition {
     pub column: u32,
 }
 
+impl core::fmt::Display for SourcePosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}:{}", self.line, self.column))
+    }
+}
+
 impl From<parser::ast::SourcePosition> for SourcePosition {
     fn from(value: parser::ast::SourcePosition) -> Self {
         Self {
