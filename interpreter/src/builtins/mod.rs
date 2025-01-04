@@ -99,6 +99,7 @@ enum BuiltinType {
     StringLength,
     Substring,
     ReplaceStrings,
+    AttrValues,
 }
 
 impl Builtins for NixBuiltins {
@@ -129,6 +130,7 @@ impl Builtins for NixBuiltins {
             "___builtin_stringLength" => BuiltinType::StringLength,
             "___builtin_substring" => BuiltinType::Substring,
             "___builtin_replaceStrings" => BuiltinType::ReplaceStrings,
+            "___builtin_attrValues" => BuiltinType::AttrValues,
             _ => return None,
         };
 
@@ -258,8 +260,27 @@ impl Builtins for NixBuiltins {
             }
             BuiltinType::Substring => execute_substring(evaluator, argument),
             BuiltinType::ReplaceStrings => execute_replace_strings(evaluator, argument),
+            BuiltinType::AttrValues => execute_attr_values(evaluator, argument),
         }
     }
+}
+
+fn execute_attr_values(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let set = evaluator.force_thunk(argument)?.expect_attrset()?.entries;
+    let mut values = evaluator
+        .gc_handle
+        .load(&set)
+        .as_ref()
+        .into_iter()
+        .map(|(_, value)| value.clone())
+        .collect::<Vec<_>>();
+
+    let entries = evaluator.gc_handle.alloc_vec(&mut values)?;
+
+    Ok(NixValue::List(List { entries }))
 }
 
 fn execute_replace_strings(

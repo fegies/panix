@@ -419,11 +419,11 @@ fn test_inherit_rec() {
 
 #[test]
 fn test_gen_list() {
-    eval_expr("builtins.genList (a: a) 0", "[]");
     eval_expr(
         "builtins.genList (x: x * x) 10",
         "[ 0 1 4 9 16 25 36 49 64 81]",
     );
+    eval_expr("builtins.genList (a: a) 0", "[]");
 }
 
 #[test]
@@ -479,6 +479,11 @@ fn test_stringlen() {
 #[test]
 fn test_substring() {
     eval_expr(r#"builtins.substring 0 3 "nixos""#, "\"nix\"");
+}
+
+#[test]
+fn test_attr_values() {
+    eval_expr("builtins.attrValues {a = 42; b = 12;}", "[42 12]");
 }
 
 #[test]

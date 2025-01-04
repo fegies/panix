@@ -126,6 +126,8 @@ let
         string
       ];
 
+    attrValues = ___builtin_attrValues;
+
     partition = predicate: list: let
       pickSetRight = map predicate list;
     in {

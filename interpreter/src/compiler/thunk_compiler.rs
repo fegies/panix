@@ -822,6 +822,9 @@ impl<'compiler, 'src, 'gc> ThunkCompiler<'compiler, 'gc> {
             return Ok(VmOp::DuplicateThunk(value_source));
         }
 
+        // optimize our code a little by replicing calls with tail calls where possible.
+        insert_tailcalls(opcode_buf.as_mut());
+
         let code = self.compiler.gc_handle.alloc_vec(opcode_buf)?;
         let (context_id, context_build_instructions) =
             resolve_possibly_cached_context(&mut self.compiler.gc_handle, context_cache, ctx_ins)?;
@@ -847,5 +850,34 @@ fn resolve_possibly_cached_context(
         let id = context_cache.len() as u32;
         context_cache.insert(ctx_ins.to_vec(), (id, insn.clone()));
         Ok((id, insn))
+    }
+}
+
+/// tune the emitted bytecode by replacing all call instructions
+/// that are followed only by skip and dropThunk instructions
+/// with TailCall instructions
+fn insert_tailcalls(mut opcodes: &mut [VmOp]) {
+    fn is_tailcall_safe(mut opcodes: &[VmOp]) -> bool {
+        while let Some(first) = opcodes.first() {
+            let advance_count = match first {
+                VmOp::DropThunks(_) => 1, // dropThunks instructions are fine because the thunk
+                // stack would be implicitly cleared by the tail call.
+                VmOp::Skip(n) => *n as usize,
+                _ => return false,
+            };
+            opcodes = &opcodes[advance_count..];
+        }
+
+        // we did not find anything unsafe...
+        true
+    }
+
+    while let Some((opcode, tail)) = opcodes.split_first_mut() {
+        if let VmOp::Call = opcode {
+            if is_tailcall_safe(tail) {
+                *opcode = VmOp::TailCall;
+            }
+        }
+        opcodes = tail;
     }
 }
