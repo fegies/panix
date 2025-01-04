@@ -2,7 +2,7 @@ use bumpalo::Bump;
 use gc::{GcError, GcHandle, GcPointer};
 use lookup_scope::ScopeBacking;
 use parser::ast::{KnownNixStringContent, NixExpr, SourcePosition};
-use thunk_compiler::ThunkCompiler;
+use thunk_compiler::translate_to_thunk;
 
 use crate::{
     builtins::NixBuiltins,
@@ -45,7 +45,7 @@ pub fn translate_expression<'src>(
     };
     let mut scope_backing = ScopeBacking::new();
 
-    ThunkCompiler::new(&mut compiler).translate_to_thunk(scope_backing.build_scope(), expr)
+    translate_to_thunk(scope_backing.build_scope(), &mut compiler, expr)
 }
 
 struct Compiler<'gc, 'builtins> {

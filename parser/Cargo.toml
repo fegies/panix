@@ -7,5 +7,4 @@ edition = "2021"
 
 [dependencies]
 lexer.workspace = true
-
 thiserror.workspace = true

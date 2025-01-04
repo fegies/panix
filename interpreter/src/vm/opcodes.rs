@@ -8,15 +8,33 @@ pub enum ValueSource {
     ThunkStackRef(u32),
 }
 
+#[derive(Trace, Clone, Debug)]
+pub struct SourcePosition {
+    pub line: u32,
+    pub column: u32,
+}
+
+impl From<parser::ast::SourcePosition> for SourcePosition {
+    fn from(value: parser::ast::SourcePosition) -> Self {
+        Self {
+            line: value.line,
+            column: value.column,
+        }
+    }
+}
+
 #[derive(Debug, Trace, Clone)]
 pub struct ExecutionContext {
     pub entries: GcPointer<Array<GcPointer<Thunk>>>,
     pub source_filename: NixString,
+    pub source_positions: Option<GcPointer<Array<SourcePosition>>>,
 }
 
 #[derive(Debug, Trace)]
 pub struct ThunkAllocArgs {
     pub code: GcPointer<Array<VmOp>>,
+    /// an array for the source position for each vm op
+    pub source_positions: GcPointer<Array<SourcePosition>>,
     pub context_id: u32,
     pub context_build_instructions: GcPointer<Array<ValueSource>>,
     pub source_file: value::NixString,
@@ -25,6 +43,8 @@ pub struct ThunkAllocArgs {
 #[derive(Debug, Trace)]
 pub struct LambdaAllocArgs {
     pub code: GcPointer<Array<VmOp>>,
+    /// an array for the source position for each vm op
+    pub source_locations: GcPointer<Array<SourcePosition>>,
     pub context_build_instructions: GcPointer<Array<ValueSource>>,
     pub call_requirements: LambdaCallType,
     pub source_file: value::NixString,

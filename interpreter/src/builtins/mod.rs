@@ -448,6 +448,7 @@ fn execute_map_attrs(
             context: ExecutionContext {
                 entries: context,
                 source_filename: native_name.clone(),
+                source_positions: None,
             },
             code: call_code.clone(),
         })?;
@@ -926,6 +927,7 @@ fn execute_map(
             context: ExecutionContext {
                 entries: context,
                 source_filename: native_name.clone(),
+                source_positions: None,
             },
             code: call_code.clone(),
         })?;

@@ -18,51 +18,124 @@ use crate::{
 };
 
 use super::{lookup_scope::LookupScope, CompileError, Compiler};
+pub use opcode_buf::OpcodeBuf;
 
-pub struct ThunkCompiler<'compiler, 'gc, 'builtins> {
-    compiler: &'compiler mut Compiler<'gc, 'builtins>,
-    current_thunk_stack_height: u32,
+mod opcode_buf {
+    use gc::GcResult;
+
+    use crate::vm::opcodes;
+
+    use super::*;
+
+    #[derive(Default)]
+    pub struct OpcodeBuf {
+        opcodes: Vec<VmOp>,
+        positions: Vec<opcodes::SourcePosition>,
+    }
+
+    impl OpcodeBuf {
+        pub fn push(&mut self, op: VmOp, pos: impl Into<opcodes::SourcePosition>) {
+            self.opcodes.push(op);
+            self.positions.push(pos.into());
+        }
+
+        pub fn clear(&mut self) {
+            self.opcodes.clear();
+            self.positions.clear();
+        }
+
+        pub fn freeze(
+            &mut self,
+            gc: &mut GcHandle,
+        ) -> GcResult<(
+            GcPointer<Array<VmOp>>,
+            GcPointer<Array<opcodes::SourcePosition>>,
+        )> {
+            let op_arr = gc.alloc_vec(&mut self.opcodes)?;
+            let pos_arr = gc.alloc_vec(&mut self.positions)?;
+            Ok((op_arr, pos_arr))
+        }
+
+        pub fn len(&self) -> usize {
+            self.opcodes.len()
+        }
+    }
+
+    impl core::ops::Index<usize> for OpcodeBuf {
+        type Output = VmOp;
+
+        fn index(&self, index: usize) -> &Self::Output {
+            &self.opcodes[index]
+        }
+    }
+    impl core::ops::IndexMut<usize> for OpcodeBuf {
+        fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+            &mut self.opcodes[index]
+        }
+    }
+    impl AsRef<[VmOp]> for OpcodeBuf {
+        fn as_ref(&self) -> &[VmOp] {
+            &self.opcodes
+        }
+    }
+    impl AsMut<[VmOp]> for OpcodeBuf {
+        fn as_mut(&mut self) -> &mut [VmOp] {
+            &mut self.opcodes
+        }
+    }
 }
 
-impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
-    pub fn new(compiler: &'compiler mut Compiler<'gc, 'builtins>) -> Self {
+struct ThunkCompiler<'compiler, 'gc, 'builtins, 'buffer> {
+    compiler: &'compiler mut Compiler<'gc, 'builtins>,
+    current_thunk_stack_height: u32,
+    opcode_buf: &'buffer mut OpcodeBuf,
+}
+
+pub fn translate_to_thunk<'src>(
+    mut scope: LookupScope<'src, '_>,
+    compiler: &mut Compiler,
+    expr: NixExpr<'src>,
+) -> Result<Thunk, CompileError> {
+    let mut opcode_buf = OpcodeBuf::default();
+    ThunkCompiler::new(compiler, &mut opcode_buf).translate_to_ops(&mut scope, expr)?;
+
+    let (code, positions) = opcode_buf.freeze(&mut compiler.gc_handle)?;
+    Ok(Thunk::Deferred {
+        context: ExecutionContext {
+            entries: compiler.gc_handle.alloc_slice(&[])?,
+            source_filename: compiler.source_filename.clone(),
+            source_positions: Some(positions),
+        },
+        code,
+    })
+}
+
+impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'builtins, 'buffer> {
+    fn new(
+        compiler: &'compiler mut Compiler<'gc, 'builtins>,
+        opcode_buf: &'buffer mut OpcodeBuf,
+    ) -> Self {
         Self {
             compiler,
             current_thunk_stack_height: 0,
+            opcode_buf,
         }
-    }
-    pub fn translate_to_thunk(
-        mut self,
-        mut scope: LookupScope<'src, '_>,
-        expr: NixExpr<'src>,
-    ) -> Result<Thunk, CompileError> {
-        let mut opcode_buf = Vec::new();
-        self.translate_to_ops(&mut scope, &mut opcode_buf, expr)?;
-
-        Ok(Thunk::Deferred {
-            context: ExecutionContext {
-                entries: self.compiler.gc_handle.alloc_slice(&[])?,
-                source_filename: self.compiler.source_filename.clone(),
-            },
-            code: self.compiler.gc_handle.alloc_vec(&mut opcode_buf)?,
-        })
     }
 
     fn translate_to_ops(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         expr: NixExpr<'src>,
     ) -> Result<(), CompileError> {
         match expr.content {
             parser::ast::NixExprContent::BasicValue(b) => {
-                self.translate_basic_value(lookup_scope, target_buffer, b)
+                self.translate_basic_value(lookup_scope, b, expr.position)
             }
             parser::ast::NixExprContent::CompoundValue(c) => {
-                self.translate_compound_value(lookup_scope, target_buffer, c, expr.position)
+                self.translate_compound_value(lookup_scope, c, expr.position)
             }
             parser::ast::NixExprContent::Code(c) => {
-                self.translate_code(lookup_scope, target_buffer, c, expr.position)
+                self.translate_code(lookup_scope, c, expr.position)
             }
         }
     }
@@ -70,8 +143,8 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_basic_value(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         value: BasicValue<'src>,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
         let value = match value {
             BasicValue::Bool(b) => NixValue::Bool(b),
@@ -79,34 +152,39 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
             BasicValue::Int(i) => NixValue::Int(i),
             BasicValue::Float(f) => NixValue::Float(f),
             BasicValue::Path(p) => {
-                self.translate_string_value(lookup_scope, target_buffer, p)?;
-                target_buffer.push(VmOp::CastToPath {
-                    source_location: self.compiler.source_filename.clone(),
-                });
+                self.translate_string_value(lookup_scope, p)?;
+                self.opcode_buf.push(
+                    VmOp::CastToPath {
+                        source_location: self.compiler.source_filename.clone(),
+                    },
+                    pos,
+                );
                 return Ok(());
             }
             BasicValue::String(s) => {
-                return self.translate_string_value(lookup_scope, target_buffer, s);
+                return self.translate_string_value(lookup_scope, s);
             }
             BasicValue::SearchPath(_) => {
                 unreachable!("search paths should have been removed by an ast pass")
             }
         };
-        target_buffer.push(VmOp::PushImmediate(self.compiler.gc_handle.alloc(value)?));
+        self.opcode_buf.push(
+            VmOp::PushImmediate(self.compiler.gc_handle.alloc(value)?),
+            pos,
+        );
         Ok(())
     }
 
     fn translate_string_value(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         s: ast::NixString<'src>,
     ) -> Result<(), CompileError> {
         match s.content {
             parser::ast::NixStringContent::Known(known) => {
                 let literal = self.compiler.alloc_string(known)?;
                 let op = VmOp::PushImmediate(literal);
-                target_buffer.push(op);
+                self.opcode_buf.push(op, s.position);
             }
             parser::ast::NixStringContent::Interpolated(mut entries) => {
                 entries.reverse();
@@ -117,14 +195,15 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                             let value = self
                                 .compiler
                                 .alloc_string(KnownNixStringContent::Literal(known))?;
-                            target_buffer.push(VmOp::PushImmediate(value));
+                            self.opcode_buf.push(VmOp::PushImmediate(value), s.position);
                         }
                         parser::ast::InterpolationEntry::Expression(expr) => {
-                            self.translate_to_ops(lookup_scope, target_buffer, expr)?;
+                            self.translate_to_ops(lookup_scope, expr)?;
                         }
                     }
                 }
-                target_buffer.push(VmOp::ConcatStrings(num_entries));
+                self.opcode_buf
+                    .push(VmOp::ConcatStrings(num_entries), s.position);
             }
         }
         Ok(())
@@ -133,49 +212,47 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_code(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         code: parser::ast::Code<'src>,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match code {
             parser::ast::Code::LetInExpr(let_expr) => {
-                self.translate_let_expr(lookup_scope, target_buffer, let_expr, pos)
+                self.translate_let_expr(lookup_scope, let_expr, pos)
             }
             parser::ast::Code::ValueReference { ident } => {
-                self.translate_value_ref(lookup_scope, target_buffer, ident, pos)
+                self.translate_value_ref(lookup_scope, ident, pos)
             }
             parser::ast::Code::WithExpr(_) => {
                 unreachable!("With expressions should have been removed by an ast pass")
             }
-            parser::ast::Code::Lambda(lambda) => {
-                self.translate_lambda(lookup_scope, target_buffer, lambda)
-            }
-            parser::ast::Code::Op(op) => self.translate_op(lookup_scope, target_buffer, op),
+            parser::ast::Code::Lambda(lambda) => self.translate_lambda(lookup_scope, lambda, pos),
+            parser::ast::Code::Op(op) => self.translate_op(lookup_scope, op, pos),
             parser::ast::Code::IfExpr(IfExpr {
                 condition,
                 truthy_case,
                 falsy_case,
             }) => {
-                self.translate_to_ops(lookup_scope, target_buffer, *condition)?;
+                let if_pos = condition.position;
+                self.translate_to_ops(lookup_scope, *condition)?;
 
-                let condition_idx = target_buffer.len();
-                target_buffer.push(VmOp::SkipUnless(0));
+                let condition_idx = self.opcode_buf.len();
+                self.opcode_buf.push(VmOp::SkipUnless(0), if_pos);
 
-                self.translate_to_ops(lookup_scope, target_buffer, *truthy_case)?;
+                self.translate_to_ops(lookup_scope, *truthy_case)?;
 
-                let skip_idx = target_buffer.len();
-                target_buffer.push(VmOp::Skip(0));
+                let skip_idx = self.opcode_buf.len();
+                self.opcode_buf.push(VmOp::Skip(0), if_pos);
 
                 // fix up the jump over the true case branch
-                let true_branch_ops = target_buffer.len() - condition_idx - 1;
-                target_buffer[condition_idx] = VmOp::SkipUnless(true_branch_ops as u32);
+                let true_branch_ops = self.opcode_buf.len() - condition_idx - 1;
+                self.opcode_buf[condition_idx] = VmOp::SkipUnless(true_branch_ops as u32);
 
                 // and now generate the false branch
-                self.translate_to_ops(lookup_scope, target_buffer, *falsy_case)?;
+                self.translate_to_ops(lookup_scope, *falsy_case)?;
 
                 // finally, fix up the unconditional jump at the end of the true case
-                let false_branch_ops = target_buffer.len() - skip_idx - 1;
-                target_buffer[skip_idx] = VmOp::Skip(false_branch_ops as u32);
+                let false_branch_ops = self.opcode_buf.len() - skip_idx - 1;
+                self.opcode_buf[skip_idx] = VmOp::Skip(false_branch_ops as u32);
 
                 Ok(())
             }
@@ -188,11 +265,11 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_lambda(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         lambda: Lambda<'src>,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
         let mut subscope = lookup_scope.subscope();
-        let mut code_buf = Vec::new();
+        let mut code_buf = OpcodeBuf::default();
 
         let mut current_thunk_stack_height = 1; // the lambda always starts with the arg on
                                                 // the thunk stack.
@@ -214,20 +291,21 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                 // we don't count the initial argument for the purposes of this
                 let added_keys = current_thunk_stack_height - 1;
                 if added_keys > 0 {
-                    code_buf.push(VmOp::PushBlackholes(added_keys));
+                    code_buf.push(VmOp::PushBlackholes(added_keys), pos);
                     let first_item_ctx = self
                         .compiler
                         .gc_handle
                         .alloc_slice(&[ValueSource::ThunkStackRef(0)])?;
 
-                    let mut subcode_buf = Vec::new();
+                    let mut subcode_buf = OpcodeBuf::default();
                     let mut current_slot = 1;
                     for (key, default_value) in args.bindings {
                         let key_ptr: value::NixString =
                             self.compiler.gc_handle.alloc_string(key)?.into();
                         call_key_buffer.push((key_ptr.clone(), default_value.is_none()));
                         let key_ptr = self.compiler.gc_handle.alloc(NixValue::String(key_ptr))?;
-                        subcode_buf.push(VmOp::PushImmediate(key_ptr));
+
+                        subcode_buf.push(VmOp::PushImmediate(key_ptr), pos);
 
                         let mut context_cache = BTreeMap::new();
                         let args = if let Some(default_value) = default_value {
@@ -238,11 +316,13 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                             //  even if no code explicitly refers to it
                             subscope.deref_ident(total_name);
 
-                            subcode_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
-                            subcode_buf.push(VmOp::GetAttribute { push_error: true });
+                            subcode_buf
+                                .push(VmOp::LoadThunk(ValueSource::ContextReference(0)), pos);
+                            subcode_buf.push(VmOp::GetAttribute { push_error: true }, pos);
                             let skip_idx = subcode_buf.len();
-                            subcode_buf.push(VmOp::SkipUnless(0));
-                            self.translate_to_ops(&mut subscope, &mut subcode_buf, default_value)?;
+                            subcode_buf.push(VmOp::SkipUnless(0), pos);
+                            ThunkCompiler::new(self.compiler, &mut subcode_buf)
+                                .translate_to_ops(&mut subscope, default_value)?;
                             let added_ops = subcode_buf.len() - skip_idx - 1;
                             subcode_buf[skip_idx] = VmOp::SkipUnless(added_ops as u32);
                             let (ctx_id, ctx_insn) = resolve_possibly_cached_context(
@@ -251,31 +331,39 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                                 subscope.get_inherit_context(),
                             )?;
 
-                            let code = self.compiler.gc_handle.alloc_vec(&mut subcode_buf)?;
+                            let (code, source_positions) =
+                                subcode_buf.freeze(&mut self.compiler.gc_handle)?;
 
                             self.compiler.gc_handle.alloc(ThunkAllocArgs {
                                 code,
                                 context_id: ctx_id,
                                 context_build_instructions: ctx_insn,
                                 source_file: self.compiler.source_filename.clone(),
+                                source_positions,
                             })?
                         } else {
                             // no default, the thunk is just a normal getattr
-                            subcode_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
-                            subcode_buf.push(VmOp::GetAttribute { push_error: false });
-                            let code = self.compiler.gc_handle.alloc_vec(&mut subcode_buf)?;
+                            subcode_buf
+                                .push(VmOp::LoadThunk(ValueSource::ContextReference(0)), pos);
+                            subcode_buf.push(VmOp::GetAttribute { push_error: false }, pos);
+                            let (code, source_positions) =
+                                subcode_buf.freeze(&mut self.compiler.gc_handle)?;
                             self.compiler.gc_handle.alloc(ThunkAllocArgs {
                                 code,
                                 context_id: 0,
                                 context_build_instructions: first_item_ctx.clone(),
                                 source_file: self.compiler.source_filename.clone(),
+                                source_positions,
                             })?
                         };
 
-                        code_buf.push(VmOp::AllocateThunk(args));
-                        code_buf.push(VmOp::OverwriteThunk {
-                            stackref: current_slot,
-                        });
+                        code_buf.push(VmOp::AllocateThunk(args), pos);
+                        code_buf.push(
+                            VmOp::OverwriteThunk {
+                                stackref: current_slot,
+                            },
+                            pos,
+                        );
                         current_slot += 1;
                     }
                 }
@@ -292,11 +380,11 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
             }
         };
 
-        let mut body_compiler = ThunkCompiler::new(&mut self.compiler);
+        let mut body_compiler = ThunkCompiler::new(&mut self.compiler, &mut code_buf);
         body_compiler.current_thunk_stack_height = current_thunk_stack_height;
 
-        body_compiler.translate_to_ops(&mut subscope, &mut code_buf, *lambda.body)?;
-        let code = self.compiler.gc_handle.alloc_vec(&mut code_buf)?;
+        body_compiler.translate_to_ops(&mut subscope, *lambda.body)?;
+        let (code, source_positions) = code_buf.freeze(&mut self.compiler.gc_handle)?;
         let context_build_instructions = self
             .compiler
             .gc_handle
@@ -307,9 +395,10 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
             context_build_instructions,
             call_requirements,
             source_file: self.compiler.source_filename.clone(),
+            source_locations: source_positions,
         })?;
 
-        target_buffer.push(VmOp::AllocLambda(args));
+        self.opcode_buf.push(VmOp::AllocLambda(args), pos);
 
         Ok(())
     }
@@ -317,8 +406,8 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_op(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         op: parser::ast::Op<'src>,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match op {
             parser::ast::Op::AttrRef {
@@ -327,43 +416,47 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                 default,
             } => {
                 // first push the name
-                self.translate_string_value(lookup_scope, target_buffer, name)?;
+                self.translate_string_value(lookup_scope, name)?;
 
                 // then the attribute set value
-                self.translate_to_ops(lookup_scope, target_buffer, *left)?;
+                self.translate_to_ops(lookup_scope, *left)?;
 
                 if let Some(default) = default {
                     // case with default, we need to emit an extra conditional jump
                     // to ensure that the default value is evaluated only if the attribute was not
                     // present
-                    target_buffer.push(VmOp::GetAttribute { push_error: true });
-                    let skip_idx = target_buffer.len();
-                    target_buffer.push(VmOp::SkipUnless(0));
-                    self.translate_to_ops(lookup_scope, target_buffer, *default)?;
-                    let default_value_ops = target_buffer.len() - skip_idx - 1;
-                    target_buffer[skip_idx] = VmOp::SkipUnless(default_value_ops as u32);
+                    self.opcode_buf
+                        .push(VmOp::GetAttribute { push_error: true }, pos);
+                    let skip_idx = self.opcode_buf.len();
+                    self.opcode_buf.push(VmOp::SkipUnless(0), pos);
+                    self.translate_to_ops(lookup_scope, *default)?;
+                    let default_value_ops = self.opcode_buf.len() - skip_idx - 1;
+                    self.opcode_buf[skip_idx] = VmOp::SkipUnless(default_value_ops as u32);
                 } else {
                     // straightforward, throwing case
-                    target_buffer.push(VmOp::GetAttribute { push_error: false });
+                    self.opcode_buf
+                        .push(VmOp::GetAttribute { push_error: false }, pos);
                 }
             }
             parser::ast::Op::Call { function, arg } => {
-                self.translate_to_ops(lookup_scope, target_buffer, *function)?;
+                self.translate_to_ops(lookup_scope, *function)?;
                 // the arg thunk
-                target_buffer.push(self.compile_subchunk(
+                let alloc_insn = self.compile_subchunk(
                     lookup_scope,
-                    &mut Vec::new(),
+                    &mut OpcodeBuf::default(),
                     &mut BTreeMap::new(),
                     *arg,
-                )?);
-                target_buffer.push(VmOp::Call);
+                )?;
+
+                self.opcode_buf.push(alloc_insn, pos);
+                self.opcode_buf.push(VmOp::Call, pos);
             }
             parser::ast::Op::Binop {
                 left,
                 right,
                 opcode,
             } => {
-                self.translate_to_ops(lookup_scope, target_buffer, *left)?;
+                self.translate_to_ops(lookup_scope, *left)?;
                 let vmop = match opcode {
                     parser::ast::BinopOpcode::Add => VmOp::Add,
                     parser::ast::BinopOpcode::ListConcat => VmOp::ConcatLists(2),
@@ -376,60 +469,63 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                     // these 3 are lazy in the second argument. We emulate that
                     // with a conditional jump
                     parser::ast::BinopOpcode::LogicalOr => {
-                        target_buffer.push(VmOp::SkipUnless(2));
+                        self.opcode_buf.push(VmOp::SkipUnless(2), pos);
                         // true branch
-                        target_buffer.push(VmOp::PushImmediate(
-                            self.compiler.cached_values.true_boolean.clone(),
-                        ));
-                        let skip_idx = target_buffer.len();
-                        target_buffer.push(VmOp::Skip(0));
+                        self.opcode_buf.push(
+                            VmOp::PushImmediate(self.compiler.cached_values.true_boolean.clone()),
+                            pos,
+                        );
+                        let skip_idx = self.opcode_buf.len();
+                        self.opcode_buf.push(VmOp::Skip(0), pos);
 
                         // false branch
-                        self.translate_to_ops(lookup_scope, target_buffer, *right)?;
+                        self.translate_to_ops(lookup_scope, *right)?;
 
                         // and fix up the value in the skip at the end of the true branch
-                        let false_branch_ops = target_buffer.len() - skip_idx - 1;
-                        target_buffer[skip_idx] = VmOp::Skip(false_branch_ops as u32);
+                        let false_branch_ops = self.opcode_buf.len() - skip_idx - 1;
+                        self.opcode_buf[skip_idx] = VmOp::Skip(false_branch_ops as u32);
 
                         return Ok(());
                     }
                     parser::ast::BinopOpcode::LogicalAnd => {
-                        let condition_idx = target_buffer.len();
-                        target_buffer.push(VmOp::SkipUnless(0));
+                        let condition_idx = self.opcode_buf.len();
+                        self.opcode_buf.push(VmOp::SkipUnless(0), pos);
 
                         // true branch, evaluate rhs
-                        self.translate_to_ops(lookup_scope, target_buffer, *right)?;
+                        self.translate_to_ops(lookup_scope, *right)?;
                         // and skip the false branch
-                        target_buffer.push(VmOp::Skip(1));
+                        self.opcode_buf.push(VmOp::Skip(1), pos);
 
-                        let true_branch_ops = target_buffer.len() - condition_idx - 1;
-                        target_buffer[condition_idx] = VmOp::SkipUnless(true_branch_ops as u32);
+                        let true_branch_ops = self.opcode_buf.len() - condition_idx - 1;
+                        self.opcode_buf[condition_idx] = VmOp::SkipUnless(true_branch_ops as u32);
 
                         // false branch, just push one false on the stack
-                        target_buffer.push(VmOp::PushImmediate(
-                            self.compiler.cached_values.false_boolean.clone(),
-                        ));
+                        self.opcode_buf.push(
+                            VmOp::PushImmediate(self.compiler.cached_values.false_boolean.clone()),
+                            pos,
+                        );
 
                         return Ok(());
                     }
                     parser::ast::BinopOpcode::LogicalImplication => {
                         // an implication can be written as !a || b
 
-                        let condition_idx = target_buffer.len();
-                        target_buffer.push(VmOp::SkipUnless(0));
+                        let condition_idx = self.opcode_buf.len();
+                        self.opcode_buf.push(VmOp::SkipUnless(0), pos);
 
                         // true branch, evaluate rhs
-                        self.translate_to_ops(lookup_scope, target_buffer, *right)?;
+                        self.translate_to_ops(lookup_scope, *right)?;
                         // and skip the false branch
-                        target_buffer.push(VmOp::Skip(1));
+                        self.opcode_buf.push(VmOp::Skip(1), pos);
 
-                        let true_branch_ops = target_buffer.len() - condition_idx - 1;
-                        target_buffer[condition_idx] = VmOp::SkipUnless(true_branch_ops as u32);
+                        let true_branch_ops = self.opcode_buf.len() - condition_idx - 1;
+                        self.opcode_buf[condition_idx] = VmOp::SkipUnless(true_branch_ops as u32);
 
                         // false branch, just push one false on the stack
-                        target_buffer.push(VmOp::PushImmediate(
-                            self.compiler.cached_values.true_boolean.clone(),
-                        ));
+                        self.opcode_buf.push(
+                            VmOp::PushImmediate(self.compiler.cached_values.true_boolean.clone()),
+                            pos,
+                        );
 
                         return Ok(());
                     }
@@ -446,14 +542,14 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                         VmOp::Compare(CompareMode::GreaterThanStrict)
                     }
                 };
-                self.translate_to_ops(lookup_scope, target_buffer, *right)?;
-                target_buffer.push(vmop);
+                self.translate_to_ops(lookup_scope, *right)?;
+                self.opcode_buf.push(vmop, pos);
             }
             parser::ast::Op::HasAttr { left, path } => match path {
                 ast::AttrsetKey::Single(name) => {
-                    self.translate_string_value(lookup_scope, target_buffer, name)?;
-                    self.translate_to_ops(lookup_scope, target_buffer, *left)?;
-                    target_buffer.push(VmOp::HasAttribute);
+                    self.translate_string_value(lookup_scope, name)?;
+                    self.translate_to_ops(lookup_scope, *left)?;
+                    self.opcode_buf.push(VmOp::HasAttribute, pos);
                 }
                 ast::AttrsetKey::Multi(_) => {
                     unreachable!("multipart hasattr should have been removed by an ast pass")
@@ -464,8 +560,8 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                     parser::ast::MonopOpcode::NumericMinus => VmOp::NumericNegate,
                     parser::ast::MonopOpcode::BinaryNot => VmOp::BinaryNot,
                 };
-                self.translate_to_ops(lookup_scope, target_buffer, *body)?;
-                target_buffer.push(opcode);
+                self.translate_to_ops(lookup_scope, *body)?;
+                self.opcode_buf.push(opcode, pos);
             }
         }
         Ok(())
@@ -474,16 +570,15 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_compound_value(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         value: parser::ast::CompoundValue<'src>,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match value {
             parser::ast::CompoundValue::Attrset(attrset) => {
-                self.translate_attrset(lookup_scope, target_buffer, attrset, pos)
+                self.translate_attrset(lookup_scope, attrset, pos)
             }
             parser::ast::CompoundValue::List(parser::ast::List { entries }) => {
-                self.translate_list(lookup_scope, target_buffer, entries)
+                self.translate_list(lookup_scope, entries, pos)
             }
         }
     }
@@ -491,7 +586,6 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_attrset(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         mut attrset: ast::Attrset<'src>,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
@@ -500,7 +594,7 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
         }
 
         let mut context_cache = BTreeMap::new();
-        let mut sub_code_buf = Vec::new();
+        let mut subcode_buf = OpcodeBuf::default();
 
         let previous_height = self.current_thunk_stack_height;
         let mut number_of_keys = 0;
@@ -514,11 +608,11 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                     let src = core::mem::replace(src.as_mut(), get_null_expr());
                     let push_thunk_op = self.compile_subchunk(
                         lookup_scope,
-                        &mut sub_code_buf,
+                        &mut subcode_buf,
                         &mut context_cache,
                         src,
                     )?;
-                    target_buffer.push(push_thunk_op);
+                    self.opcode_buf.push(push_thunk_op, pos);
                     self.current_thunk_stack_height += 1;
                 }
             }
@@ -541,21 +635,23 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                             .compiler
                             .alloc_string(KnownNixStringContent::Literal(&ident))?;
 
-                        sub_code_buf.push(VmOp::PushImmediate(ident_value.clone()));
+                        subcode_buf.push(VmOp::PushImmediate(ident_value.clone()), pos);
                         // the source, added to the thunk context
-                        sub_code_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)));
-                        sub_code_buf.push(VmOp::GetAttribute { push_error: false });
+                        subcode_buf.push(VmOp::LoadThunk(ValueSource::ContextReference(0)), pos);
+                        subcode_buf.push(VmOp::GetAttribute { push_error: false }, pos);
 
-                        let code = self.compiler.gc_handle.alloc_vec(&mut sub_code_buf)?;
+                        let (code, source_positions) =
+                            subcode_buf.freeze(&mut self.compiler.gc_handle)?;
                         let alloc_args = self.compiler.gc_handle.alloc(ThunkAllocArgs {
                             context_id,
                             code,
                             context_build_instructions: context_insn.clone(),
                             source_file: self.compiler.source_filename.clone(),
+                            source_positions,
                         })?;
 
-                        target_buffer.push(VmOp::PushImmediate(ident_value));
-                        target_buffer.push(VmOp::AllocateThunk(alloc_args));
+                        self.opcode_buf.push(VmOp::PushImmediate(ident_value), pos);
+                        self.opcode_buf.push(VmOp::AllocateThunk(alloc_args), pos);
                         self.current_thunk_stack_height += 1;
                         number_of_keys += 1;
                     }
@@ -574,8 +670,9 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                                     pos,
                                 })?;
 
-                        target_buffer.push(VmOp::PushImmediate(ident_value));
-                        target_buffer.push(VmOp::DuplicateThunk(value_source));
+                        self.opcode_buf.push(VmOp::PushImmediate(ident_value), pos);
+                        self.opcode_buf
+                            .push(VmOp::DuplicateThunk(value_source), pos);
                         self.current_thunk_stack_height += 1;
                         number_of_keys += 1;
                     }
@@ -592,21 +689,22 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                 }
             };
 
-            self.translate_string_value(lookup_scope, target_buffer, key)?;
+            self.translate_string_value(lookup_scope, key)?;
             let push_thunk_op =
-                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut context_cache, value)?;
-            target_buffer.push(push_thunk_op);
+                self.compile_subchunk(lookup_scope, &mut subcode_buf, &mut context_cache, value)?;
+            self.opcode_buf.push(push_thunk_op, pos);
             self.current_thunk_stack_height += 1;
 
             number_of_keys += 1;
         }
 
-        target_buffer.push(VmOp::BuildAttrset(number_of_keys));
+        self.opcode_buf
+            .push(VmOp::BuildAttrset(number_of_keys), pos);
         self.current_thunk_stack_height -= number_of_keys;
 
         let thunks_to_drop = self.current_thunk_stack_height - previous_height;
         if thunks_to_drop > 0 {
-            target_buffer.push(VmOp::DropThunks(thunks_to_drop));
+            self.opcode_buf.push(VmOp::DropThunks(thunks_to_drop), pos);
             self.current_thunk_stack_height = previous_height;
         }
 
@@ -616,23 +714,27 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_list(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         list: Vec<NixExpr<'src>>,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
         if list.is_empty() {
-            target_buffer.push(VmOp::AllocList(0));
+            self.opcode_buf.push(VmOp::AllocList(0), pos);
             return Ok(());
         }
 
         let num_entries = list.len();
         let mut ctx_cache = BTreeMap::new();
-        let mut sub_code_buf = Vec::new();
         for expr in list {
-            let push_thunk_op =
-                self.compile_subchunk(lookup_scope, &mut sub_code_buf, &mut ctx_cache, expr)?;
-            target_buffer.push(push_thunk_op);
+            let push_thunk_op = self.compile_subchunk(
+                lookup_scope,
+                &mut OpcodeBuf::default(),
+                &mut ctx_cache,
+                expr,
+            )?;
+            self.opcode_buf.push(push_thunk_op, pos);
         }
-        target_buffer.push(VmOp::AllocList(num_entries as u32));
+        self.opcode_buf
+            .push(VmOp::AllocList(num_entries as u32), pos);
 
         Ok(())
     }
@@ -640,7 +742,6 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_value_ref(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         ident: &'src str,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
@@ -668,7 +769,7 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
             }
         };
 
-        target_buffer.push(opcode);
+        self.opcode_buf.push(opcode, pos);
 
         Ok(())
     }
@@ -676,9 +777,8 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn translate_let_expr(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        target_buffer: &mut Vec<VmOp>,
         let_expr: ast::LetInExpr<'src>,
-        _pos: SourcePosition,
+        pos: SourcePosition,
     ) -> Result<(), CompileError> {
         let height_before = self.current_thunk_stack_height;
         let mut added_keys = 0;
@@ -707,10 +807,11 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
         // To do that, we preallocate a set of blackholes, before overwriting them
         // with the real thunk definitions.
         let added_thunks = self.current_thunk_stack_height - height_before;
-        target_buffer.push(VmOp::PushBlackholes(added_thunks));
+        self.opcode_buf
+            .push(VmOp::PushBlackholes(added_thunks), pos);
 
         let mut cached_context_instructions = BTreeMap::new();
-        let mut instruction_buf = Vec::new();
+        let mut instruction_buf = OpcodeBuf::default();
 
         let mut slot_to_overwrite = height_before;
         let mut source_context_ref = height_before;
@@ -726,10 +827,13 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                     &mut cached_context_instructions,
                     *source_expr,
                 )?;
-                target_buffer.push(create_thunk_op);
-                target_buffer.push(VmOp::OverwriteThunk {
-                    stackref: slot_to_overwrite,
-                });
+                self.opcode_buf.push(create_thunk_op, pos);
+                self.opcode_buf.push(
+                    VmOp::OverwriteThunk {
+                        stackref: slot_to_overwrite,
+                    },
+                    pos,
+                );
                 slot_to_overwrite += 1;
             } else {
                 // as this expression did not have a source, we would need to pick the entries
@@ -747,6 +851,10 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                 .gc_handle
                 .alloc_slice(&[ValueSource::ThunkStackRef(context_ref)])?;
 
+            let inherit_positions =
+                self.compiler
+                    .gc_handle
+                    .alloc_slice(&[pos.into(), pos.into(), pos.into()])?;
             for ident in inherit_entry.entries {
                 let ident = self
                     .compiler
@@ -757,17 +865,22 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                     VmOp::GetAttribute { push_error: false },
                 ])?;
 
-                target_buffer.push(VmOp::AllocateThunk(self.compiler.gc_handle.alloc(
-                    ThunkAllocArgs {
+                self.opcode_buf.push(
+                    VmOp::AllocateThunk(self.compiler.gc_handle.alloc(ThunkAllocArgs {
                         code,
                         context_id: 0,
                         context_build_instructions: context_build_instructions.clone(),
                         source_file: self.compiler.source_filename.clone(),
+                        source_positions: inherit_positions.clone(),
+                    })?),
+                    pos,
+                );
+                self.opcode_buf.push(
+                    VmOp::OverwriteThunk {
+                        stackref: slot_to_overwrite,
                     },
-                )?));
-                target_buffer.push(VmOp::OverwriteThunk {
-                    stackref: slot_to_overwrite,
-                });
+                    pos,
+                );
                 slot_to_overwrite += 1;
             }
         }
@@ -780,19 +893,22 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
                 &mut cached_context_instructions,
                 body,
             )?;
-            target_buffer.push(push_thunk_op);
-            target_buffer.push(VmOp::OverwriteThunk {
-                stackref: slot_to_overwrite,
-            });
+            self.opcode_buf.push(push_thunk_op, pos);
+            self.opcode_buf.push(
+                VmOp::OverwriteThunk {
+                    stackref: slot_to_overwrite,
+                },
+                pos,
+            );
             slot_to_overwrite += 1;
         }
 
         // finally, all binding thunks are properly set.
         // now we can emit the body instructions
-        self.translate_to_ops(lookup_scope, target_buffer, *let_expr.body)?;
+        self.translate_to_ops(lookup_scope, *let_expr.body)?;
 
         // and restore the previous status quo
-        target_buffer.push(VmOp::DropThunks(added_thunks));
+        self.opcode_buf.push(VmOp::DropThunks(added_thunks), pos);
         self.current_thunk_stack_height = height_before;
         lookup_scope.drop_entries(added_keys);
 
@@ -804,16 +920,16 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
     fn compile_subchunk(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        opcode_buf: &mut Vec<VmOp>,
+        opcode_buf: &mut OpcodeBuf,
         context_cache: &mut BTreeMap<Vec<ValueSource>, (u32, GcPointer<Array<ValueSource>>)>,
         expr: NixExpr<'src>,
     ) -> Result<VmOp, CompileError> {
         let mut subscope = lookup_scope.subscope();
-        ThunkCompiler::new(&mut self.compiler).translate_to_ops(&mut subscope, opcode_buf, expr)?;
+        ThunkCompiler::new(&mut self.compiler, opcode_buf).translate_to_ops(&mut subscope, expr)?;
         let ctx_ins = subscope.get_inherit_context();
 
         if let (&[VmOp::LoadThunk(ValueSource::ContextReference(0))], &[value_source]) =
-            (opcode_buf.as_slice(), ctx_ins)
+            (opcode_buf.as_ref(), ctx_ins)
         {
             // the requested instruction should push a value on the local thunk stack.
             // the compiled thunk only loads a single value from its context, which we would select
@@ -831,12 +947,13 @@ impl<'compiler, 'src, 'gc, 'builtins> ThunkCompiler<'compiler, 'gc, 'builtins> {
         // optimize our code a little by replicing calls with tail calls where possible.
         insert_tailcalls(opcode_buf.as_mut());
 
-        let code = self.compiler.gc_handle.alloc_vec(opcode_buf)?;
+        let (code, source_positions) = opcode_buf.freeze(&mut self.compiler.gc_handle)?;
         let (context_id, context_build_instructions) =
             resolve_possibly_cached_context(&mut self.compiler.gc_handle, context_cache, ctx_ins)?;
         let alloc_args = self.compiler.gc_handle.alloc(ThunkAllocArgs {
             context_id,
             code,
+            source_positions,
             context_build_instructions,
             source_file: self.compiler.source_filename.clone(),
         })?;

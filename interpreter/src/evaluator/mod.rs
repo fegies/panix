@@ -154,10 +154,12 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                 context_build_instructions,
                                 call_requirements,
                                 source_file: _,
+                                source_locations,
                             } = self.evaluator.gc_handle.load(&args);
 
                             let code = code.clone();
                             let call_requirements = call_requirements.clone();
+                            let source_locations = source_locations.clone();
 
                             let alloc_buf = &mut self.evaluator.thunk_alloc_buffer;
                             fetch_context_entries(
@@ -169,6 +171,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                     .as_ref(),
                             );
                             let context = ExecutionContext {
+                                source_positions: Some(source_locations),
                                 entries: self.evaluator.gc_handle.alloc_vec(alloc_buf)?,
                                 source_filename: self.source_filename.clone(),
                             };
@@ -525,6 +528,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
         let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
         fetch_context_entries(thunk_buf, &self.state, build_instructions);
         let context = ExecutionContext {
+            source_positions: Some(args.source_positions.clone()),
             entries: self.evaluator.gc_handle.alloc_vec(thunk_buf)?,
             source_filename: self.source_filename.clone(),
         };

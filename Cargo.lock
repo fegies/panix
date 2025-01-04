@@ -159,6 +159,7 @@ dependencies = [
 name = "lexer"
 version = "0.1.0"
 dependencies = [
+ "gc_derive",
  "lexer_impedance_matcher",
  "memchr",
  "thiserror",

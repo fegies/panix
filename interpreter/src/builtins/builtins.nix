@@ -374,6 +374,7 @@ let
         then let
           head = lst.head;
         in
+          # we do not want to carry around the thunks from decons
           ___builtin_seq [head [lst.head]]
         else let
           left_len = len / 2;
