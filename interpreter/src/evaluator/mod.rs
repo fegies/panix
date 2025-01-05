@@ -26,10 +26,6 @@ struct ThunkEvalState {
     thunk_stack: Vec<GcPointer<Thunk>>,
     code_buf: Vec<VmOp>,
     code_source_positions: Option<GcPointer<Array<SourcePosition>>>,
-
-    // a buffer that is filled with the filenames for
-    // tail recursion calls to allow us to recover the correct stacktrace.
-    tailcall_trace_buf: Vec<(NixString, Option<SourcePosition>)>,
 }
 
 struct ThunkEvaluator<'eval, 'gc> {
@@ -37,6 +33,10 @@ struct ThunkEvaluator<'eval, 'gc> {
     evaluator: &'eval mut Evaluator<'gc>,
     source_filename: NixString,
     insn_counter: usize,
+
+    // a buffer that is filled with the filenames for
+    // tail recursion calls to allow us to recover the correct stacktrace.
+    tailcall_trace_buf: Vec<(NixString, Option<SourcePosition>)>,
 }
 
 impl<'gc> Evaluator<'gc> {
@@ -78,6 +78,7 @@ impl<'gc> Evaluator<'gc> {
                     evaluator: self,
                     source_filename: source_filename.clone(),
                     insn_counter: 0,
+                    tailcall_trace_buf: Vec::new(),
                 }
                 .compute_result()?;
 
@@ -103,6 +104,7 @@ impl<'gc> Evaluator<'gc> {
             evaluator: self,
             source_filename,
             insn_counter: 0,
+            tailcall_trace_buf: Vec::new(),
         }
         .compute_result()
     }
@@ -131,15 +133,17 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             }
 
             // print the tailcall entries if present
-            for (filename, pos) in self.state.tailcall_trace_buf.iter().rev() {
+            for (filename, pos) in self.tailcall_trace_buf.iter().rev() {
                 if let Some(pos) = pos {
                     println!(
                         "at {} {} (tailcall)",
                         filename.load(&self.evaluator.gc_handle),
                         pos
                     );
-                }
+                } else {
+
                 println!("at {} (tailcall)", filename.load(&self.evaluator.gc_handle),);
+                }
             }
         }
 
@@ -361,10 +365,11 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                 .pop()
                                 .expect("thunk stack exhausted unexpectedly");
                             let func = self.pop()?;
-                            // clear all our state.
+
+                            // put the code buffer back to avoid a reallocation
                             core::mem::drop(code);
                             self.state.code_buf = code_buf;
-                            self.state.clear();
+
                             match func {
                                 NixValue::Builtin(builtin) => {
                                     // a builtin does not really need to use our stack frame.
@@ -376,26 +381,26 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                     );
                                 }
                                 NixValue::Function(func) => {
-                                    // stash the location in the tailcall buffer.
+                                    // grab the current location for future reuse.
                                     let current_source_pos =
                                         self.state.code_source_positions.as_ref().map(|ptr| {
                                             self.evaluator.gc_handle.load(&ptr).as_ref()
                                                 [self.insn_counter]
                                                 .clone()
                                         });
-                                    self.insn_counter = 0;
-
                                     let current_filename = core::mem::replace(
                                         &mut self.source_filename,
                                         func.context.source_filename.clone(),
                                     );
 
-                                    self.state
-                                        .tailcall_trace_buf
+                                    // reinitialize our context and continue from the top.
+                                    self.insn_counter = 0;
+                                    self.state.clear();
+                                    self.state.initialize_for_call(func, arg, self.evaluator)?;
+
+                                    self.tailcall_trace_buf
                                         .push((current_filename, current_source_pos));
 
-                                    // reinitialize our context and continue from the top.
-                                    self.state.initialize_for_call(func, arg, self.evaluator)?;
                                     continue 'outer;
                                 }
                                 _ => return Err(EvaluateError::TypeError),
@@ -811,7 +816,6 @@ impl ThunkEvalState {
         self.local_stack.clear();
         self.thunk_stack.clear();
         self.code_buf.clear();
-        self.tailcall_trace_buf.clear();
         self.code_source_positions = None;
     }
 
