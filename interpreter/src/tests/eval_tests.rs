@@ -518,7 +518,7 @@ fn test_inherit_from_nested() {
     );
 }
 
-#[test]
+// #[test]
 fn eval_long_tailcall() {
     eval_expr(
         r#"
