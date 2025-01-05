@@ -112,8 +112,10 @@ let
       then acc
       else let
         new_acc = op acc (elem_at_list idx);
+        next_idx = idx + 1;
+        step = ___builtin_seq [new_acc next_idx (iter new_acc)];
       in
-        seq new_acc (iter new_acc (idx + 1));
+        step next_idx;
   in
     iter nul 0;
 
@@ -126,10 +128,11 @@ let
         else arg.outPath or (throw "cannot coerce a set to a string")
       )
     else ___builtin_tostring arg;
-  rawBuiltins = {
+  builtins = {
     inherit
       concatMap
       throw
+      builtins
       toString
       map
       deepSeq
@@ -399,12 +402,4 @@ let
       else decons list_len (cons_inner_sort 0 list_len);
   };
 in
-  # avoid carrying around the thunks for all of our builtins lambdas.
-  # we need to add the builtins as a recursive key after the deepseq to avoid
-  # an infinite recursion.
-  deepSeq rawBuiltins (
-    let
-      builtins = rawBuiltins // {inherit builtins;};
-    in
-      builtins
-  )
+  builtins

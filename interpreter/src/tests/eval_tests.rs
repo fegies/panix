@@ -517,3 +517,15 @@ fn test_inherit_from_nested() {
         "[42 13]",
     );
 }
+
+#[test]
+fn eval_long_tailcall() {
+    eval_expr(
+        r#"
+    let huge_list = builtins.genList (a: a) 10000;
+    sum = builtins.foldl' (acc: val: acc + val) 0 huge_list;
+    in sum
+        "#,
+        "49995000",
+    );
+}

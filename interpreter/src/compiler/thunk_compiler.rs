@@ -52,6 +52,11 @@ mod opcode_buf {
             GcPointer<Array<opcodes::SourcePosition>>,
         )> {
             let op_arr = gc.alloc_vec(&mut self.opcodes)?;
+
+            // optimize our bytecode, inserting tailcalls where possible before
+            // emitting the result
+            insert_tailcalls(&mut self.opcodes);
+
             let pos_arr = gc.alloc_vec(&mut self.positions)?;
             Ok((op_arr, pos_arr))
         }
@@ -382,8 +387,8 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
 
         let mut body_compiler = ThunkCompiler::new(&mut self.compiler, &mut code_buf);
         body_compiler.current_thunk_stack_height = current_thunk_stack_height;
-
         body_compiler.translate_to_ops(&mut subscope, *lambda.body)?;
+
         let (code, source_positions) = code_buf.freeze(&mut self.compiler.gc_handle)?;
         let context_build_instructions = self
             .compiler
@@ -942,9 +947,6 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
             opcode_buf.clear();
             return Ok(VmOp::DuplicateThunk(value_source));
         }
-
-        // optimize our code a little by replicing calls with tail calls where possible.
-        insert_tailcalls(opcode_buf.as_mut());
 
         let (code, source_positions) = opcode_buf.freeze(&mut self.compiler.gc_handle)?;
         let (context_id, context_build_instructions) =

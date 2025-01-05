@@ -151,14 +151,23 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
     fn compute_result_inner(&mut self) -> Result<NixValue, EvaluateError> {
         'outer: loop {
             #[cfg(test)]
-            println!("forcing thunk...");
+            println!(
+                "forcing thunk at {}, {:?} ....",
+                self.source_filename.load(&self.evaluator.gc_handle),
+                self.state.code_source_positions.as_ref().map(|p| self
+                    .evaluator
+                    .gc_handle
+                    .load(p)
+                    .as_ref()[0]
+                    .clone())
+            );
 
             let mut code_buf = core::mem::take(&mut self.state.code_buf);
             {
                 let mut code = code_buf.drain(..);
 
                 while let Some(opcode) = code.next() {
-                    // #[cfg(test)]
+                    #[cfg(test)]
                     println!("executing: {:?}", opcode.debug(&self.evaluator.gc_handle));
 
                     match opcode {

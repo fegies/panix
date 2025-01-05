@@ -241,15 +241,7 @@ impl Builtins for NixBuiltins {
             BuiltinType::FromJson => execute_fromjson(evaluator, argument),
             BuiltinType::RemoveAttrs => execute_remove_attrs(evaluator, argument),
             BuiltinType::DeepSeq => execute_deepseq(evaluator, argument),
-            BuiltinType::Seq => {
-                let [e1, e2] = evaluator
-                    .force_thunk(argument)?
-                    .expect_list()?
-                    .expect_entries(&evaluator.gc_handle)?;
-
-                evaluator.force_thunk(e1)?;
-                evaluator.force_thunk(e2)
-            }
+            BuiltinType::Seq => execute_seq(evaluator, argument),
             BuiltinType::Match => execute_match(evaluator, argument),
             BuiltinType::MapAttrs => {
                 execute_map_attrs(evaluator, argument, self.native_name.clone())
@@ -267,6 +259,25 @@ impl Builtins for NixBuiltins {
             BuiltinType::ReplaceStrings => execute_replace_strings(evaluator, argument),
             BuiltinType::AttrValues => execute_attr_values(evaluator, argument),
         }
+    }
+}
+
+fn execute_seq(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let list = evaluator.force_thunk(argument)?.expect_list()?;
+    if let Some([e1, e2]) = list.expect_entries(&evaluator.gc_handle).ok() {
+        evaluator.force_thunk(e1)?;
+        evaluator.force_thunk(e2)
+    } else {
+        let mut entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
+        let last = entries.pop().ok_or(EvaluateError::AccessOutOfRange)?;
+        for entry in entries {
+            evaluator.force_thunk(entry)?;
+        }
+
+        evaluator.force_thunk(last)
     }
 }
 
