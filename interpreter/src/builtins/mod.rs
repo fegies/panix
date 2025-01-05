@@ -554,7 +554,6 @@ fn deep_force(evaluator: &mut Evaluator, value: GcPointer<Thunk>) -> Result<(), 
         NixValue::Attrset(set) => {
             let entries = evaluator.gc_handle.load(&set.entries).as_ref().to_owned();
             for (_name, entry) in entries {
-                println!("forcing: {:?}", _name.debug(&evaluator.gc_handle));
                 deep_force(evaluator, entry)?;
             }
         }

@@ -141,8 +141,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         pos
                     );
                 } else {
-
-                println!("at {} (tailcall)", filename.load(&self.evaluator.gc_handle),);
+                    println!("at {} (tailcall)", filename.load(&self.evaluator.gc_handle),);
                 }
             }
         }
@@ -151,13 +150,17 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
     }
     fn compute_result_inner(&mut self) -> Result<NixValue, EvaluateError> {
         'outer: loop {
+            #[cfg(test)]
             println!("forcing thunk...");
+
             let mut code_buf = core::mem::take(&mut self.state.code_buf);
             {
                 let mut code = code_buf.drain(..);
 
                 while let Some(opcode) = code.next() {
+                    // #[cfg(test)]
                     println!("executing: {:?}", opcode.debug(&self.evaluator.gc_handle));
+
                     match opcode {
                         VmOp::AllocList(list_len) => {
                             let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;
@@ -540,6 +543,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
             self.state.code_buf = code_buf;
             let result_value = self.pop()?;
+            #[cfg(test)]
             println!(
                 "thunk evaluated to {:?}",
                 result_value.debug(&self.evaluator.gc_handle)
@@ -559,6 +563,8 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             .gc_handle
             .load(&args.context_build_instructions)
             .as_ref();
+
+        #[cfg(test)]
         println!("ctx: {build_instructions:?}");
 
         let thunk_buf = &mut self.evaluator.thunk_alloc_buffer;

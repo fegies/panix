@@ -324,6 +324,18 @@ let
         in
           compare_iter 0;
 
+    elem = x: xs: let
+      list_len = length xs;
+      pick = elemAt xs;
+      iter = idx:
+        if idx == list_len
+        then false
+        else if pick idx == x
+        then true
+        else iter (idx + 1);
+    in
+      iter 0;
+
     sort = comparator: list: let
       pick = elemAt list;
       list_len = length list;
