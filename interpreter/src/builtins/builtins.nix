@@ -30,11 +30,11 @@ let
     # we go with radix 4 to improve perf a little and reduce recursion depth.
     # we could go wider, but the cases would need to be hardcoded, or there would be little benefit over just recursing one level deeper.
     iter = length: offset:
-    # seq the offset to avoid a deep thunk chain being carried onto the generated list
-      seq offset
-      ( # the 0 length case is handled by the outer function already.
-        if length <= 4 # it is 1 or 2
-        then
+    # the 0 length case is handled by the outer function already.
+      if length <= 4 # it is 1 or 2
+      then
+        ___builtin_seq [
+          offset
           (
             # base cases.
             if length <= 2
@@ -52,19 +52,19 @@ let
                   [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3))]
               )
           )
-        else let
-          # recursion....
-          step_size = length / 4;
-          iter_step_size = iter step_size;
-        in
-          concatLists [
-            (iter_step_size offset)
-            (iter_step_size (offset + step_size))
-            (iter_step_size (offset + 2 * step_size))
-            # the last one may have a slightly smaller step
-            (iter (length - 3 * step_size) (offset + 3 * step_size))
-          ]
-      );
+        ]
+      else let
+        # recursion....
+        step_size = length / 4;
+        iter_step_size = iter step_size;
+      in
+        concatLists [
+          (iter_step_size offset)
+          (iter_step_size (offset + step_size))
+          (iter_step_size (offset + 2 * step_size))
+          # the last one may have a slightly smaller step
+          (iter (length - 3 * step_size) (offset + 3 * step_size))
+        ];
   in
     if length == 0
     then []
