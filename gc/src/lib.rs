@@ -102,18 +102,8 @@ impl PageSource for CollectionHandle<'_> {
         self.pages.get_allocation_page(generation)
     }
     fn finish_allocation_page(&mut self, generation: Generation) {
-        let gen = generation.0 as usize;
-
-        let new_page = self
-            .pages
-            .global
-            .lock()
-            .unwrap()
-            .get_page(generation)
-            .unwrap();
-        let new_page = Rc::new(new_page);
-        self.pages.pages[gen] = new_page.clone();
-        self.scavenge_pending_set.entries[gen].push_back(new_page);
+        let new_page = self.pages.refresh_allocation_page(generation);
+        self.scavenge_pending_set.entries[generation.0 as usize].push_back(new_page);
     }
     fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation {
         self.pages.generations.get_generation(ptr)
@@ -125,15 +115,7 @@ impl PageSource for PromotionHandle<'_> {
     }
 
     fn finish_allocation_page(&mut self, generation: Generation) {
-        let gen = generation.0 as usize;
-        let new_page = self
-            .pages
-            .global
-            .lock()
-            .unwrap()
-            .get_page(generation)
-            .unwrap();
-        self.pages.pages[gen] = Rc::new(new_page);
+        self.pages.refresh_allocation_page(generation);
     }
 
     fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation {
@@ -183,42 +165,70 @@ impl GenerationCounter {
 }
 
 struct AllocationPages {
-    pages: [Rc<Page>; GC_GEN_HIGHEST as usize],
+    active_pages: [Rc<Page>; GC_NUM_GENERATIONS as usize],
     generations: GenerationAnalyzer,
     global: Arc<Mutex<Pagetracker>>,
-    alloc_counters: [GenerationCounter; GC_GEN_HIGHEST as usize],
+    alloc_counters: [GenerationCounter; GC_NUM_GENERATIONS as usize],
+    used_pages_current: [Vec<Rc<Page>>; GC_NUM_GENERATIONS as usize],
 }
+
 impl AllocationPages {
+    pub fn suggest_collection_target_generation(&self) -> Generation {
+        let mut budget = 1;
+        for gen in 1..=GC_GEN_HIGHEST {
+            budget *= 4;
+            if self.used_pages_current[gen as usize].len() < budget {
+                return Generation(gen - 1);
+            }
+        }
+
+        // everything is over budget. do a full collection instead.
+        Generation(GC_GEN_HIGHEST)
+    }
+
+    // refresh the allocation page for the current generation and return a reference to it.
+    pub fn refresh_allocation_page(&mut self, generation: Generation) -> Rc<Page> {
+        let gen = generation.0 as usize;
+        let new_page = self
+            .global
+            .lock()
+            .unwrap()
+            .get_page(generation)
+            .expect("heap exhausted");
+        let new_page = Rc::new(new_page);
+
+        self.active_pages[gen] = new_page.clone();
+        self.used_pages_current[gen].push(new_page.clone());
+
+        new_page
+    }
+
     pub fn new(heap: Arc<Mutex<Pagetracker>>) -> Self {
         let mut guard = heap.lock().unwrap();
         let pages =
             std::array::from_fn(|gen| Rc::new(guard.get_page(Generation(gen as u8)).unwrap()));
         let generations = guard.get_analyzer().clone();
         drop(guard);
+        let mut used_pages_current = core::array::from_fn(|_| Vec::new());
+
+        // ensure that the current page tracker starts off containing the initial page set.
+        used_pages_current
+            .iter_mut()
+            .zip(pages.iter())
+            .for_each(|(vec, page)| vec.push(page.clone()));
+
         Self {
-            pages,
+            active_pages: pages,
             generations,
             global: heap,
             alloc_counters: core::array::from_fn(|_| GenerationCounter::default()),
+            used_pages_current,
         }
-    }
-    pub fn get_fresh_allocpages(&mut self) -> Generation {
-        let mut heap = self.global.lock().unwrap();
-        let target_generation = heap.suggest_collection_target_generation();
-
-        heap.mark_current_pages_as_previous(target_generation);
-
-        for gen in 0..=target_generation.0 {
-            let gen = Generation(gen);
-            self.pages[gen.0 as usize] = Rc::new(heap.get_page(gen).unwrap());
-        }
-
-        target_generation
     }
 
     pub fn get_allocation_page(&mut self, generation: Generation) -> (&Page, &GenerationCounter) {
         let gen = generation.0 as usize;
-        (&self.pages[gen], &self.alloc_counters[gen])
+        (&self.active_pages[gen], &self.alloc_counters[gen])
     }
 
     fn print_heap_sizes(&self) {
@@ -245,14 +255,6 @@ impl AllocationPages {
     }
 }
 
-impl Drop for AllocationPages {
-    fn drop(&mut self) {
-        let mut heap = self.global.lock().unwrap();
-        heap.mark_current_pages_as_previous(Generation(GC_GEN_HIGHEST));
-        heap.rotate_used_pages_to_generation(Generation(GC_GEN_HIGHEST));
-    }
-}
-
 impl GcHandle {
     fn with_retry<TResult>(
         &mut self,
@@ -269,26 +271,51 @@ impl GcHandle {
     fn run_gc(&mut self) {
         println!("gc triggered!");
         self.alloc_pages.print_heap_sizes();
-        let target_generation = self.alloc_pages.get_fresh_allocpages();
+        let target_generation = self.alloc_pages.suggest_collection_target_generation();
         println!("collecting gen {}", target_generation.0);
+
+        let mut previous_pages = Vec::new();
+
+        // clear out the previous alloc pages and used tracker.
+
+        {
+            for gen in 0..=target_generation.0 {
+                // move the entries of the previous tracker to a local vec.
+                previous_pages.append(&mut self.alloc_pages.used_pages_current[gen as usize]);
+                self.alloc_pages.refresh_allocation_page(Generation(gen));
+            }
+        }
+
+        // at this point, the previous page tracker is cleared and the alloc pages filled with
+        // fresh pages for all generations to be collected.
 
         let mut handle = CollectionHandle {
             pages: &mut self.alloc_pages,
             scavenge_pending_set: ScavengePendingSet::new(),
         };
 
-        // we will never allocate anything in gen0 during GC
+        // now, put all new pages into the bucket that will potentially be scavenged
+
+        // we will never allocate anything in gen0 during GC. so we do not need to put the gen0
+        // page into the scavenge set. We will however need to put the next higher gen into the set
+        // because we might allocate there during collection.
         for gen in 1..=target_generation.next_higher().0 as usize {
-            handle.scavenge_pending_set.entries[gen].push_back(handle.pages.pages[gen].clone());
+            handle.scavenge_pending_set.entries[gen]
+                .push_back(handle.pages.active_pages[gen].clone());
         }
+
+        // trace all root pointers, copying their content to the new space.
 
         let mut num_roots = 0;
         inspect_roots(|root| {
             num_roots += 1;
             scavenge_heap_pointer(&mut handle, root, target_generation);
         });
-
         println!("traced {num_roots} roots");
+
+        // now, scavenge the allocation pages, starting with the lowest generation and working our
+        // way up. note that the current allocating page may very well be a part of the set to be
+        // scavenged.
 
         for gen in 1..=target_generation.next_higher().0 {
             while let Some(next_page) =
@@ -300,6 +327,19 @@ impl GcHandle {
             }
         }
 
+        core::mem::drop(handle);
+        // at this point, no references to any of the previous pages
+        // should exist any longer.
+        // this means we can return them to the heap for future reuse.
+        {
+            let mut guard = self.alloc_pages.global.lock().unwrap();
+            guard.return_pages(
+                previous_pages.into_iter().filter_map(|page| {
+                    Rc::<Page>::into_inner(page).map(|page| page.into_allocated())
+                }),
+            )
+        }
+
         for counter in self
             .alloc_pages
             .alloc_counters
@@ -309,11 +349,6 @@ impl GcHandle {
             counter.mark_cleared();
         }
 
-        self.alloc_pages
-            .global
-            .lock()
-            .unwrap()
-            .rotate_used_pages_to_generation(target_generation);
         println!("gc done.");
     }
 
@@ -330,13 +365,13 @@ impl GcHandle {
         &mut self,
         data: TData,
     ) -> GcResult<GcPointer<TData>> {
-        let heap_ptr = match self.alloc_pages.pages[0]
+        let heap_ptr = match self.alloc_pages.active_pages[0]
             .try_alloc(data, &mut self.alloc_pages.alloc_counters[0])
         {
             Ok(ptr) => ptr,
             Err(value) => {
                 self.clear_nursery()?;
-                self.alloc_pages.pages[0]
+                self.alloc_pages.active_pages[0]
                     .try_alloc(value, &mut self.alloc_pages.alloc_counters[0])
                     .map_err(|_| GcError::ObjectBiggerThanPage)?
             }
@@ -351,7 +386,7 @@ impl GcHandle {
         data: &[TData],
     ) -> GcResult<GcPointer<Array<TData>>> {
         let heap_ptr = self.with_retry(|gc_handle| {
-            gc_handle.alloc_pages.pages[0]
+            gc_handle.alloc_pages.active_pages[0]
                 .try_alloc_slice(data, &mut gc_handle.alloc_pages.alloc_counters[0])
         })?;
         Ok(heap_ptr.root())
@@ -373,7 +408,7 @@ impl GcHandle {
     }
 
     fn get_nursery_page(&self) -> (&Page, &GenerationCounter) {
-        let page = self.alloc_pages.pages[0].as_ref();
+        let page = self.alloc_pages.active_pages[0].as_ref();
         let counter = &self.alloc_pages.alloc_counters[0];
         (page, counter)
     }

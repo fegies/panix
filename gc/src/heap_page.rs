@@ -1,5 +1,5 @@
 use crate::{
-    heap::ZeroedPage,
+    heap::{AllocatedPage, ZeroedPage},
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
     CollectionHandle, GcError, Generation, GenerationCounter, PageSource, GC_PAGE_SIZE,
@@ -135,7 +135,7 @@ mod header {
 
 pub(crate) struct Page {
     /// the lowest valid address that belongs to this page
-    base_address: *mut u8,
+    inner: AllocatedPage,
     /// the latest non-free byte of this page.
     /// (e.g. a value 1 past the free range)
     free_top: Cell<*mut HeapEntry>,
@@ -145,20 +145,20 @@ pub(crate) struct Page {
 }
 
 impl Page {
-    pub(crate) fn get_base(&self) -> *mut u8 {
-        self.base_address
-    }
-
     pub(crate) fn new(page: ZeroedPage) -> Self {
-        let base_address = page.into_base();
-        debug_assert!(base_address as usize % GC_PAGE_SIZE == 0);
+        let page: AllocatedPage = page.into();
+        debug_assert!(page.base as usize % GC_PAGE_SIZE == 0);
 
-        let free_top = unsafe { base_address.add(GC_PAGE_SIZE) } as *mut HeapEntry;
+        let free_top = unsafe { page.base.add(GC_PAGE_SIZE) } as *mut HeapEntry;
         Self {
-            base_address,
+            inner: page,
             free_top: Cell::new(free_top),
             scavenge_end_addr: Cell::new(free_top as usize),
         }
+    }
+
+    pub fn into_allocated(self) -> AllocatedPage {
+        self.inner
     }
 
     pub(crate) fn scavenge_content(
@@ -292,7 +292,7 @@ impl Page {
         // as much as the object header needs.
         let header_ptr = unsafe { (data_ptr as *mut HeapEntry).sub(1) };
 
-        if (self.base_address as usize) < header_ptr as usize {
+        if (self.inner.base as usize) < header_ptr as usize {
             // our allocation is legal, so perform it by writing the free top.
             self.free_top.set(header_ptr);
 

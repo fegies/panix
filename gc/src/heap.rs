@@ -3,8 +3,9 @@ use std::{cell::Cell, sync::Arc};
 use crate::{
     get_heap_base,
     heap_page::{HeapEntry, Page},
+    init::get_global_gc,
     pointer::RawHeapGcPointer,
-    Generation, GC_GEN_HIGHEST, GC_NUM_GENERATIONS, GC_PAGE_SIZE,
+    Generation, GC_PAGE_SIZE,
 };
 
 #[derive(Clone)]
@@ -29,9 +30,7 @@ pub struct Pagetracker {
     base: *mut u8,
     size: usize,
     next_free_base: *mut u8,
-    free_pages: Vec<AllocatedPage>,
-    used_pages_current: [Vec<AllocatedPage>; GC_NUM_GENERATIONS],
-    used_pages_previous: [Vec<AllocatedPage>; GC_NUM_GENERATIONS],
+    free_pages: Vec<ZeroedPage>,
     generations: GenerationAnalyzer,
 }
 unsafe impl Send for Pagetracker {}
@@ -43,14 +42,11 @@ impl Pagetracker {
             .into_boxed_slice()
             .into();
         let analyzer = GenerationAnalyzer { inner: generations };
-        const EMPTYVEC: Vec<AllocatedPage> = Vec::new();
         Self {
             base,
             size,
             next_free_base: base,
             free_pages: Vec::new(),
-            used_pages_current: [EMPTYVEC; GC_NUM_GENERATIONS],
-            used_pages_previous: [EMPTYVEC; GC_NUM_GENERATIONS],
             generations: analyzer,
         }
     }
@@ -58,50 +54,19 @@ impl Pagetracker {
         &self.generations
     }
 
+    pub fn return_pages(&mut self, pages: impl Iterator<Item = AllocatedPage>) {
+        self.free_pages.extend(pages.map(|page| page.zero()));
+    }
+
     /// compute the optimal collection target according to internal metrics
-    pub fn suggest_collection_target_generation(&self) -> Generation {
-        let mut budget = 1;
-        for gen in 1..=GC_GEN_HIGHEST {
-            budget *= 4;
-            if self.used_pages_current[gen as usize].len() < budget {
-                return Generation(gen - 1);
-            }
-        }
-
-        // everything is over budget. do a full collection instead.
-        Generation(GC_GEN_HIGHEST)
-    }
-
-    /// rotate out the tracked pages in the specified generations.
-    /// free the previously used pages and marke the currently used ones as previously used.
-    pub fn rotate_used_pages_to_generation(&mut self, target_generation: Generation) {
-        for gen in 0..=target_generation.0 {
-            let gen = gen as usize;
-
-            self.free_pages.append(&mut self.used_pages_previous[gen]);
-
-            core::mem::swap(
-                &mut self.used_pages_current[gen],
-                &mut self.used_pages_previous[gen],
-            );
-        }
-    }
-    /// move the pages from the current generation to the previous one, ensuring the current set is empty.
-    pub fn mark_current_pages_as_previous(&mut self, target_generation: Generation) {
-        for gen in 0..=target_generation.0 as usize {
-            self.used_pages_previous[gen].append(&mut self.used_pages_current[gen])
-        }
-    }
-
     pub fn get_page(&mut self, generation: Generation) -> Option<Page> {
-        let page = self.free_pages.pop().or_else(|| self.grow_heap())?.zero();
+        let page = self.free_pages.pop().or_else(|| self.grow_heap())?;
         self.generations.set_generation(page.base, generation);
-        self.used_pages_current[generation.0 as usize].push(AllocatedPage { base: page.base });
 
         Some(Page::new(page))
     }
 
-    fn grow_heap(&mut self) -> Option<AllocatedPage> {
+    fn grow_heap(&mut self) -> Option<ZeroedPage> {
         let page = self.next_free_base;
         let next_free = unsafe { page.byte_add(GC_PAGE_SIZE) };
 
@@ -109,7 +74,13 @@ impl Pagetracker {
             return None;
         } else {
             self.next_free_base = next_free;
-            Some(AllocatedPage { base: page })
+            Some(
+                AllocatedPage {
+                    base: page,
+                    _private: (),
+                }
+                .zero(),
+            )
         }
     }
 }
@@ -123,28 +94,49 @@ impl ZeroedPage {
     pub unsafe fn from_zeroed_addr(base: *mut u8) -> Self {
         Self { base }
     }
-    pub fn into_base(self) -> *mut u8 {
-        self.base
+}
+
+impl From<ZeroedPage> for AllocatedPage {
+    fn from(value: ZeroedPage) -> Self {
+        Self {
+            base: value.base,
+            _private: (),
+        }
     }
 }
 
 /// a page
 pub(crate) struct AllocatedPage {
-    base: *mut u8,
+    pub base: *mut u8,
+    _private: (),
 }
-impl From<Page> for AllocatedPage {
-    fn from(value: Page) -> Self {
-        Self {
-            base: value.get_base(),
+
+impl AllocatedPage {
+    fn zero(mut self) -> ZeroedPage {
+        unsafe {
+            let base = self.base;
+
+            self.as_byteslice().fill(0);
+
+            // forget the page to ensure that it is not dropped, as we are converting it here...
+            core::mem::forget(self);
+
+            ZeroedPage::from_zeroed_addr(base)
         }
     }
+
+    fn as_byteslice(&mut self) -> &mut [u8] {
+        unsafe { core::slice::from_raw_parts_mut(self.base, GC_PAGE_SIZE) }
+    }
 }
-impl AllocatedPage {
-    fn zero(self) -> ZeroedPage {
-        unsafe {
-            let slice = core::slice::from_raw_parts_mut(self.base, GC_PAGE_SIZE);
-            slice.fill(0);
-            ZeroedPage::from_zeroed_addr(self.base)
-        }
+
+impl Drop for AllocatedPage {
+    fn drop(&mut self) {
+        let base = self.base;
+        self.as_byteslice().fill(0);
+
+        let zeroed = ZeroedPage { base };
+
+        get_global_gc().lock().unwrap().free_pages.push(zeroed);
     }
 }
