@@ -4,7 +4,7 @@ use crate::{
     heap_page::{HeapEntry, Page},
     object::{HeapObject, TraceCallback},
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    GcHandle, GcPointer, GcResult,
+    GcHandle, GcPointer, GcResult, GenerationCounter,
 };
 
 pub struct SimpleGcString {
@@ -49,10 +49,14 @@ impl Page {
         &self,
         len: usize,
         init: impl FnOnce(&mut [u8]),
+        counter: &GenerationCounter,
     ) -> Option<HeapGcPointer<SimpleGcString>> {
         let required_space = len + core::mem::size_of::<SimpleGcString>();
-        let (header_pointer, data_pointer) =
-            self.try_reserve(required_space, core::mem::align_of::<SimpleGcString>())?;
+        let (header_pointer, data_pointer) = self.try_reserve(
+            required_space,
+            core::mem::align_of::<SimpleGcString>(),
+            counter,
+        )?;
         let cast_data_pointer = data_pointer as *mut SimpleGcString;
         unsafe {
             core::ptr::write(cast_data_pointer, SimpleGcString { length: len as u32 });
@@ -72,9 +76,13 @@ impl Page {
 impl GcHandle {
     pub fn alloc_string(&mut self, str: &str) -> GcResult<GcPointer<SimpleGcString>> {
         let ptr = self.with_retry(|gc_handle| {
-            let page = gc_handle.get_nursery_page();
+            let (page, counter) = gc_handle.get_nursery_page();
             unsafe {
-                page.try_alloc_with_init(str.len(), |dest| dest.copy_from_slice(str.as_bytes()))
+                page.try_alloc_with_init(
+                    str.len(),
+                    |dest| dest.copy_from_slice(str.as_bytes()),
+                    counter,
+                )
             }
         })?;
         Ok(ptr.root())
@@ -86,15 +94,19 @@ impl GcHandle {
     ) -> GcResult<GcPointer<SimpleGcString>> {
         let len = pieces.iter().map(|p| p.len()).sum();
         let ptr = self.with_retry(|gc_handle| {
-            let alloc_page = gc_handle.get_nursery_page();
+            let (alloc_page, counter) = gc_handle.get_nursery_page();
             unsafe {
-                alloc_page.try_alloc_with_init(len, |mut dest| {
-                    for piece in pieces {
-                        let len = piece.len();
-                        dest[..len].copy_from_slice(piece.as_bytes());
-                        dest = &mut dest[len..];
-                    }
-                })
+                alloc_page.try_alloc_with_init(
+                    len,
+                    |mut dest| {
+                        for piece in pieces {
+                            let len = piece.len();
+                            dest[..len].copy_from_slice(piece.as_bytes());
+                            dest = &mut dest[len..];
+                        }
+                    },
+                    counter,
+                )
             }
         })?;
         Ok(ptr.root())
@@ -118,12 +130,16 @@ impl GcHandle {
         }
 
         let ptr = self.with_retry(|gc_handle| {
-            let alloc_page = gc_handle.get_nursery_page();
+            let (alloc_page, counter) = gc_handle.get_nursery_page();
             unsafe {
-                alloc_page.try_alloc_with_init(requested_len, |dest| {
-                    let src = gc_handle.load(string).as_ref().as_bytes();
-                    dest.copy_from_slice(&src[range.clone()]);
-                })
+                alloc_page.try_alloc_with_init(
+                    requested_len,
+                    |dest| {
+                        let src = gc_handle.load(string).as_ref().as_bytes();
+                        dest.copy_from_slice(&src[range.clone()]);
+                    },
+                    counter,
+                )
             }
         })?;
 
@@ -140,17 +156,21 @@ impl GcHandle {
             .sum();
 
         let ptr = self.with_retry(|gc_handle| {
-            let alloc_page = gc_handle.get_nursery_page();
+            let (alloc_page, counter) = gc_handle.get_nursery_page();
             unsafe {
-                alloc_page.try_alloc_with_init(len, |mut dest| {
-                    // and, now we need to load everything a second time...
-                    for piece in pieces {
-                        let piece = gc_handle.load(piece).as_ref();
-                        let len = piece.len();
-                        dest[..len].copy_from_slice(piece.as_bytes());
-                        dest = &mut dest[len..];
-                    }
-                })
+                alloc_page.try_alloc_with_init(
+                    len,
+                    |mut dest| {
+                        // and, now we need to load everything a second time...
+                        for piece in pieces {
+                            let piece = gc_handle.load(piece).as_ref();
+                            let len = piece.len();
+                            dest[..len].copy_from_slice(piece.as_bytes());
+                            dest = &mut dest[len..];
+                        }
+                    },
+                    counter,
+                )
             }
         })?;
 

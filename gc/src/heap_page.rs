@@ -2,7 +2,7 @@ use crate::{
     heap::ZeroedPage,
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    CollectionHandle, GcError, Generation, PageSource, GC_PAGE_SIZE,
+    CollectionHandle, GcError, Generation, GenerationCounter, PageSource, GC_PAGE_SIZE,
 };
 use std::cell::Cell;
 
@@ -221,9 +221,15 @@ impl Page {
 
     /// attempt to move the provided object into this heap page.
     /// Will return the object on failure.
-    pub fn try_alloc<T: HeapObject + 'static>(&self, object: T) -> Result<HeapGcPointer<T>, T> {
+    pub fn try_alloc<T: HeapObject + 'static>(
+        &self,
+        object: T,
+        counter: &mut GenerationCounter,
+    ) -> Result<HeapGcPointer<T>, T> {
+        let alloc_size = object.allocation_size();
+
         if let Some((header_ptr, data_ptr)) =
-            self.try_reserve(object.allocation_size(), core::mem::align_of_val(&object))
+            self.try_reserve(alloc_size, core::mem::align_of_val(&object), counter)
         {
             let cast_data_ptr = data_ptr as *mut T;
             unsafe {
@@ -249,6 +255,7 @@ impl Page {
         &self,
         requested_space: usize,
         requested_alignment: usize,
+        counter: &GenerationCounter,
     ) -> Option<(*mut HeapEntry, *mut u8)> {
         debug_assert!(requested_alignment.is_power_of_two());
 
@@ -288,6 +295,9 @@ impl Page {
         if (self.base_address as usize) < header_ptr as usize {
             // our allocation is legal, so perform it by writing the free top.
             self.free_top.set(header_ptr);
+
+            counter.record_allocation(requested_space);
+
             // and return the pointer to the allocation
             Some((header_ptr, data_ptr))
         } else {
@@ -402,9 +412,9 @@ fn copy_object_to_new_allocation(
 
     let header = unsafe { (obj as *const dyn HeapObject as *const HeapEntry).offset(-1) };
     loop {
-        let allocation_page = gc_handle.get_allocation_page(target_generation);
+        let (allocation_page, counter) = gc_handle.get_allocation_page(target_generation);
         if let Some((destination_header, _destination_data)) =
-            allocation_page.try_reserve(alloc_size, alloc_align)
+            allocation_page.try_reserve(alloc_size, alloc_align, counter)
         {
             let total_copy_size = alloc_size + core::mem::size_of::<HeapEntry>();
             unsafe {

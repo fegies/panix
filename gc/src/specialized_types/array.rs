@@ -5,6 +5,7 @@ use crate::{
     heap_page::{HeapEntry, Page},
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
+    GenerationCounter,
 };
 
 pub struct Array<T>
@@ -91,13 +92,14 @@ impl Page {
         &self,
         num_items: u32,
         init: impl FnOnce(&mut [MaybeUninit<T>]),
+        counter: &GenerationCounter,
     ) -> Option<HeapGcPointer<Array<T>>>
     where
         T: HeapObject + Sized + 'static,
     {
         let required_space = Array::<T>::get_size_for_len(num_items as usize);
         let (header_pointer, data_pointer) =
-            self.try_reserve(required_space, Array::<T>::get_alignment())?;
+            self.try_reserve(required_space, Array::<T>::get_alignment(), counter)?;
         let cast_data_pointer = data_pointer as *mut Array<T>;
 
         unsafe {
@@ -122,33 +124,50 @@ impl Page {
             core::ptr::write(header_pointer, HeapEntry::for_object(obj));
 
             let raw_ptr = RawHeapGcPointer::from_addr(header_pointer);
+
             Some(HeapGcPointer::from_raw_unchecked(raw_ptr))
         }
     }
 
-    pub fn try_alloc_slice<T>(&self, slice: &[T]) -> Option<HeapGcPointer<Array<T>>>
+    pub fn try_alloc_slice<T>(
+        &self,
+        slice: &[T],
+        counter: &mut GenerationCounter,
+    ) -> Option<HeapGcPointer<Array<T>>>
     where
         T: HeapObject + Sized + 'static + Clone,
     {
         unsafe {
-            self.try_alloc_slice_inplace(slice.len() as u32, |dest| {
-                for (dest, src) in dest.iter_mut().zip(slice) {
-                    dest.write(src.clone());
-                }
-            })
+            self.try_alloc_slice_inplace(
+                slice.len() as u32,
+                |dest| {
+                    for (dest, src) in dest.iter_mut().zip(slice) {
+                        dest.write(src.clone());
+                    }
+                },
+                counter,
+            )
         }
     }
 
-    pub fn try_alloc_vec<T>(&self, vec: &mut Vec<T>) -> Option<HeapGcPointer<Array<T>>>
+    pub fn try_alloc_vec<T>(
+        &self,
+        vec: &mut Vec<T>,
+        counter: &GenerationCounter,
+    ) -> Option<HeapGcPointer<Array<T>>>
     where
         T: HeapObject + Sized + 'static,
     {
         unsafe {
-            self.try_alloc_slice_inplace(vec.len() as u32, |dest| {
-                for (dest, src) in dest.iter_mut().zip(vec.drain(..)) {
-                    dest.write(src);
-                }
-            })
+            self.try_alloc_slice_inplace(
+                vec.len() as u32,
+                |dest| {
+                    for (dest, src) in dest.iter_mut().zip(vec.drain(..)) {
+                        dest.write(src);
+                    }
+                },
+                counter,
+            )
         }
     }
 }

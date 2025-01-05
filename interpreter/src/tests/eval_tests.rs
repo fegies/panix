@@ -523,7 +523,7 @@ fn eval_long_tailcall() {
     eval_expr(
         r#"
     let huge_list = builtins.genList (a: a) 10000;
-    sum = builtins.foldl' (acc: val: acc + val) 0 huge_list;
+    sum = builtins.foldl' (acc: val: acc + val) 0 (builtins.deepSeq huge_list huge_list);
     in sum
         "#,
         "49995000",

@@ -80,10 +80,8 @@ let
       then acc
       else let
         new_acc = op acc (elem_at_list idx);
-        next_idx = idx + 1;
-        step = ___builtin_seq [new_acc next_idx (iter new_acc)];
       in
-        step next_idx;
+        ___builtin_seq [new_acc (iter new_acc)] (idx + 1);
   in
     iter nul 0;
 

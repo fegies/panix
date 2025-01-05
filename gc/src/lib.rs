@@ -8,6 +8,7 @@ pub mod specialized_types;
 
 use std::{
     alloc::Layout,
+    cell::Cell,
     collections::VecDeque,
     rc::Rc,
     sync::{Arc, Mutex},
@@ -97,7 +98,7 @@ struct PromotionHandle<'a> {
 }
 
 impl PageSource for CollectionHandle<'_> {
-    fn get_allocation_page(&mut self, generation: Generation) -> &Page {
+    fn get_allocation_page(&mut self, generation: Generation) -> (&Page, &GenerationCounter) {
         self.pages.get_allocation_page(generation)
     }
     fn finish_allocation_page(&mut self, generation: Generation) {
@@ -119,7 +120,7 @@ impl PageSource for CollectionHandle<'_> {
     }
 }
 impl PageSource for PromotionHandle<'_> {
-    fn get_allocation_page(&mut self, generation: Generation) -> &Page {
+    fn get_allocation_page(&mut self, generation: Generation) -> (&Page, &GenerationCounter) {
         self.pages.get_allocation_page(generation)
     }
 
@@ -141,7 +142,7 @@ impl PageSource for PromotionHandle<'_> {
 }
 
 trait PageSource {
-    fn get_allocation_page(&mut self, generation: Generation) -> &Page;
+    fn get_allocation_page(&mut self, generation: Generation) -> (&Page, &GenerationCounter);
     fn finish_allocation_page(&mut self, generation: Generation);
     fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation;
 }
@@ -156,10 +157,36 @@ where
     Ok(res)
 }
 
+#[derive(Default)]
+struct GenerationCounter {
+    current_live_objects: Cell<usize>,
+    current_size_bytes: Cell<usize>,
+    lifetime_allocation_count: Cell<usize>,
+    lifetime_allocation_bytes: Cell<usize>,
+}
+impl GenerationCounter {
+    pub fn record_allocation(&self, size: usize) {
+        self.current_size_bytes
+            .set(self.current_size_bytes.get() + size);
+        self.current_live_objects
+            .set(self.current_live_objects.get() + 1);
+        self.lifetime_allocation_count
+            .set(self.lifetime_allocation_count.get() + 1);
+        self.lifetime_allocation_bytes
+            .set(self.lifetime_allocation_bytes.get() + size);
+    }
+
+    fn mark_cleared(&self) {
+        self.current_live_objects.set(0);
+        self.current_size_bytes.set(0);
+    }
+}
+
 struct AllocationPages {
     pages: [Rc<Page>; GC_GEN_HIGHEST as usize],
     generations: GenerationAnalyzer,
     global: Arc<Mutex<Pagetracker>>,
+    alloc_counters: [GenerationCounter; GC_GEN_HIGHEST as usize],
 }
 impl AllocationPages {
     pub fn new(heap: Arc<Mutex<Pagetracker>>) -> Self {
@@ -172,6 +199,7 @@ impl AllocationPages {
             pages,
             generations,
             global: heap,
+            alloc_counters: core::array::from_fn(|_| GenerationCounter::default()),
         }
     }
     pub fn get_fresh_allocpages(&mut self) -> Generation {
@@ -188,8 +216,32 @@ impl AllocationPages {
         target_generation
     }
 
-    pub fn get_allocation_page(&mut self, generation: Generation) -> &Page {
-        &self.pages[generation.0 as usize]
+    pub fn get_allocation_page(&mut self, generation: Generation) -> (&Page, &GenerationCounter) {
+        let gen = generation.0 as usize;
+        (&self.pages[gen], &self.alloc_counters[gen])
+    }
+
+    fn print_heap_sizes(&self) {
+        println!("---------\nHeap statistics: ");
+        for (gen, counter) in self.alloc_counters.iter().enumerate() {
+            println!("\ngeneration {gen}: \n");
+            println!("current live count: {}", counter.current_live_objects.get());
+            println!("current live bytes: {}", counter.current_size_bytes.get());
+            println!(
+                "total alloc count:  {}",
+                counter.lifetime_allocation_count.get()
+            );
+            println!(
+                "total alloc bytes:  {}",
+                counter.lifetime_allocation_bytes.get()
+            );
+
+            if counter.lifetime_allocation_count.get() == 0 {
+                println!("....");
+                break;
+            }
+        }
+        println!("\n");
     }
 }
 
@@ -216,6 +268,7 @@ impl GcHandle {
     }
     fn run_gc(&mut self) {
         println!("gc triggered!");
+        self.alloc_pages.print_heap_sizes();
         let target_generation = self.alloc_pages.get_fresh_allocpages();
         println!("collecting gen {}", target_generation.0);
 
@@ -247,6 +300,15 @@ impl GcHandle {
             }
         }
 
+        for counter in self
+            .alloc_pages
+            .alloc_counters
+            .iter()
+            .take(target_generation.0 as usize + 1)
+        {
+            counter.mark_cleared();
+        }
+
         self.alloc_pages
             .global
             .lock()
@@ -268,12 +330,14 @@ impl GcHandle {
         &mut self,
         data: TData,
     ) -> GcResult<GcPointer<TData>> {
-        let heap_ptr = match self.get_nursery_page().try_alloc(data) {
+        let heap_ptr = match self.alloc_pages.pages[0]
+            .try_alloc(data, &mut self.alloc_pages.alloc_counters[0])
+        {
             Ok(ptr) => ptr,
             Err(value) => {
                 self.clear_nursery()?;
                 self.alloc_pages.pages[0]
-                    .try_alloc(value)
+                    .try_alloc(value, &mut self.alloc_pages.alloc_counters[0])
                     .map_err(|_| GcError::ObjectBiggerThanPage)?
             }
         };
@@ -286,8 +350,10 @@ impl GcHandle {
         &mut self,
         data: &[TData],
     ) -> GcResult<GcPointer<Array<TData>>> {
-        let heap_ptr =
-            self.with_retry(|gc_handle| gc_handle.get_nursery_page().try_alloc_slice(data))?;
+        let heap_ptr = self.with_retry(|gc_handle| {
+            gc_handle.alloc_pages.pages[0]
+                .try_alloc_slice(data, &mut gc_handle.alloc_pages.alloc_counters[0])
+        })?;
         Ok(heap_ptr.root())
     }
 
@@ -299,13 +365,17 @@ impl GcHandle {
         &mut self,
         data: &mut Vec<TData>,
     ) -> GcResult<GcPointer<Array<TData>>> {
-        let heap_ptr =
-            self.with_retry(|gc_handle| gc_handle.get_nursery_page().try_alloc_vec(data))?;
+        let heap_ptr = self.with_retry(|gc_handle| {
+            let (page, counter) = gc_handle.get_nursery_page();
+            page.try_alloc_vec(data, counter)
+        })?;
         Ok(heap_ptr.root())
     }
 
-    fn get_nursery_page(&self) -> &Page {
-        self.alloc_pages.pages[0].as_ref()
+    fn get_nursery_page(&self) -> (&Page, &GenerationCounter) {
+        let page = self.alloc_pages.pages[0].as_ref();
+        let counter = &self.alloc_pages.alloc_counters[0];
+        (page, counter)
     }
 
     fn get() -> GcResult<Self> {
