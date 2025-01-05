@@ -814,37 +814,35 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
         let mut instruction_buf = OpcodeBuf::default();
 
         let mut slot_to_overwrite = height_before;
-        let mut source_context_ref = height_before;
 
         // now, emit all the thunk definitions, ensuring they match up with the keys
         // by iterating in the same order.
         for inherit_entry in let_expr.inherit_entries {
-            if let Some(source_expr) = inherit_entry.source {
-                // first, set the inherit source thunk....
-                let create_thunk_op = self.compile_subchunk(
-                    lookup_scope,
-                    &mut instruction_buf,
-                    &mut cached_context_instructions,
-                    *source_expr,
-                )?;
-                self.opcode_buf.push(create_thunk_op, pos);
-                self.opcode_buf.push(
-                    VmOp::OverwriteThunk {
-                        stackref: slot_to_overwrite,
-                    },
-                    pos,
-                );
-                slot_to_overwrite += 1;
-            } else {
-                // as this expression did not have a source, we would need to pick the entries
-                // from the context. Since this is a let expression, they would already
-                // have been part of the context, so this does not make any sense.
-                unreachable!("unqualified inherits in a let in do not make sense.");
-            }
+            // as this expression did not have a source, we would need to pick the entries
+            // from the context. Since this is a let expression, they would already
+            // have been part of the context, so this does not make any sense.
+            let source_expr = inherit_entry
+                .source
+                .expect("unqualified inherites in a let in do not make sense.");
+
+            // first, set the inherit source thunk....
+            let create_thunk_op = self.compile_subchunk(
+                lookup_scope,
+                &mut instruction_buf,
+                &mut cached_context_instructions,
+                *source_expr,
+            )?;
+            self.opcode_buf.push(create_thunk_op, pos);
+            self.opcode_buf.push(
+                VmOp::OverwriteThunk {
+                    stackref: slot_to_overwrite,
+                },
+                pos,
+            );
 
             // and now emit all of the inherit keys as simple attrest refs
-            let context_ref = source_context_ref;
-            source_context_ref += 1;
+            let context_ref = slot_to_overwrite;
+            slot_to_overwrite += 1;
 
             let context_build_instructions = self
                 .compiler
@@ -855,6 +853,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                 self.compiler
                     .gc_handle
                     .alloc_slice(&[pos.into(), pos.into(), pos.into()])?;
+
             for ident in inherit_entry.entries {
                 let ident = self
                     .compiler

@@ -509,3 +509,11 @@ fn test_sort() {
         "[ 42 77 147 249 483 526 ]",
     );
 }
+
+#[test]
+fn test_inherit_from_nested() {
+    eval_expr(
+        "(a: let inherit (a.b) d; inherit (a.c) e; in [d e]) {b.d = 42; c.e = 13;}",
+        "[42 13]",
+    );
+}
