@@ -1,8 +1,6 @@
-// mod heap;
+mod heap;
 mod heap_page;
 mod object;
-// mod rootset;
-mod heap;
 pub mod pointer;
 pub mod specialized_types;
 
