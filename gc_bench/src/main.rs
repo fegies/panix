@@ -75,11 +75,12 @@ fn ref_many(gc: &mut GcHandle) -> GcResult<()> {
     }
 
     let stru = gc.alloc(Ref { inner: str })?;
+
+    gc.force_collect();
+
     let other = gc.alloc_string("new")?;
     let mut new = gc.alloc(Ref { inner: other })?;
     new = gc.replace(&stru, new);
-
-    gc.force_collect();
     gc.force_collect();
 
     assert_eq!("new", gc.load(&gc.load(&new).inner).as_ref());

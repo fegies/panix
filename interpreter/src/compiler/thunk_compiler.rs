@@ -990,6 +990,8 @@ fn insert_tailcalls(mut opcodes: &mut [VmOp]) {
                 VmOp::Skip(n) => *n as usize,
                 _ => return false,
             };
+            // advance past the current instructions plus however many we have been requested to
+            // skip
             opcodes = &opcodes[(1 + advance_count)..];
         }
 
