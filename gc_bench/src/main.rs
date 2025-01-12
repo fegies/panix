@@ -62,6 +62,8 @@ fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
     Ok(())
 }
 
+fn main() {}
+
 #[test]
 fn test_main() {
     gc::with_gc(|gc| perform_work(gc)).unwrap().unwrap();
