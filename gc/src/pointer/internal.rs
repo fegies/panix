@@ -95,6 +95,10 @@ impl RawHeapGcPointer {
     pub(crate) fn to_bits(&self) -> u32 {
         self.content
     }
+
+    pub(crate) fn to_heap_offset(&self) -> usize {
+        (self.content as usize) << HEAP_ENTRY_SHIFT
+    }
 }
 
 pub(crate) struct RootsetReference {

@@ -270,6 +270,10 @@ impl GcHandle {
     }
     fn run_gc(&mut self) {
         println!("gc triggered!");
+
+        // self.alloc_pages.refresh_allocation_page(Generation(0));
+        // return;
+
         self.alloc_pages.print_heap_sizes();
         let target_generation = self.alloc_pages.suggest_collection_target_generation();
         println!("collecting gen {}", target_generation.0);
@@ -334,9 +338,10 @@ impl GcHandle {
         {
             let mut guard = self.alloc_pages.global.lock().unwrap();
             guard.return_pages(
-                previous_pages.into_iter().filter_map(|page| {
-                    Rc::<Page>::into_inner(page).map(|page| page.into_allocated())
-                }),
+                previous_pages
+                    .into_iter()
+                    .filter_map(|page| Rc::<Page>::into_inner(page))
+                    .map(|page| page.into_allocated()),
             )
         }
 

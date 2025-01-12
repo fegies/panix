@@ -14,15 +14,16 @@ pub struct GenerationAnalyzer {
 }
 impl GenerationAnalyzer {
     pub fn get_generation(&self, pointer: &RawHeapGcPointer) -> Generation {
-        const ENTRIES_PER_PAGE: usize = GC_PAGE_SIZE / core::mem::size_of::<HeapEntry>();
-        let page = pointer.to_bits() as usize / ENTRIES_PER_PAGE;
+        let page = pointer.to_heap_offset() / GC_PAGE_SIZE;
         self.inner[page].get()
     }
+
     fn set_generation(&self, page: *const u8, generation: Generation) {
         let page = (page as usize - get_heap_base() as usize) / GC_PAGE_SIZE;
-        self.inner[page].replace(generation);
+        self.inner[page].set(generation);
     }
 }
+
 // safe because all writing operations are protected by the mutex of the heap.
 unsafe impl Send for GenerationAnalyzer {}
 

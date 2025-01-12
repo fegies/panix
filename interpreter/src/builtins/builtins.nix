@@ -33,26 +33,23 @@ let
     # the 0 length case is handled by the outer function already.
       if length <= 4 # it is 1 or 2
       then
-        ___builtin_seq [
-          offset
-          (
-            # base cases.
-            if length <= 2
-            then
-              (
-                if length == 1
-                then [(generator offset)]
-                else [(generator offset) (generator (offset + 1))] # length 2
-              )
-            else # it must be > 2 and <= 4
-              (
-                if length == 3
-                then [(generator offset) (generator (offset + 1)) (generator (offset + 2))]
-                else #length 4
-                  [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3))]
-              )
-          )
-        ]
+        (
+          # base cases.
+          if length <= 2
+          then
+            (
+              if length == 1
+              then [(generator offset)]
+              else [(generator offset) (generator (offset + 1))] # length 2
+            )
+          else # it must be > 2 and <= 4
+            (
+              if length == 3
+              then [(generator offset) (generator (offset + 1)) (generator (offset + 2))]
+              else #length 4
+                [(generator offset) (generator (offset + 1)) (generator (offset + 2)) (generator (offset + 3))]
+            )
+        )
       else let
         # recursion....
         step_size = length / 4;
@@ -74,12 +71,12 @@ let
 
   foldl' = op: nul: list: let
     max_len = length list;
-    elem_at_list = elemAt list;
+    pick = elemAt list;
     iter = acc: idx:
       if idx == max_len
       then acc
       else let
-        new_acc = op acc (elem_at_list idx);
+        new_acc = op acc (pick idx);
       in
         ___builtin_seq [new_acc (iter new_acc)] (idx + 1);
   in
@@ -356,7 +353,7 @@ let
           head = lst.head;
         in
           # we do not want to carry around the thunks from decons
-          ___builtin_seq [head [lst.head]]
+          ___builtin_seq [head [head]]
         else let
           left_len = len / 2;
           right_len = len - left_len;

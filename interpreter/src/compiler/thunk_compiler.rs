@@ -51,11 +51,11 @@ mod opcode_buf {
             GcPointer<Array<VmOp>>,
             GcPointer<Array<opcodes::SourcePosition>>,
         )> {
-            let op_arr = gc.alloc_vec(&mut self.opcodes)?;
-
             // optimize our bytecode, inserting tailcalls where possible before
             // emitting the result
             insert_tailcalls(&mut self.opcodes);
+
+            let op_arr = gc.alloc_vec(&mut self.opcodes)?;
 
             let pos_arr = gc.alloc_vec(&mut self.positions)?;
             Ok((op_arr, pos_arr))
@@ -985,12 +985,12 @@ fn insert_tailcalls(mut opcodes: &mut [VmOp]) {
     fn is_tailcall_safe(mut opcodes: &[VmOp]) -> bool {
         while let Some(first) = opcodes.first() {
             let advance_count = match first {
-                VmOp::DropThunks(_) => 1, // dropThunks instructions are fine because the thunk
+                VmOp::DropThunks(_) => 0, // dropThunks instructions are fine because the thunk
                 // stack would be implicitly cleared by the tail call.
                 VmOp::Skip(n) => *n as usize,
                 _ => return false,
             };
-            opcodes = &opcodes[advance_count..];
+            opcodes = &opcodes[(1 + advance_count)..];
         }
 
         // we did not find anything unsafe...

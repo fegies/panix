@@ -26,6 +26,8 @@ fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
         .unwrap();
     let cloned = value.clone();
 
+    gc.force_collect();
+
     let str = gc.alloc_string("a test string")?;
     println!("str: {:?}, {}", str.as_raw(), gc.load(&str).as_ref());
 
@@ -34,6 +36,8 @@ fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
     for _ in 0..100 {
         let _value = gc.alloc(Simple { f: [1; 256] }).unwrap();
     }
+
+    gc.force_collect();
 
     let refer = gc.alloc(Referencing {
         raw: value.as_raw().clone(),
@@ -58,8 +62,39 @@ fn perform_work(gc: &mut GcHandle) -> GcResult<()> {
     Ok(())
 }
 
-fn main() {
+#[test]
+fn test_main() {
     gc::with_gc(|gc| perform_work(gc)).unwrap().unwrap();
+}
+
+fn ref_many(gc: &mut GcHandle) -> GcResult<()> {
+    let str = gc.alloc_string("foobar")?;
+    #[derive(Trace)]
+    struct Ref {
+        inner: GcPointer<SimpleGcString>,
+    }
+
+    let stru = gc.alloc(Ref { inner: str })?;
+    let other = gc.alloc_string("new")?;
+    let mut new = gc.alloc(Ref { inner: other })?;
+    new = gc.replace(&stru, new);
+
+    gc.force_collect();
+    gc.force_collect();
+
+    assert_eq!("new", gc.load(&gc.load(&new).inner).as_ref());
+
+    Ok(())
+}
+
+#[test]
+fn test_referencing_many() {
+    gc::with_gc(|gc| {
+        for _ in 0..100 {
+            ref_many(gc).unwrap()
+        }
+    })
+    .unwrap();
 }
 
 #[derive(Trace)]
