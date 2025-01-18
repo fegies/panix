@@ -8,7 +8,7 @@ pub enum ValueSource {
     ThunkStackRef(u32),
 }
 
-#[derive(Trace, Clone, Debug)]
+#[derive(Trace, Clone, Debug, PartialEq, Eq)]
 pub struct SourcePosition {
     pub line: u32,
     pub column: u32,

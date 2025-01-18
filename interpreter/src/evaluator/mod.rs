@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, rc::Rc};
+use std::{cmp::Ordering, fmt::Display, rc::Rc};
 
 use gc::{specialized_types::array::Array, GcError, GcHandle, GcPointer};
 
@@ -36,7 +36,7 @@ struct ThunkEvaluator<'eval, 'gc> {
 
     // a buffer that is filled with the filenames for
     // tail recursion calls to allow us to recover the correct stacktrace.
-    tailcall_trace_buf: Vec<(NixString, Option<SourcePosition>)>,
+    tailcall_trace_buf: Vec<(NixString, Option<SourcePosition>, usize)>,
 }
 
 impl<'gc> Evaluator<'gc> {
@@ -133,15 +133,30 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             }
 
             // print the tailcall entries if present
-            for (filename, pos) in self.tailcall_trace_buf.iter().rev() {
+            for (filename, pos, count) in self.tailcall_trace_buf.iter().rev() {
+                struct PrintCount(usize);
+                impl Display for PrintCount {
+                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        if self.0 > 1 {
+                            f.write_fmt(format_args!(" {} times", self.0))
+                        } else {
+                            Ok(())
+                        }
+                    }
+                }
                 if let Some(pos) = pos {
                     println!(
-                        "at {} {} (tailcall)",
+                        "at {} {} (tailcall{})",
                         filename.load(&self.evaluator.gc_handle),
-                        pos
+                        pos,
+                        PrintCount(*count)
                     );
                 } else {
-                    println!("at {} (tailcall)", filename.load(&self.evaluator.gc_handle),);
+                    println!(
+                        "at {} (tailcall{})",
+                        filename.load(&self.evaluator.gc_handle),
+                        PrintCount(*count)
+                    );
                 }
             }
         }
@@ -410,8 +425,28 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                     self.state.clear();
                                     self.state.initialize_for_call(func, arg, self.evaluator)?;
 
-                                    self.tailcall_trace_buf
-                                        .push((current_filename, current_source_pos));
+                                    fn add_tailcall_pos(
+                                        buf: &mut Vec<(NixString, Option<SourcePosition>, usize)>,
+                                        file: NixString,
+                                        pos: Option<SourcePosition>,
+                                        gc: &GcHandle,
+                                    ) {
+                                        if let Some((prevfile, prevpos, count)) = buf.last_mut() {
+                                            if *prevpos == pos && prevfile.load(gc) == file.load(gc)
+                                            {
+                                                *count += 1;
+                                                return;
+                                            }
+                                        }
+                                        buf.push((file, pos, 1));
+                                    }
+
+                                    add_tailcall_pos(
+                                        &mut self.tailcall_trace_buf,
+                                        current_filename,
+                                        current_source_pos,
+                                        &self.evaluator.gc_handle,
+                                    );
 
                                     continue 'outer;
                                 }
