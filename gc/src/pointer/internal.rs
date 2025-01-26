@@ -232,6 +232,8 @@ impl RawGcPointer {
     /// only safe if the pointer is known to be a heap pointer (like if it is found on the heap)
     #[inline]
     pub(crate) unsafe fn get_heapref_unchecked(&self) -> RawHeapGcPointer {
+        debug_assert!(!self.is_root());
+
         RawHeapGcPointer {
             content: self.content,
         }

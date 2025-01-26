@@ -31,10 +31,6 @@ impl RootSet {
         super::RootsetReference { content: rootref }.into()
     }
 
-    fn root_raw(&mut self, ptr: &RawGcPointer) -> RawGcPointer {
-        self.root_heapref(&ptr.get_heapref())
-    }
-
     /// replace the pointer representation to instead be a plain heap-only pointer.
     fn unroot_raw(&mut self, ptr: &mut RawGcPointer) {
         if let Err(rootref) = ptr.decode() {
@@ -57,7 +53,8 @@ pub(super) fn read_rootset_entry(entry: &Slabkey) -> RawHeapGcPointer {
 
 impl RawGcPointer {
     pub fn root(&self) -> RawGcPointer {
-        with_rootset(|set| set.root_raw(self))
+        let heapref = self.get_heapref();
+        with_rootset(|set| set.root_heapref(&heapref))
     }
 
     /// unroot the pointer.

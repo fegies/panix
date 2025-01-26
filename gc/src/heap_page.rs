@@ -74,7 +74,7 @@ mod header {
                 Err(Self::decode_forward(bitrep))
             }
         }
-        fn decode(&self) -> Result<&dyn HeapObject, ForwardingPointer> {
+        pub fn decode(&self) -> Result<&dyn HeapObject, ForwardingPointer> {
             if self.widening_function as usize & 1 == 0 {
                 let loaded = unsafe { self.get_widener().widen(self.get_dataref_unchecked()) };
                 Ok(loaded)
@@ -369,28 +369,18 @@ pub(crate) fn promote_object(
 ) -> RawHeapGcPointer {
     let header = heap_ptr.resolve_mut();
 
-    let new_heap_ptr = match header.decode_mut() {
+    let mut new_heap_ptr = match header.decode_mut() {
         Ok(obj) => copy_object_to_new_allocation(obj, gc_handle, target_generation),
         Err(forward) => {
             let (mut resolved, _) = forward.follow_to_end();
             if gc_handle.get_generation(&resolved).0 >= target_generation.0 {
                 // the object it was pointing to was already a member of the target generation.
-                resolved
+                return resolved;
             } else {
                 // we need to copy the object.
                 let header = resolved.resolve_mut();
-                let mut new_value =
+                let new_value =
                     copy_object_to_new_allocation(header.load_mut(), gc_handle, target_generation);
-
-                // ensure that all the indirectly referenced values are also promoted.
-                new_value.resolve_mut().load_mut().trace(&mut |ptr| {
-                    let mut heap_ptr = unsafe { ptr.get_heapref_unchecked() };
-                    if gc_handle.get_generation(&heap_ptr) >= target_generation {
-                        return;
-                    }
-                    let new_value = promote_object(gc_handle, &mut heap_ptr, target_generation);
-                    unsafe { core::ptr::write(ptr, new_value.into()) }
-                });
 
                 header.forward_to(new_value.clone());
                 new_value
@@ -399,6 +389,17 @@ pub(crate) fn promote_object(
     };
 
     header.forward_to(new_heap_ptr.clone());
+
+    // ensure that all the indirectly referenced values are also promoted.
+    new_heap_ptr.resolve_mut().load_mut().trace(&mut |ptr| {
+        let mut heap_ptr = unsafe { ptr.get_heapref_unchecked() };
+        if gc_handle.get_generation(&heap_ptr) >= target_generation {
+            return;
+        }
+        let new_value = promote_object(gc_handle, &mut heap_ptr, target_generation);
+        unsafe { core::ptr::write(ptr, new_value.into()) }
+    });
+
     new_heap_ptr
 }
 

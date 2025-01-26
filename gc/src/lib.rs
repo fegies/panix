@@ -280,12 +280,10 @@ impl GcHandle {
 
         // clear out the previous alloc pages and used tracker.
 
-        {
-            for gen in 0..=target_generation.0 {
-                // move the entries of the previous tracker to a local vec.
-                previous_pages.append(&mut self.alloc_pages.used_pages_current[gen as usize]);
-                self.alloc_pages.refresh_allocation_page(Generation(gen));
-            }
+        for gen in 0..=target_generation.0 {
+            // move the entries of the previous tracker to a local vec.
+            previous_pages.append(&mut self.alloc_pages.used_pages_current[gen as usize]);
+            self.alloc_pages.refresh_allocation_page(Generation(gen));
         }
 
         // at this point, the previous page tracker is cleared and the alloc pages filled with
