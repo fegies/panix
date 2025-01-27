@@ -470,7 +470,7 @@ impl GcHandle {
             let new_value = promote_object(
                 &mut handle,
                 &mut new_value.as_ref().get_heapref(),
-                replacement_gen,
+                target_generation,
             );
 
             ptr.as_ref()
