@@ -2,7 +2,8 @@ use crate::{
     heap::{AllocatedPage, ZeroedPage},
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    CollectionHandle, GcError, Generation, GenerationCounter, PageSource, GC_PAGE_SIZE,
+    CollectionHandle, GcError, Generation, GenerationCounter, PageSource, PromotionHandle,
+    RawGcPointer, GC_PAGE_SIZE,
 };
 use std::cell::Cell;
 
@@ -166,6 +167,14 @@ impl Page {
         gc_handle: &mut CollectionHandle,
         gc_max_generation: Generation,
     ) -> Result<(), GcError> {
+        self.resume_scavenge(&mut |gc_pointer| {
+            let mut heap_ptr = unsafe { gc_pointer.get_heapref_unchecked() };
+            scavenge_heap_pointer(gc_handle, &mut heap_ptr, gc_max_generation);
+            unsafe { core::ptr::write(gc_pointer, heap_ptr.into()) }
+        })
+    }
+
+    fn resume_scavenge(&self, trace_cb: &mut dyn FnMut(&mut RawGcPointer)) -> Result<(), GcError> {
         // a past-the-end pointer to the highest non-scavengable memory address
         let mut scavenge_end_addr = self.scavenge_end_addr.get();
         // a pointer to the place we began to scavenge.
@@ -185,11 +194,7 @@ impl Page {
                     (&mut *scavenge_current).load_mut()
                 };
 
-                object.trace(&mut |gc_pointer| {
-                    let mut heap_ptr = unsafe { gc_pointer.get_heapref_unchecked() };
-                    scavenge_heap_pointer(gc_handle, &mut heap_ptr, gc_max_generation);
-                    unsafe { core::ptr::write(gc_pointer, heap_ptr.into()) }
-                });
+                object.trace(trace_cb);
                 scavenge_current = advance_entrypointer(scavenge_current, object.allocation_size());
             }
             // set the end to where we started as everything up to here has been scavenged
@@ -363,42 +368,43 @@ pub(crate) fn scavenge_heap_pointer(
 }
 
 pub(crate) fn promote_object(
-    gc_handle: &mut impl PageSource,
+    gc_handle: &mut PromotionHandle,
     heap_ptr: &mut RawHeapGcPointer,
     target_generation: Generation,
 ) -> RawHeapGcPointer {
+    let gen = target_generation.0 as usize;
+
     let header = heap_ptr.resolve_mut();
-
-    let mut new_heap_ptr = match header.decode_mut() {
-        Ok(obj) => copy_object_to_new_allocation(obj, gc_handle, target_generation),
-        Err(forward) => {
-            let (mut resolved, _) = forward.follow_to_end();
-            if gc_handle.get_generation(&resolved).0 >= target_generation.0 {
-                // the object it was pointing to was already a member of the target generation.
-                return resolved;
-            } else {
-                // we need to copy the object.
-                let header = resolved.resolve_mut();
-                let new_value =
-                    copy_object_to_new_allocation(header.load_mut(), gc_handle, target_generation);
-
-                header.forward_to(new_value.clone());
-                new_value
-            }
-        }
-    };
-
+    let new_heap_ptr =
+        copy_object_to_new_allocation(header.load_mut(), gc_handle, target_generation);
     header.forward_to(new_heap_ptr.clone());
 
-    // ensure that all the indirectly referenced values are also promoted.
-    new_heap_ptr.resolve_mut().load_mut().trace(&mut |ptr| {
-        let mut heap_ptr = unsafe { ptr.get_heapref_unchecked() };
-        if gc_handle.get_generation(&heap_ptr) >= target_generation {
-            return;
+    let mut current_scavenge_page = gc_handle.pages.active_pages[gen].clone();
+    loop {
+        current_scavenge_page
+            .resume_scavenge(&mut |ptr| {
+                let mut heapref = unsafe { ptr.get_heapref_unchecked() };
+                if gc_handle.get_generation(&heapref) >= target_generation {
+                    return;
+                }
+
+                let new_value = copy_object_to_new_allocation(
+                    heapref.resolve_mut().load_mut(),
+                    gc_handle,
+                    target_generation,
+                );
+                unsafe {
+                    core::ptr::write(ptr, new_value.into());
+                }
+            })
+            .expect("promotion failed");
+
+        if let Some(next) = gc_handle.scavenge_pending_set.pop() {
+            current_scavenge_page = next;
+        } else {
+            break;
         }
-        let new_value = promote_object(gc_handle, &mut heap_ptr, target_generation);
-        unsafe { core::ptr::write(ptr, new_value.into()) }
-    });
+    }
 
     new_heap_ptr
 }

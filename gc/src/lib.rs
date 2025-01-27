@@ -93,6 +93,7 @@ struct CollectionHandle<'a> {
 }
 struct PromotionHandle<'a> {
     pages: &'a mut AllocationPages,
+    scavenge_pending_set: Vec<Rc<Page>>,
 }
 
 impl PageSource for CollectionHandle<'_> {
@@ -113,7 +114,8 @@ impl PageSource for PromotionHandle<'_> {
     }
 
     fn finish_allocation_page(&mut self, generation: Generation) {
-        self.pages.refresh_allocation_page(generation);
+        let new_page = self.pages.refresh_allocation_page(generation);
+        self.scavenge_pending_set.push(new_page);
     }
 
     fn get_generation(&self, ptr: &RawHeapGcPointer) -> Generation {
@@ -462,7 +464,9 @@ impl GcHandle {
             // to ensure this does not happen, we need to promote the value to the generation the source is in.
             let mut handle = PromotionHandle {
                 pages: &mut self.alloc_pages,
+                scavenge_pending_set: Vec::new(),
             };
+
             let new_value = promote_object(
                 &mut handle,
                 &mut new_value.as_ref().get_heapref(),
