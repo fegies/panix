@@ -145,6 +145,7 @@ struct GenerationCounter {
     current_size_bytes: Cell<usize>,
     lifetime_allocation_count: Cell<usize>,
     lifetime_allocation_bytes: Cell<usize>,
+    collection_count: usize,
 }
 impl GenerationCounter {
     pub fn record_allocation(&self, size: usize) {
@@ -235,6 +236,7 @@ impl AllocationPages {
         println!("---------\nHeap statistics: ");
         for (gen, counter) in self.alloc_counters.iter().enumerate() {
             println!("\ngeneration {gen}: \n");
+            println!("collection count: {}", counter.collection_count);
             println!("current live count: {}", counter.current_live_objects.get());
             println!("current live bytes: {}", counter.current_size_bytes.get());
             println!(
@@ -276,6 +278,7 @@ impl GcHandle {
 
         self.alloc_pages.print_heap_sizes();
         let target_generation = self.alloc_pages.suggest_collection_target_generation();
+        self.alloc_pages.alloc_counters[target_generation.0 as usize].collection_count += 1;
         println!("collecting gen {}", target_generation.0);
 
         let mut previous_pages = Vec::new();

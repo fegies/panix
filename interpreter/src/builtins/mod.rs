@@ -103,6 +103,7 @@ enum BuiltinType {
     Substring,
     ReplaceStrings,
     AttrValues,
+    AttrNames,
 }
 
 impl Builtins for NixBuiltins {
@@ -134,6 +135,7 @@ impl Builtins for NixBuiltins {
             "___builtin_substring" => BuiltinType::Substring,
             "___builtin_replaceStrings" => BuiltinType::ReplaceStrings,
             "___builtin_attrValues" => BuiltinType::AttrValues,
+            "___builtin_attrNames" => BuiltinType::AttrNames,
             _ => return None,
         };
 
@@ -258,6 +260,7 @@ impl Builtins for NixBuiltins {
             BuiltinType::Substring => execute_substring(evaluator, argument),
             BuiltinType::ReplaceStrings => execute_replace_strings(evaluator, argument),
             BuiltinType::AttrValues => execute_attr_values(evaluator, argument),
+            BuiltinType::AttrNames => execute_attr_names(evaluator, argument),
         }
     }
 }
@@ -279,6 +282,32 @@ fn execute_seq(
 
         evaluator.force_thunk(last)
     }
+}
+
+fn execute_attr_names(
+    evaluator: &mut Evaluator,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let set = evaluator.force_thunk(argument)?.expect_attrset()?.entries;
+    let names = evaluator
+        .gc_handle
+        .load(&set)
+        .as_ref()
+        .into_iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let mut entries = names
+        .into_iter()
+        .map(|name| {
+            evaluator
+                .gc_handle
+                .alloc(Thunk::Value(NixValue::String(name)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let entries = evaluator.gc_handle.alloc_vec(&mut entries)?;
+
+    Ok(NixValue::List(List { entries }))
 }
 
 fn execute_attr_values(

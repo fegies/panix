@@ -25,6 +25,7 @@ let
   concatMap = f: list: concatLists (map f list);
   seq = e1: e2: ___builtin_seq [e1 e2];
   deepSeq = e1: e2: ___builtin_deepSeq [e1 e2];
+  mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
 
   genList = generator: length: let
     # we go with radix 4 to improve perf a little and reduce recursion depth.
@@ -98,6 +99,7 @@ let
       builtins
       toString
       map
+      mapAttrs
       deepSeq
       abort
       typeOf
@@ -162,8 +164,6 @@ let
           else []
       );
 
-    mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
-
     replaceStrings = patterns: replacements: string:
       ___builtin_replaceStrings [
         patterns
@@ -171,6 +171,7 @@ let
         string
       ];
 
+    attrNames = ___builtin_attrNames;
     attrValues = ___builtin_attrValues;
 
     partition = predicate: list: let

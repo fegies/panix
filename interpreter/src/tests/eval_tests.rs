@@ -541,3 +541,11 @@ fn test_any() {
     eval_expr("builtins.any (x: x < 3) [5 6]", "false");
     eval_expr("builtins.any (x: x < 3) [2 5 3]", "true");
 }
+
+#[test]
+fn test_attrnames() {
+    eval_expr(
+        "builtins.attrNames { y = 1; x = \"foo\"; }",
+        "[ \"x\" \"y\" ]",
+    );
+}
