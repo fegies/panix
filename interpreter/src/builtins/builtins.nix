@@ -363,6 +363,30 @@ let
       if list_len <= 1
       then list
       else decons list_len (cons_inner_sort 0 list_len);
+
+    any = predicate: list: let
+      list_len = length list;
+      pick = elemAt list;
+      iter = idx:
+        if idx == list_len
+        then false
+        else if predicate (pick idx)
+        then true
+        else iter (idx + 1);
+    in
+      iter 0;
+
+    all = predicate: list: let
+      list_len = length list;
+      pick = elemAt list;
+      iter = idx:
+        if idx == list_len
+        then true
+        else if predicate (pick idx)
+        then iter (idx + 1)
+        else false;
+    in
+      iter 0;
   };
 in
   builtins

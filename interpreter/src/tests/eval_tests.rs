@@ -523,7 +523,21 @@ fn eval_long_tailcall() {
     eval_expr(
         r#"
     let huge_list = builtins.genList (a: a) 10000;
-    in builtins.foldl' (acc: val: acc + val) 0 huge_list        "#,
+    in builtins.foldl' (acc: val: acc + val) 0 huge_list"#,
         "49995000",
     );
+}
+
+#[test]
+fn test_all() {
+    eval_expr("builtins.all (v: false) []", "true");
+    eval_expr("builtins.all (x: x < 3) [1 2]", "true");
+    eval_expr("builtins.all (x: x < 3) [1 2 3]", "false");
+}
+
+#[test]
+fn test_any() {
+    eval_expr("builtins.any (v: true) []", "false");
+    eval_expr("builtins.any (x: x < 3) [5 6]", "false");
+    eval_expr("builtins.any (x: x < 3) [2 5 3]", "true");
 }
