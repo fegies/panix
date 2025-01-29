@@ -25,6 +25,7 @@ let
   concatMap = f: list: concatLists (map f list);
   seq = e1: e2: ___builtin_seq [e1 e2];
   deepSeq = e1: e2: ___builtin_deepSeq [e1 e2];
+  stringLength = ___builtin_stringLength;
   mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
 
   genList = generator: length: let
@@ -110,6 +111,7 @@ let
       filter
       split
       isString
+      stringLength
       isFloat
       elemAt
       splitVersion
@@ -200,9 +202,18 @@ let
 
     removeAttrs = set: list: ___builtin_removeAttrs [set list];
 
-    stringLength = ___builtin_stringLength;
-
-    substring = start: len: string: ___builtin_substring [start len string];
+    substring = let
+      least = a: b:
+        if a <= b
+        then a
+        else b;
+    in
+      start: len: string: let
+        strlen = stringLength string;
+      in
+        if start >= strlen
+        then ""
+        else ___builtin_substring [start (least len (strlen - start)) string];
 
     compareVersions = let
       unpackList = v:
