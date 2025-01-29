@@ -388,18 +388,41 @@ pub(crate) fn promote_object(
                     return;
                 }
 
-                let new_value = copy_object_to_new_allocation(
-                    heapref.resolve_mut().load_mut(),
-                    gc_handle,
-                    target_generation,
-                );
+                let header = heapref.resolve_mut();
+                let new_value = match header.decode_mut() {
+                    Ok(obj) => {
+                        let res = copy_object_to_new_allocation(obj, gc_handle, target_generation);
+                        header.forward_to(res.clone());
+                        res
+                    }
+                    Err(forward) => {
+                        let mut heapref = forward.follow_to_end().0;
+                        if gc_handle.get_generation(&heapref) >= target_generation {
+                            // actually, the forwarding chain ends up in a high enough generation.
+                            // we do not need to promote anything and can just use the final value.
+                            heapref
+                        } else {
+                            // even though we followed the chain, we still ended up in a
+                            // generation that is too low. forward as normal.
+                            let header = heapref.resolve_mut();
+                            let res = copy_object_to_new_allocation(
+                                header.load_mut(),
+                                gc_handle,
+                                target_generation,
+                            );
+                            header.forward_to(res.clone());
+                            res
+                        }
+                    }
+                };
+
                 unsafe {
                     core::ptr::write(ptr, new_value.into());
                 }
             })
             .expect("promotion failed");
 
-        if let Some(next) = gc_handle.scavenge_pending_set.pop() {
+        if let Some(next) = gc_handle.scavenge_pending_set.pop_front() {
             current_scavenge_page = next;
         } else {
             break;
