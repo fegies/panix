@@ -549,3 +549,8 @@ fn test_attrnames() {
         "[ \"x\" \"y\" ]",
     );
 }
+
+#[test]
+fn test_trace() {
+    eval_expr("builtins.trace 42 1", "1");
+}

@@ -104,6 +104,7 @@ enum BuiltinType {
     ReplaceStrings,
     AttrValues,
     AttrNames,
+    Trace,
 }
 
 impl Builtins for NixBuiltins {
@@ -136,6 +137,7 @@ impl Builtins for NixBuiltins {
             "___builtin_replaceStrings" => BuiltinType::ReplaceStrings,
             "___builtin_attrValues" => BuiltinType::AttrValues,
             "___builtin_attrNames" => BuiltinType::AttrNames,
+            "___builtin_trace" => BuiltinType::Trace,
             _ => return None,
         };
 
@@ -261,8 +263,22 @@ impl Builtins for NixBuiltins {
             BuiltinType::ReplaceStrings => execute_replace_strings(evaluator, argument),
             BuiltinType::AttrValues => execute_attr_values(evaluator, argument),
             BuiltinType::AttrNames => execute_attr_names(evaluator, argument),
+            BuiltinType::Trace => execute_trace(evaluator, argument),
         }
     }
+}
+
+fn execute_trace(
+    evaluator: &mut Evaluator,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let list = evaluator.force_thunk(argument)?.expect_list()?;
+    let [message, value] = list.expect_entries(&evaluator.gc_handle)?;
+    let message = evaluator.force_thunk(message)?.expect_string()?;
+    let message = message.load(&evaluator.gc_handle);
+    println!("trace: {message}");
+
+    evaluator.force_thunk(value)
 }
 
 fn execute_seq(
