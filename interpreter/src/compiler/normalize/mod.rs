@@ -1,21 +1,23 @@
 use add_builtins::add_builtins_def;
 use bumpalo::Bump;
+use misc::MiscPass;
 use parser::ast::{
     AssertExpr, Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda,
     LetInExpr, List, MonopOpcode, NixExpr, NixString, Op, SourcePosition, WithExpr,
 };
 use remove_attrset_rec::RemoveAttrsetRecPass;
+use remove_multipath_attrset::RemoveMultipathPass;
 use remove_with_expr::RemoveWithExprPass;
 
-use self::remove_multipath_attrset::RemoveMultipathAndSearchpathPass;
-
 mod add_builtins;
+mod misc;
 mod remove_attrset_rec;
 mod remove_multipath_attrset;
 mod remove_with_expr;
 
 pub fn normalize_ast<'src>(ast: &mut NixExpr<'src>, bump: &'src Bump) {
-    RemoveMultipathAndSearchpathPass::new().inspect_expr(ast);
+    MiscPass {}.inspect_expr(ast);
+    RemoveMultipathPass::new().inspect_expr(ast);
     RemoveAttrsetRecPass::new().inspect_expr(ast);
     RemoveWithExprPass::new(bump).inspect_expr(ast);
     add_builtins_def(ast);

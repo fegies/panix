@@ -274,9 +274,8 @@ fn execute_trace(
 ) -> Result<NixValue, EvaluateError> {
     let list = evaluator.force_thunk(argument)?.expect_list()?;
     let [message, value] = list.expect_entries(&evaluator.gc_handle)?;
-    let message = evaluator.force_thunk(message)?.expect_string()?;
-    let message = message.load(&evaluator.gc_handle);
-    println!("trace: {message}");
+    let message = evaluator.force_thunk(message)?;
+    println!("trace: {:?}", message.debug(&evaluator.gc_handle));
 
     evaluator.force_thunk(value)
 }

@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use parser::ast::{KnownNixStringContent, NixString};
+
 use super::*;
 pub struct MultipathEntryCollection<'a> {
     entries: BTreeMap<KnownNixStringContent<'a>, (SourcePosition, MultipathEntry<'a>)>,

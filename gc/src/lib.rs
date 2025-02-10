@@ -237,6 +237,7 @@ impl AllocationPages {
         for (gen, counter) in self.alloc_counters.iter().enumerate() {
             println!("\ngeneration {gen}: \n");
             println!("collection count: {}", counter.collection_count);
+            println!("active pages: {}", self.used_pages_current[gen].len());
             println!("current live count: {}", counter.current_live_objects.get());
             println!("current live bytes: {}", counter.current_size_bytes.get());
             println!(

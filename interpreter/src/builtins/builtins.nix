@@ -215,10 +215,7 @@ let
         then ""
         else ___builtin_substring [start (least len (strlen - start)) string];
 
-    trace = msg: let
-      strmsg = toString msg;
-    in
-      value: ___builtin_trace [strmsg value];
+    trace = msg: value: ___builtin_trace [msg value];
 
     compareVersions = let
       unpackList = v:
