@@ -9,5 +9,5 @@ gc.workspace = true
 datatest-stable = "0.3"
 
 [[test]]
-name = "datatest"
+name = "nixcpp"
 harness = false
