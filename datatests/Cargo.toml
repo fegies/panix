@@ -1,0 +1,13 @@
+[package]
+name = "datatests"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+interpreter.workspace = true
+gc.workspace = true
+datatest-stable = "0.3"
+
+[[test]]
+name = "datatest"
+harness = false

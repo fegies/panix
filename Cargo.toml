@@ -9,7 +9,9 @@ members = [
     "gc",
     "gc_derive",
     "lexer_impedance_matcher",
-    "gc_bench", "interpreter",
+    "gc_bench",
+    "interpreter",
+    "datatests"
 ]
 
 [workspace.dependencies]

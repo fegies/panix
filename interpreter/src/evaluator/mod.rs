@@ -55,7 +55,18 @@ impl<'gc> Evaluator<'gc> {
         self.force_thunk(ptr)
     }
 
-    pub fn force_thunk(&mut self, mut thunk: GcPointer<Thunk>) -> Result<NixValue, EvaluateError> {
+    pub fn compare_values(
+        &mut self,
+        left: &NixValue,
+        right: &NixValue,
+    ) -> Result<Option<Ordering>, EvaluateError> {
+        compare_values(self, left, right)
+    }
+
+    pub(crate) fn force_thunk(
+        &mut self,
+        mut thunk: GcPointer<Thunk>,
+    ) -> Result<NixValue, EvaluateError> {
         match self.gc_handle.load(&thunk) {
             Thunk::Blackhole => return Err(EvaluateError::BlackholeEvaluated),
             Thunk::Value(v) => return Ok(v.clone()),
@@ -90,7 +101,7 @@ impl<'gc> Evaluator<'gc> {
         }
     }
 
-    pub fn evaluate_call(
+    pub(crate) fn evaluate_call(
         &mut self,
         func: value::Function,
         arg: GcPointer<Thunk>,
