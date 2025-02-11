@@ -27,6 +27,7 @@ let
   deepSeq = e1: e2: ___builtin_deepSeq [e1 e2];
   stringLength = ___builtin_stringLength;
   mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
+  map = func: list: ___builtin_map {inherit func list;};
 
   genList = generator: length: let
     # we go with radix 4 to improve perf a little and reduce recursion depth.
@@ -216,6 +217,16 @@ let
         else ___builtin_substring [start (least len (strlen - start)) string];
 
     trace = msg: value: ___builtin_trace [msg value];
+
+    head = list: elemAt list 0;
+
+    tail = list: let
+      lstlen = length list;
+      pick = elemAt list;
+    in
+      if lstlen == 0
+      then throw "'tail called on an empty list'"
+      else genList (idx: pick (idx + 1)) (lstlen - 1);
 
     compareVersions = let
       unpackList = v:

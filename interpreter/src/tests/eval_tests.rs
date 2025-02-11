@@ -551,6 +551,11 @@ fn test_attrnames() {
 }
 
 #[test]
+fn test_mergeattr() {
+    eval_expr("{a = 1; b = 3;} // {a = 2;}", "{b = 3; a = 2;}");
+}
+
+#[test]
 fn test_trace() {
     eval_expr("builtins.trace 42 1", "1");
 }

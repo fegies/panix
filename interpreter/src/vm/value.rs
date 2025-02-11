@@ -280,14 +280,13 @@ impl Attrset {
                     if let Some(next) = right_iter.next() {
                         (right_key, right_entry) = next;
                     } else {
-                        result_buf.push(left_entry);
                         result_buf.extend(left_iter.map(|t| t.1));
                         break;
                     }
+
                     if let Some(next) = left_iter.next() {
                         (left_key, left_entry) = next;
                     } else {
-                        result_buf.push(right_entry);
                         result_buf.extend(right_iter.map(|t| t.1));
                         break;
                     }

@@ -16,11 +16,11 @@ mod remove_multipath_attrset;
 mod remove_with_expr;
 
 pub fn normalize_ast<'src>(ast: &mut NixExpr<'src>, bump: &'src Bump) {
+    add_builtins_def(ast);
     MiscPass {}.inspect_expr(ast);
     RemoveMultipathPass::new().inspect_expr(ast);
     RemoveAttrsetRecPass::new().inspect_expr(ast);
     RemoveWithExprPass::new(bump).inspect_expr(ast);
-    add_builtins_def(ast);
 }
 
 trait Pass<'src> {

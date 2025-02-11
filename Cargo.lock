@@ -153,6 +153,7 @@ dependencies = [
  "datatest-stable",
  "gc",
  "interpreter",
+ "parser",
 ]
 
 [[package]]
