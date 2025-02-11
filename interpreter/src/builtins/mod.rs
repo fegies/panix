@@ -105,6 +105,7 @@ enum BuiltinType {
     AttrValues,
     AttrNames,
     Trace,
+    HasAttrMulti,
 }
 
 impl Builtins for NixBuiltins {
@@ -138,6 +139,7 @@ impl Builtins for NixBuiltins {
             "___builtin_attrValues" => BuiltinType::AttrValues,
             "___builtin_attrNames" => BuiltinType::AttrNames,
             "___builtin_trace" => BuiltinType::Trace,
+            "___builtin_hasattr_multi" => BuiltinType::HasAttrMulti,
             _ => return None,
         };
 
@@ -264,8 +266,42 @@ impl Builtins for NixBuiltins {
             BuiltinType::AttrValues => execute_attr_values(evaluator, argument),
             BuiltinType::AttrNames => execute_attr_names(evaluator, argument),
             BuiltinType::Trace => execute_trace(evaluator, argument),
+            BuiltinType::HasAttrMulti => execute_hasattr_multi(evaluator, argument),
         }
     }
+}
+
+fn execute_hasattr_multi(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let list = evaluator.force_thunk(argument)?.expect_list()?;
+    let [attrset, names] = list.expect_entries(&evaluator.gc_handle)?;
+
+    let mut maybe_attrset = evaluator.force_thunk(attrset)?;
+
+    let names = evaluator.force_thunk(names)?.expect_list()?;
+    let names = evaluator
+        .gc_handle
+        .load(&names.entries)
+        .as_ref()
+        .to_owned()
+        .into_iter()
+        .map(|thunk| evaluator.force_thunk(thunk)?.expect_string())
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for name in names {
+        if let NixValue::Attrset(attrset) = maybe_attrset {
+            if let Some(inner) = attrset.get_entry(&evaluator.gc_handle, &name) {
+                maybe_attrset = evaluator.force_thunk(inner)?;
+                continue;
+            }
+        }
+
+        return Ok(NixValue::Bool(false));
+    }
+
+    Ok(NixValue::Bool(true))
 }
 
 fn execute_trace(

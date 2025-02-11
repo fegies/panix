@@ -5,7 +5,7 @@ use crate::{compile_source, vm::value::NixValue, Evaluator};
 fn eval_expr(source: &str, expected_source: &str) {
     with_gc(|gc_handle| {
         let full_expr = format!("({source}) == ({expected_source})");
-        println!("Evaluating: {full_expr:?}");
+        println!("\nEvaluating: {full_expr:?}\n");
         let thunk = compile_source(gc_handle, full_expr.as_bytes(), "<<inline>>").unwrap();
 
         let eval_value = Evaluator::new(gc_handle)
@@ -82,7 +82,9 @@ fn test_hasattr() {
     eval_expr("{a = 42;} ? a", "true");
     eval_expr("{a = 42;} ? b", "false");
     eval_expr("12 ? a", "false");
-    eval_expr("let i = \"a\"; in {a = 42;} ? \"${i}\"", "true")
+    eval_expr("let i = \"a\"; in {a = 42;} ? \"${i}\"", "true");
+    eval_expr("null ? x", "false");
+    eval_expr("null ? x.y", "false");
 }
 
 #[test]

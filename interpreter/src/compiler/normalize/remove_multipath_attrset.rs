@@ -1,4 +1,4 @@
-use parser::ast::{Attrset, AttrsetKey, NixExpr, SourcePosition};
+use parser::ast::{Attrset, AttrsetKey, Code, List, NixExpr, Op, SourcePosition};
 
 use crate::compiler::get_null_expr;
 
@@ -37,43 +37,52 @@ impl Pass<'_> for RemoveMultipathPass {
         collection.to_attrs(&mut attrset.attrs);
     }
 
-    fn inspect_hasattr<'a>(&mut self, attrset: &mut NixExpr<'a>, path: &mut AttrsetKey<'a>) {
-        // first, recurse.
-        self.descend_hasattr(attrset, path);
+    fn inspect_expr(&mut self, expr: &mut NixExpr<'_>) {
+        self.descend_expr(expr);
 
-        match path {
-            AttrsetKey::Single(_) => {
-                // nothing to do here.
-                return;
-            }
-            AttrsetKey::Multi(multipath) => {
-                let last_attr = multipath
-                    .pop()
-                    .expect("multipath shoud have at least 1 entry");
-                for attr in multipath.drain(..) {
-                    let inner_source = core::mem::replace(attrset, get_null_expr());
-                    *attrset = NixExpr {
-                        position: inner_source.position,
-                        content: parser::ast::NixExprContent::Code(parser::ast::Code::Op(
-                            parser::ast::Op::AttrRef {
-                                name: attr,
-                                default: Some(Box::new(NixExpr {
-                                    position: inner_source.position,
-                                    content: parser::ast::NixExprContent::CompoundValue(
-                                        parser::ast::CompoundValue::Attrset(Attrset {
-                                            is_recursive: false,
-                                            inherit_keys: Vec::new(),
-                                            attrs: Vec::new(),
-                                        }),
-                                    ),
-                                })),
-                                left: Box::new(inner_source),
-                            },
-                        )),
-                    };
-                }
-                *path = AttrsetKey::Single(last_attr);
-            }
+        if let parser::ast::NixExprContent::Code(Code::Op(Op::HasAttr {
+            left,
+            path: AttrsetKey::Multi(multipath),
+        })) = &mut expr.content
+        {
+            let inner = core::mem::replace(left.as_mut(), get_null_expr());
+            let position = inner.position;
+            let list = NixExpr {
+                position,
+                content: parser::ast::NixExprContent::CompoundValue(
+                    parser::ast::CompoundValue::List(List {
+                        entries: multipath
+                            .drain(..)
+                            .map(|str| NixExpr {
+                                position: inner.position,
+                                content: parser::ast::NixExprContent::BasicValue(
+                                    parser::ast::BasicValue::String(str),
+                                ),
+                            })
+                            .collect(),
+                    }),
+                ),
+            };
+
+            *expr = NixExpr {
+                position,
+                content: parser::ast::NixExprContent::Code(Code::Op(Op::Call {
+                    function: Box::new(NixExpr {
+                        position,
+                        content: parser::ast::NixExprContent::Code(Code::ValueReference {
+                            ident: "___builtin_hasattr_multi",
+                        }),
+                    }),
+                    arg: Box::new(NixExpr {
+                        position,
+                        content: parser::ast::NixExprContent::CompoundValue(
+                            parser::ast::CompoundValue::List(List {
+                                entries: vec![inner, list],
+                            }),
+                        ),
+                    }),
+                })),
+            };
         }
     }
 }
