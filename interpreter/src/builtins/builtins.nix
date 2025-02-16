@@ -28,6 +28,7 @@ let
   stringLength = ___builtin_stringLength;
   mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
   map = func: list: ___builtin_map {inherit func list;};
+  isPath = arg: typeOf arg == "path";
 
   genList = generator: length: let
     # we go with radix 4 to improve perf a little and reduce recursion depth.
@@ -108,6 +109,7 @@ let
       match
       genList
       isInt
+      isPath
       foldl'
       filter
       split
@@ -131,21 +133,23 @@ let
     isFunction = arg: typeOf arg == "lambda";
     isList = arg: typeOf arg == "list";
     isNull = arg: arg == null;
-    isPath = arg: typeOf arg == "path";
     langVersion = 6;
     hasAttr = s: set: set ? "${s}";
     getAttr = s: set: set."${s}";
 
     baseNameOf = let
       matcher = match "^.*?([^/]*)/?$";
-      result = name: let
-        matchResult = matcher name;
+    in
+      name: let
+        matchResult = matcher (
+          if isPath name
+          then (___builtin_tostring name)
+          else name
+        );
       in
         if matchResult == null
         then name
         else elemAt matchResult 0;
-    in
-      seq matcher result;
 
     dirOf = name: let
       matchResult = match "^(.*)/[^/]*$" name;

@@ -439,6 +439,8 @@ fn test_basenameof() {
     eval_expr("baseNameOf \"foo/\"", "\"foo\"");
     eval_expr("baseNameOf \"foo/bar/\"", "\"bar\"");
     eval_expr("baseNameOf \"/\"", "\"\"");
+
+    eval_expr("baseNameOf ./foo", "\"foo\"");
 }
 
 #[test]
