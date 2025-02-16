@@ -137,6 +137,10 @@ let
     hasAttr = s: set: set ? "${s}";
     getAttr = s: set: set."${s}";
     currentSystem = "x86_64-linux";
+    add = a: b: a + b;
+    bitAnd = a: b: ___builtin_bitand [a b];
+    bitOr = a: b: ___builtin_bitor [a b];
+    bitXor = a: b: ___builtin_bitxor [a b];
 
     baseNameOf = let
       matcher = match "^.*?([^/]*)/?$";

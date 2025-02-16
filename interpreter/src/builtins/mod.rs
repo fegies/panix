@@ -106,6 +106,9 @@ enum BuiltinType {
     AttrNames,
     Trace,
     HasAttrMulti,
+    BitAnd,
+    BitXor,
+    BitOr,
 }
 
 impl Builtins for NixBuiltins {
@@ -140,6 +143,9 @@ impl Builtins for NixBuiltins {
             "___builtin_attrNames" => BuiltinType::AttrNames,
             "___builtin_trace" => BuiltinType::Trace,
             "___builtin_hasattr_multi" => BuiltinType::HasAttrMulti,
+            "___builtin_bitand" => BuiltinType::BitAnd,
+            "___builtin_bitor" => BuiltinType::BitOr,
+            "___builtin_bitxor" => BuiltinType::BitXor,
             _ => return None,
         };
 
@@ -267,8 +273,25 @@ impl Builtins for NixBuiltins {
             BuiltinType::AttrNames => execute_attr_names(evaluator, argument),
             BuiltinType::Trace => execute_trace(evaluator, argument),
             BuiltinType::HasAttrMulti => execute_hasattr_multi(evaluator, argument),
+            BuiltinType::BitAnd => execute_bitop(evaluator, argument, |l, r| l & r),
+            BuiltinType::BitXor => execute_bitop(evaluator, argument, |l, r| l ^ r),
+            BuiltinType::BitOr => execute_bitop(evaluator, argument, |l, r| l | r),
         }
     }
+}
+
+fn execute_bitop(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+    op: impl Fn(i64, i64) -> i64,
+) -> Result<NixValue, EvaluateError> {
+    let list = evaluator.force_thunk(argument)?.expect_list()?;
+    let [l, r] = list.expect_entries(&evaluator.gc_handle)?;
+
+    let l = evaluator.force_thunk(l)?.expect_int()?;
+    let r = evaluator.force_thunk(r)?.expect_int()?;
+
+    Ok(NixValue::Int(op(l, r)))
 }
 
 fn execute_hasattr_multi(
