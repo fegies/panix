@@ -1,7 +1,6 @@
 use std::{cmp::Ordering, path::Path};
 
 use interpreter::Evaluator;
-use parser::ast::{InheritEntry, NixExpr, NixString};
 
 fn eval_ok_test(path: &Path) -> datatest_stable::Result<()> {
     gc::with_gc(|handle| {
