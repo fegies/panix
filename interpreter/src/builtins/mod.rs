@@ -657,25 +657,50 @@ fn execute_deepseq(
 }
 
 fn deep_force(evaluator: &mut Evaluator, value: GcPointer<Thunk>) -> Result<(), EvaluateError> {
-    match evaluator.force_thunk(value)? {
-        NixValue::List(list) => {
-            let entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
-            for entry in entries {
-                deep_force(evaluator, entry)?;
-            }
-        }
-        NixValue::Attrset(set) => {
-            let entries = evaluator.gc_handle.load(&set.entries).as_ref().to_owned();
-            for (_name, entry) in entries {
-                deep_force(evaluator, entry)?;
-            }
-        }
-        _ => {
-            // all other values need not be forced further
-        }
-    }
+    return recurse(evaluator, value, &mut Vec::with_capacity(16));
 
-    Ok(())
+    fn recurse(
+        evaluator: &mut Evaluator,
+        value: GcPointer<Thunk>,
+        parent_stack: &mut Vec<GcPointer<Thunk>>,
+    ) -> Result<(), EvaluateError> {
+        match evaluator.force_thunk(value.clone())? {
+            NixValue::List(list) => {
+                for parent_val in parent_stack.iter() {
+                    if evaluator.gc_handle.reference_equals(parent_val, &value) {
+                        return Ok(());
+                    }
+                }
+                parent_stack.push(value);
+
+                let entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
+                for entry in entries {
+                    recurse(evaluator, entry, parent_stack)?;
+                }
+
+                parent_stack.pop();
+            }
+            NixValue::Attrset(set) => {
+                for parent_val in parent_stack.iter() {
+                    if evaluator.gc_handle.reference_equals(parent_val, &value) {
+                        return Ok(());
+                    }
+                }
+                parent_stack.push(value);
+
+                let entries = evaluator.gc_handle.load(&set.entries).as_ref().to_owned();
+                for (_name, entry) in entries {
+                    recurse(evaluator, entry, parent_stack)?;
+                }
+
+                parent_stack.pop();
+            }
+            _ => {
+                // all other values need not be forced further
+            }
+        }
+        Ok(())
+    }
 }
 
 fn execute_remove_attrs(

@@ -486,4 +486,17 @@ impl GcHandle {
             unsafe { GcPointer::<TData>::from_raw_unchecked(ptr) }
         }
     }
+
+    /// test the two pointers for reference equality
+    /// returns true if they refer to the same piece of memory.
+    pub fn reference_equals<TData>(
+        &self,
+        ptr_a: &GcPointer<TData>,
+        ptr_b: &GcPointer<TData>,
+    ) -> bool {
+        let address_a = ptr_a.as_raw().get_heapref().resolve().get_dataref();
+        let address_b = ptr_b.as_raw().get_heapref().resolve().get_dataref();
+
+        core::ptr::addr_eq(address_a, address_b)
+    }
 }
