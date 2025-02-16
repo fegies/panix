@@ -497,6 +497,23 @@ fn test_replace_strings() {
         r#"builtins.replaceStrings ["oo" "a"] ["a" "i"] "foobar""#,
         r#""fabir""#,
     );
+    eval_expr(
+        r#"let dbg = a: builtins.trace a a; in dbg (builtins.replaceStrings ["a" ""] ["b" "X"] "fafa")"#,
+        "\"XfbXfbX\"",
+    );
+    eval_expr(
+        r#"builtins.replaceStrings ["aa" ""] ["b" "X"] "faafa""#,
+        "\"XfbXfXaX\"",
+    );
+    eval_expr(
+        r#"builtins.replaceStrings ["aa" ""] ["b" "X"] "faafa""#,
+        "\"XfbXfXaX\"",
+    );
+}
+
+#[test]
+fn test_replace_strings_empty() {
+    eval_expr(r#"builtins.replaceStrings [""] ["X"] """#, "\"X\"");
 }
 
 #[test]

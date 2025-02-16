@@ -413,22 +413,44 @@ fn execute_replace_strings(
     piece_source_buffer.push(BufferEntry::StringPiece(0..loaded_string.len()));
     for (pattern_idx, pattern) in patterns.into_iter().enumerate() {
         let pattern = pattern.load(&evaluator.gc_handle);
-        let finder = memchr::memmem::Finder::new(pattern);
-        for previous_entry in piece_source_buffer.drain(..) {
-            match previous_entry {
-                BufferEntry::StringPiece(mut range) => {
-                    while let Some(match_idx) =
-                        finder.find(&loaded_string[range.clone()].as_bytes())
-                    {
-                        piece_target_buffer.push(BufferEntry::StringPiece(
-                            range.start..(range.start + match_idx),
-                        ));
-                        range = (range.start + match_idx + pattern.len())..range.end;
-                        piece_target_buffer.push(BufferEntry::Replacement(pattern_idx));
+        if pattern.is_empty() {
+            // for empty patterns, the replacement is instead interspersed around every
+            // remaining source char
+            for previous_entry in piece_source_buffer.drain(..) {
+                match previous_entry {
+                    BufferEntry::StringPiece(mut range) => {
+                        while !range.is_empty() {
+                            piece_target_buffer.push(BufferEntry::Replacement(pattern_idx));
+                            piece_target_buffer
+                                .push(BufferEntry::StringPiece(range.start..(range.start + 1)));
+                            range = (range.start + 1)..range.end;
+                        }
                     }
-                    piece_target_buffer.push(BufferEntry::StringPiece(range));
+                    r @ BufferEntry::Replacement(_) => piece_target_buffer.push(r),
                 }
-                r @ BufferEntry::Replacement(_) => piece_target_buffer.push(r),
+            }
+            piece_target_buffer.push(BufferEntry::Replacement(pattern_idx));
+        } else {
+            let finder = memchr::memmem::Finder::new(pattern);
+            for previous_entry in piece_source_buffer.drain(..) {
+                match previous_entry {
+                    BufferEntry::StringPiece(mut range) => {
+                        while let Some(match_idx) =
+                            finder.find(&loaded_string[range.clone()].as_bytes())
+                        {
+                            let range_before = range.start..(range.start + match_idx);
+                            if !range_before.is_empty() {
+                                piece_target_buffer.push(BufferEntry::StringPiece(range_before));
+                            };
+                            range = (range.start + match_idx + pattern.len())..range.end;
+                            piece_target_buffer.push(BufferEntry::Replacement(pattern_idx));
+                        }
+                        if !range.is_empty() {
+                            piece_target_buffer.push(BufferEntry::StringPiece(range));
+                        }
+                    }
+                    r @ BufferEntry::Replacement(_) => piece_target_buffer.push(r),
+                }
             }
         }
         core::mem::swap(&mut piece_source_buffer, &mut piece_target_buffer);
