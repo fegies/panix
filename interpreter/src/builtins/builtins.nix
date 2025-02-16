@@ -136,6 +136,7 @@ let
     langVersion = 6;
     hasAttr = s: set: set ? "${s}";
     getAttr = s: set: set."${s}";
+    currentSystem = "x86_64-linux";
 
     baseNameOf = let
       matcher = match "^.*?([^/]*)/?$";
