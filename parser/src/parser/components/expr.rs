@@ -403,7 +403,7 @@ fn infix_binding_power(token: &Token<'_>) -> Option<(u8, u8)> {
         Token::Plus => (16, 17),
         Token::Minus => (16, 17),
         Token::Slash => (18, 19),
-        Token::Star => (20, 21),
+        Token::Star => (18, 19),
         Token::DoublePlus => (23, 22),
         Token::QuestionMark => (24, 25),
         // this is where the unary minus would go, with bp 26

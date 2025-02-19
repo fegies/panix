@@ -664,13 +664,14 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
     fn execute_concat_lists(&mut self, count: u32) -> Result<(), EvaluateError> {
         let result = if count == 2 {
-            let left = self.pop()?.expect_list()?;
             let right = self.pop()?.expect_list()?;
+            let left = self.pop()?.expect_list()?;
             List::concat_lists(&[left, right], &mut self.evaluator.gc_handle)?
         } else {
-            let lists = core::iter::repeat_with(|| self.pop()?.expect_list())
+            let mut lists = core::iter::repeat_with(|| self.pop()?.expect_list())
                 .take(count as usize)
                 .collect::<Result<Vec<_>, _>>()?;
+            lists.reverse();
             List::concat_lists(&lists, &mut self.evaluator.gc_handle)?
         };
 

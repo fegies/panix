@@ -142,6 +142,23 @@ let
     bitOr = a: b: ___builtin_bitor [a b];
     bitXor = a: b: ___builtin_bitxor [a b];
 
+    concatStringsSep = separator: list: let
+      pick = elemAt list;
+      recurse = start: len:
+        if len == 1
+        then pick start
+        else let
+          half_len = len / 2;
+          left = recurse start half_len;
+          right = recurse (start + half_len) (len - half_len);
+        in
+          left + separator + right;
+      listlen = length list;
+    in
+      if listlen == 0
+      then ""
+      else recurse 0 listlen;
+
     baseNameOf = let
       matcher = match "^.*?([^/]*)/?$";
     in
@@ -226,6 +243,7 @@ let
         else ___builtin_substring [start (least len (strlen - start)) string];
 
     trace = msg: value: ___builtin_trace [msg value];
+    dbg = value: ___builtin_trace [value value];
 
     head = list: elemAt list 0;
 

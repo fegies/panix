@@ -25,6 +25,7 @@ fn eval_expr(source: &str, expected_source: &str) {
 fn test_basic_arithmentic() {
     eval_expr("1 + 2 * 3", "7");
     eval_expr("6 / 2", "3");
+    eval_expr("3 / 2 * 2", "2");
 }
 
 #[test]
@@ -61,6 +62,7 @@ fn test_alloc_list() {
     eval_expr("[1 2 3]", "[1   2   3]");
     eval_expr("[] < [1]", "true");
     eval_expr("[] < []", "false");
+    eval_expr("builtins.toString [1 2 3]", "\"1 2 3\"");
 }
 
 #[test]
@@ -373,7 +375,17 @@ fn test_cat_attrs() {
 
 #[test]
 fn test_concat_lists() {
+    eval_expr(
+        "builtins.dbg (builtins.toString ([1] ++ [2] ++ [3]))",
+        "\"1 2 3\"",
+    );
     eval_expr("builtins.concatLists [ [1] [2] [3] ]", "[1 2 3]");
+    eval_expr("builtins.concatLists [ [1 2] [2] [3] ]", "[1 2 2 3]");
+}
+
+#[test]
+fn test_concatmap() {
+    eval_expr("builtins.concatMap (x: [x] ++ [1]) [3 4]", "[3 1 4 1]");
 }
 
 #[test]
