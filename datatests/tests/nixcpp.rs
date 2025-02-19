@@ -31,8 +31,8 @@ fn parse_ok_test(path: &Path) -> datatest_stable::Result<()> {
     let expected_file_cont = std::fs::read(&expected_path)?;
     let file_cont = std::fs::read(path)?;
 
-    let expected = parser::parse_nix(&expected_file_cont).unwrap();
-    let value = parser::parse_nix(&file_cont).unwrap();
+    let _expected = parser::parse_nix(&expected_file_cont).unwrap();
+    let _value = parser::parse_nix(&file_cont).unwrap();
 
     // assert_eq!(expected, value);
 

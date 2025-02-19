@@ -86,6 +86,12 @@ pub enum CompoundValue<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum LetExpr<'a> {
+    LetIn(LetInExpr<'a>),
+    AttrsetLet(Attrset<'a>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct LetInExpr<'a> {
     pub bindings: BTreeMap<&'a str, NixExpr<'a>>,
     pub inherit_entries: Vec<InheritEntry<'a>>,
@@ -164,7 +170,7 @@ pub enum Op<'a> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Code<'a> {
-    LetInExpr(LetInExpr<'a>),
+    LetExpr(LetExpr<'a>),
     ValueReference { ident: &'a str },
     WithExpr(WithExpr<'a>),
     Lambda(Lambda<'a>),

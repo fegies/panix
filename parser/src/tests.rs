@@ -3,7 +3,7 @@ use lexer::SourcePosition;
 use crate::{
     ast::{
         Attrset, BasicValue, BinopOpcode, Code, CompoundValue, InheritEntry, Lambda,
-        LambdaAttrsetArgs, NixExpr, NixString, Op,
+        LambdaAttrsetArgs, List, NixExpr, NixString, Op,
     },
     parse_nix,
 };
@@ -153,5 +153,44 @@ fn test_attrset_lambda_trailing_comma() {
         })),
     };
     let value = parse_nix("{a, foo, }@args: 42".as_bytes()).unwrap();
+    assert_eq!(expected, value);
+}
+
+#[test]
+fn list_getattr_or() {
+    let expected = NixExpr {
+        position: SourcePosition { line: 1, column: 1 },
+        content: crate::ast::NixExprContent::CompoundValue(CompoundValue::List(List {
+            entries: vec![
+                NixExpr {
+                    position: SourcePosition { line: 1, column: 3 },
+                    content: crate::ast::NixExprContent::Code(Code::Op(Op::AttrRef {
+                        left: Box::new(NixExpr {
+                            position: SourcePosition { line: 1, column: 2 },
+                            content: crate::ast::NixExprContent::Code(Code::ValueReference {
+                                ident: "x",
+                            }),
+                        }),
+                        name: NixString::from_literal("y", SourcePosition { line: 1, column: 4 }),
+                        default: Some(Box::new(NixExpr {
+                            position: SourcePosition {
+                                line: 1,
+                                column: 10,
+                            },
+                            content: crate::ast::NixExprContent::BasicValue(BasicValue::Int(1)),
+                        })),
+                    })),
+                },
+                NixExpr {
+                    position: SourcePosition {
+                        line: 1,
+                        column: 12,
+                    },
+                    content: crate::ast::NixExprContent::BasicValue(BasicValue::Int(2)),
+                },
+            ],
+        })),
+    };
+    let value = parse_nix("[x.y or 1 2]".as_bytes()).unwrap();
     assert_eq!(expected, value);
 }

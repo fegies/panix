@@ -4,12 +4,21 @@ use lexer::Token;
 
 use crate::parser::{ast::LetInExpr, ParseResult, TokenSource};
 
-use super::{unexpected, Parser};
+use super::{unexpected, LetExpr, Parser};
 
 impl<'t, S: TokenSource<'t>> Parser<S> {
+    pub fn parse_let(&mut self) -> ParseResult<LetExpr<'t>> {
+        if let Token::CurlyOpen = self.expect_peek()? {
+            self.expect_next()?;
+            Ok(LetExpr::AttrsetLet(self.parse_attrset_initial()?))
+        } else {
+            Ok(LetExpr::LetIn(self.parse_let_in()?))
+        }
+    }
+
     /// parse a let in expression.
     /// assumes that the initial let has already been parsed
-    pub fn parse_let(&mut self) -> ParseResult<LetInExpr<'t>> {
+    fn parse_let_in(&mut self) -> ParseResult<LetInExpr<'t>> {
         let mut bindings = BTreeMap::new();
         let mut inherit_entries = Vec::new();
 

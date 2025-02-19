@@ -80,13 +80,14 @@ impl Pass<'_> for RemoveAttrsetRecPass {
                 )),
             };
 
-            let let_expr = NixExprContent::Code(parser::ast::Code::LetInExpr(LetInExpr {
+            let let_expr = LetInExpr {
                 bindings,
                 inherit_entries: parent_let_inherit_entries,
                 body: Box::new(body),
-            }));
-
-            expr.content = let_expr;
+            };
+            expr.content = NixExprContent::Code(parser::ast::Code::LetExpr(
+                parser::ast::LetExpr::LetIn(let_expr),
+            ));
         }
     }
 }

@@ -3,7 +3,7 @@ use bumpalo::Bump;
 use misc::MiscPass;
 use parser::ast::{
     AssertExpr, Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, IfExpr, Lambda,
-    LetInExpr, List, MonopOpcode, NixExpr, NixString, Op, SourcePosition, WithExpr,
+    LetExpr, LetInExpr, List, MonopOpcode, NixExpr, NixString, Op, SourcePosition, WithExpr,
 };
 use remove_attrset_rec::RemoveAttrsetRecPass;
 use remove_multipath_attrset::RemoveMultipathPass;
@@ -34,7 +34,7 @@ trait Pass<'src> {
             parser::ast::NixExprContent::CompoundValue(val) => {
                 self.inspect_compount_value(val, expr.position)
             }
-            parser::ast::NixExprContent::Code(code) => self.inspect_code(code),
+            parser::ast::NixExprContent::Code(code) => self.inspect_code(code, expr.position),
         }
     }
 
@@ -57,19 +57,26 @@ trait Pass<'src> {
         }
     }
 
-    fn inspect_code(&mut self, code: &mut Code<'src>) {
-        self.descend_code(code)
+    fn inspect_code(&mut self, code: &mut Code<'src>, pos: SourcePosition) {
+        self.descend_code(code, pos)
     }
 
-    fn descend_code(&mut self, code: &mut Code<'src>) {
+    fn descend_code(&mut self, code: &mut Code<'src>, pos: SourcePosition) {
         match code {
-            Code::LetInExpr(letexpr) => self.inspect_let_expr(letexpr),
+            Code::LetExpr(letexpr) => self.inspect_let_expr(letexpr, pos),
             Code::ValueReference { ident } => self.inspect_value_ref(ident),
             Code::WithExpr(expr) => self.inspect_with_expr(expr),
             Code::Lambda(lambda) => self.inspect_lambda(lambda),
             Code::Op(expr) => self.inspect_op(expr),
             Code::IfExpr(expr) => self.inspect_if_expr(expr),
             Code::AssertExpr(assert) => self.inspect_assert(assert),
+        }
+    }
+
+    fn inspect_let_expr(&mut self, letexpr: &mut LetExpr<'src>, pos: SourcePosition) {
+        match letexpr {
+            LetExpr::LetIn(let_in_expr) => self.inspect_let_in_expr(let_in_expr),
+            LetExpr::AttrsetLet(attrset) => self.inspect_attrset(attrset, pos),
         }
     }
 
@@ -122,7 +129,7 @@ trait Pass<'src> {
         }
     }
 
-    fn inspect_let_expr(&mut self, expr: &mut LetInExpr<'src>) {
+    fn inspect_let_in_expr(&mut self, expr: &mut LetInExpr<'src>) {
         self.descend_let_expr(expr)
     }
 

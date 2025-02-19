@@ -78,6 +78,11 @@ fn test_get_attribute() {
 }
 
 #[test]
+fn test_getattr_or_in_list() {
+    eval_expr("let a = {}; in [a.x or 4 5]", "[4 5]");
+}
+
+#[test]
 fn test_hasattr() {
     eval_expr("{a = 42;} ? a", "true");
     eval_expr("{a = 42;} ? b", "false");
@@ -93,6 +98,11 @@ fn test_hasattr_multi() {
     eval_expr("{a = {b = 1;};} ? a.b", "true");
     eval_expr("{a = {b = 1;};} ? a.b.c", "false");
     eval_expr("{a = {b = 1;};} ? a.c.c", "false");
+}
+
+#[test]
+fn test_getattr_multi() {
+    eval_expr("{x.y.z = 42;}.x.y.z", "42");
 }
 
 #[test]

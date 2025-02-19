@@ -38,7 +38,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 pos = expr.position;
                 expr.content
             }
-            Token::KwLet => NixExprContent::Code(Code::LetInExpr(self.parse_let()?)),
+            Token::KwLet => NixExprContent::Code(Code::LetExpr(self.parse_let()?)),
             Token::KwWith => NixExprContent::Code(Code::WithExpr(self.parse_with_expr()?)),
             Token::KwRec => {
                 NixExprContent::CompoundValue(CompoundValue::Attrset(self.parse_attrset_rec()?))
@@ -78,15 +78,15 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             content: lhs,
         };
 
-        if !allow_spaces {
-            if let Some(peeked) = self.peek() {
-                if *peeked == Token::Whitespace || could_start_expression(peeked) {
-                    return Ok(lhs);
+        loop {
+            if !allow_spaces {
+                if let Some(peeked) = self.peek() {
+                    if *peeked == Token::Whitespace || could_start_expression(peeked) {
+                        return Ok(lhs);
+                    }
                 }
             }
-        }
 
-        loop {
             if let Some((l_bp, r_bp)) = self.peek().and_then(infix_binding_power) {
                 if l_bp < min_bp {
                     break;
@@ -136,7 +136,8 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                                 if let Some(Token::Ident("or")) = self.peek_no_whitespace() {
                                     // skip or keyword
                                     self.expect_next()?;
-                                    Some(Box::new(self.parse_expr()?))
+                                    let default = self.parse_with_bindingpower(0, allow_spaces)?;
+                                    Some(Box::new(default))
                                 } else {
                                     None
                                 };

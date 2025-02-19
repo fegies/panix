@@ -221,9 +221,14 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match code {
-            parser::ast::Code::LetInExpr(let_expr) => {
-                self.translate_let_expr(lookup_scope, let_expr, pos)
-            }
+            parser::ast::Code::LetExpr(let_expr) => match let_expr {
+                ast::LetExpr::LetIn(let_in_expr) => {
+                    self.translate_let_expr(lookup_scope, let_in_expr, pos)
+                }
+                ast::LetExpr::AttrsetLet(_attrset) => {
+                    unreachable!("let attrset expressions should have been removed by an ast pass")
+                }
+            },
             parser::ast::Code::ValueReference { ident } => {
                 self.translate_value_ref(lookup_scope, ident, pos)
             }

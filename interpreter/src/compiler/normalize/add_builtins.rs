@@ -8,5 +8,5 @@ pub fn add_builtins_def(ast: &mut NixExpr<'_>) {
     let mut template = get_builtins_expr();
     *template.body = body;
 
-    ast.content = NixExprContent::Code(Code::LetInExpr(template));
+    ast.content = NixExprContent::Code(Code::LetExpr(parser::ast::LetExpr::LetIn(template)));
 }

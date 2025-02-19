@@ -11,7 +11,7 @@ use gc::{GcError, GcHandle, GcPointer};
 use gc_derive::Trace;
 use json_parser::JsonParser;
 use parser::{
-    ast::{Code, LetInExpr, NixExprContent},
+    ast::{Code, LetExpr, LetInExpr, NixExprContent},
     parse_nix,
 };
 use regex::Regex;
@@ -62,7 +62,7 @@ fn build_builtins_expr() -> LetInExpr<'static> {
     let builtins = parse_nix(include_bytes!("./prelude.nix"))
         .expect("to be able to parse the static builtin def");
 
-    if let NixExprContent::Code(Code::LetInExpr(letexpr)) = builtins.content {
+    if let NixExprContent::Code(Code::LetExpr(LetExpr::LetIn(letexpr))) = builtins.content {
         letexpr
     } else {
         unreachable!("we built a let in expr.");

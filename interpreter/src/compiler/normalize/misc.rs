@@ -1,6 +1,6 @@
 use parser::ast::{
-    AssertExpr, Code, IfExpr, KnownNixStringContent, NixExpr, NixExprContent, NixString,
-    SourcePosition,
+    AssertExpr, Attrset, Code, IfExpr, KnownNixStringContent, LetExpr, LetInExpr, NixExpr,
+    NixExprContent, NixString, SourcePosition, WithExpr,
 };
 
 use crate::compiler::get_null_expr;
@@ -20,9 +20,9 @@ impl Pass<'_> for MiscPass {
         }
     }
 
-    fn inspect_code(&mut self, code: &mut Code<'_>) {
+    fn inspect_code(&mut self, code: &mut Code<'_>, pos: SourcePosition) {
         // first, descend.
-        self.descend_code(code);
+        self.descend_code(code, pos);
 
         if let Code::AssertExpr(AssertExpr { assertion, value }) = code {
             let if_expr = IfExpr {
@@ -32,6 +32,69 @@ impl Pass<'_> for MiscPass {
             };
             *code = Code::IfExpr(if_expr);
         }
+    }
+
+    fn inspect_let_expr(&mut self, expr: &mut LetExpr, position: SourcePosition) {
+        match expr {
+            LetExpr::LetIn(let_in_expr) => {
+                self.inspect_let_in_expr(let_in_expr);
+            }
+            LetExpr::AttrsetLet(attrset) => {
+                // we do want to remove this obsolete form...
+                // to achieve that we replace it with a with and getattr.
+
+                let attrset = core::mem::replace(
+                    attrset,
+                    Attrset {
+                        is_recursive: false,
+                        inherit_keys: Vec::new(),
+                        attrs: Vec::new(),
+                    },
+                );
+                let attrset = NixExpr {
+                    position,
+                    content: NixExprContent::CompoundValue(parser::ast::CompoundValue::Attrset(
+                        attrset,
+                    )),
+                };
+
+                let name = "!attrset_let";
+                let nameref = NixExpr {
+                    position,
+                    content: NixExprContent::Code(Code::ValueReference { ident: name }),
+                };
+
+                // attrset_let.body
+                let body = NixExpr {
+                    position,
+                    content: NixExprContent::Code(Code::Op(parser::ast::Op::AttrRef {
+                        left: Box::new(nameref.clone()),
+                        name: NixString::from_literal("body", position),
+                        default: None,
+                    })),
+                };
+
+                // with !attrset_let; <<source>>
+                let with_expr = NixExpr {
+                    position,
+                    content: NixExprContent::Code(Code::WithExpr(WithExpr {
+                        binding: Box::new(nameref),
+                        body: Box::new(attrset),
+                    })),
+                };
+
+                // let attrset_let = with attrset_let; <<source>>; in attrset_let.body
+                let mut outer_let = LetInExpr {
+                    bindings: [(name, with_expr)].into_iter().collect(),
+                    inherit_entries: Vec::new(),
+                    body: Box::new(body),
+                };
+
+                // continue our pass downward
+                self.inspect_let_in_expr(&mut outer_let);
+                *expr = LetExpr::LetIn(outer_let);
+            }
+        };
     }
 }
 

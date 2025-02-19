@@ -115,13 +115,14 @@ impl<'src> Pass<'src> for RemoveWithExprPass<'src> {
 
                 let mut bindings = BTreeMap::new();
                 bindings.insert(ident, core::mem::replace(binding.as_mut(), get_null_expr()));
-                let let_expr = Code::LetInExpr(LetInExpr {
+                let let_expr = LetInExpr {
                     bindings,
                     inherit_entries: Vec::new(),
                     body: core::mem::replace(body, Box::new(get_null_expr())),
-                });
+                };
 
-                expr.content = NixExprContent::Code(let_expr);
+                expr.content =
+                    NixExprContent::Code(Code::LetExpr(parser::ast::LetExpr::LetIn(let_expr)));
 
                 // and, at this point the ident we used is no longer active and can be removed
                 if let Some(ident) = self.used_with_ident_stack.pop() {
@@ -148,7 +149,7 @@ impl<'src> Pass<'src> for RemoveWithExprPass<'src> {
         }
     }
 
-    fn inspect_let_expr(&mut self, letexpr: &mut LetInExpr<'src>) {
+    fn inspect_let_in_expr(&mut self, letexpr: &mut LetInExpr<'src>) {
         // first announce the presence of the added keys
         for key in letexpr.bindings.keys().chain(
             letexpr
