@@ -29,6 +29,66 @@ let
   mapAttrs = func: attrset: ___builtin_mapAttrs [func attrset];
   map = func: list: ___builtin_map {inherit func list;};
   isPath = arg: typeOf arg == "path";
+  attrValues = ___builtin_attrValues;
+  hasAttr = s: set: set ? "${s}";
+  elem = x: xs: let
+    list_len = length xs;
+    pick = elemAt xs;
+    iter = idx:
+      if idx == list_len
+      then false
+      else if pick idx == x
+      then true
+      else iter (idx + 1);
+  in
+    iter 0;
+
+  decons = len: lst:
+    if len == 0
+    then []
+    else if len == 1
+    then [lst.head]
+    else let
+      left_len = len / 2;
+      right_len = len - left_len;
+    in
+      (decons left_len lst) ++ (decons right_len (cons_skip left_len lst));
+  # convert a cons list into a nix list
+  cons_skip = len: list:
+    if len == 0
+    then list
+    else cons_skip (len - 1) list.tail;
+  to_cons = list: let
+    list_len = length list;
+    pick = elemAt list;
+    go = idx:
+      if idx == list_len
+      then null
+      else {
+        head = pick idx;
+        tail = go (idx + 1);
+      };
+  in
+    go 0;
+  cons_append = left: right: let
+    go = l:
+      if l == null
+      then right
+      else {
+        head = l.head;
+        tail = go l.tail;
+      };
+  in
+    go left;
+  cons_elem = x: let
+    iter = xs:
+      if xs == null
+      then false
+      else if xs.head == x
+      then true
+      else iter xs.tail;
+  in
+    iter;
 
   genList = generator: length: let
     # we go with radix 4 to improve perf a little and reduce recursion depth.
@@ -104,6 +164,8 @@ let
       map
       mapAttrs
       deepSeq
+      elem
+      hasAttr
       abort
       typeOf
       match
@@ -134,10 +196,12 @@ let
     isList = arg: typeOf arg == "list";
     isNull = arg: arg == null;
     langVersion = 6;
-    hasAttr = s: set: set ? "${s}";
     getAttr = s: set: set."${s}";
     currentSystem = "x86_64-linux";
     add = a: b: a + b;
+    sub = a: b: a - b;
+    mul = a: b: a * b;
+    div = a: b: a / b;
     bitAnd = a: b: ___builtin_bitand [a b];
     bitOr = a: b: ___builtin_bitor [a b];
     bitXor = a: b: ___builtin_bitxor [a b];
@@ -201,7 +265,6 @@ let
       ];
 
     attrNames = ___builtin_attrNames;
-    attrValues = ___builtin_attrValues;
 
     partition = predicate: list: let
       pickSetRight = map predicate list;
@@ -342,18 +405,6 @@ let
         in
           compare_iter 0;
 
-    elem = x: xs: let
-      list_len = length xs;
-      pick = elemAt xs;
-      iter = idx:
-        if idx == list_len
-        then false
-        else if pick idx == x
-        then true
-        else iter (idx + 1);
-    in
-      iter 0;
-
     sort = comparator: list: let
       pick = elemAt list;
       list_len = length list;
@@ -393,24 +444,6 @@ let
           right_len = len - left_len;
         in
           merge (cons_inner_sort start_idx left_len) (cons_inner_sort (start_idx + left_len) right_len);
-      # convert a cons list into a nix list
-      cons_skip = len: list:
-        if len == 0
-        then list
-        else cons_skip (len - 1) list.tail;
-      # converts a cons list of the specified length to a nix list
-      decons = len: lst:
-        if len == 1
-        then let
-          head = lst.head;
-        in
-          # we do not want to carry around the thunks from decons
-          ___builtin_seq [head [head]]
-        else let
-          left_len = len / 2;
-          right_len = len - left_len;
-        in
-          (decons left_len lst) ++ (decons right_len (cons_skip left_len lst));
     in
       if list_len <= 1
       then list
@@ -439,6 +472,48 @@ let
         else false;
     in
       iter 0;
+
+    genericClosure = {
+      startSet,
+      operator,
+    }: let
+      iter = input @ {
+        done_keys,
+        result,
+        result_len,
+        work_list,
+      }:
+        if work_list == null # work set is empty...
+        then input # we are done, just return the result
+        else if cons_elem work_list.head.key done_keys
+        then # we already processed that key
+          iter {
+            inherit done_keys result result_len;
+            work_list = work_list.tail; # skip it
+          }
+        else
+          # the key was actually new. Add the entry to the result set
+          # and expand the pending set.
+          iter {
+            done_keys = {
+              head = work_list.head.key;
+              tail = done_keys;
+            };
+            result = {
+              head = work_list.head;
+              tail = result;
+            };
+            result_len = result_len + 1;
+            work_list = cons_append work_list.tail (to_cons (operator work_list.head));
+          };
+      result = iter {
+        done_keys = null;
+        result = null;
+        result_len = 0;
+        work_list = to_cons startSet;
+      };
+    in
+      decons result.result_len result.result;
   };
 in
   builtins
