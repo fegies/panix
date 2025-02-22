@@ -381,6 +381,7 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                 .thunk_stack
                                 .pop()
                                 .expect("thunk stack exhausted unexpectedly");
+
                             let result = match self.pop()? {
                                 NixValue::Function(function) => {
                                     self.evaluator.evaluate_call(function, arg)
@@ -390,23 +391,58 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                     .builtins
                                     .clone()
                                     .execute_builtin(builtin, arg, &mut self.evaluator),
+                                NixValue::Attrset(attrset) => {
+                                    // if the attrset has a functor entry, we can use the
+                                    // normal call syntax to call the functor.
+                                    let functor = attrset
+                                        .get_and_force_entry_str(self.evaluator, "__functor")?
+                                        .expect_function()?;
+
+                                    // first the functor needs to be called with the self attrest
+                                    // as value.
+                                    let attrset_thunk = self
+                                        .evaluator
+                                        .gc_handle
+                                        .alloc(Thunk::Value(NixValue::Attrset(attrset)))?;
+                                    let function = self
+                                        .evaluator
+                                        .evaluate_call(functor, attrset_thunk)?
+                                        .expect_function()?;
+
+                                    // now, we can try to call again, this time with the real
+                                    // argument
+                                    self.evaluator.evaluate_call(function, arg)
+                                }
                                 _ => Err(EvaluateError::TypeError),
                             }?;
 
                             self.state.local_stack.push(result);
                         }
                         VmOp::TailCall => {
-                            // Tail call! first save the argument, then clear all state
+                            // Tail call!
+                            // first save the argument, then clear all state
                             let arg = self
                                 .state
                                 .thunk_stack
                                 .pop()
                                 .expect("thunk stack exhausted unexpectedly");
-                            let func = self.pop()?;
+                            let mut func = self.pop()?;
 
                             // put the code buffer back to avoid a reallocation
                             core::mem::drop(code);
                             self.state.code_buf = code_buf;
+
+                            if let NixValue::Attrset(attrset) = &func {
+                                // try to handle the callable attrset case.
+                                let functor = attrset
+                                    .get_and_force_entry_str(self.evaluator, "__functor")?
+                                    .expect_function()?;
+
+                                let attrset_self_arg =
+                                    self.evaluator.gc_handle.alloc(Thunk::Value(func))?;
+
+                                func = self.evaluator.evaluate_call(functor, attrset_self_arg)?;
+                            }
 
                             match func {
                                 NixValue::Builtin(builtin) => {
@@ -867,6 +903,13 @@ impl NixValue {
     pub fn expect_int(self) -> Result<i64, EvaluateError> {
         match self {
             NixValue::Int(i) => Ok(i),
+            _ => Err(EvaluateError::TypeError),
+        }
+    }
+
+    pub fn expect_function(self) -> Result<value::Function, EvaluateError> {
+        match self {
+            NixValue::Function(f) => Ok(f),
             _ => Err(EvaluateError::TypeError),
         }
     }
