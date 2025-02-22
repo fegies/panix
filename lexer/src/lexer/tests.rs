@@ -269,3 +269,19 @@ fn ident_with_single_quot() {
         &[Token::Ident("foo'"), Token::Whitespace, Token::Ident("bar")],
     );
 }
+
+#[test]
+fn quoted_newline() {
+    let str = r#""a\
+b""#;
+    assert_lex(
+        str,
+        &[
+            Token::StringBegin,
+            Token::StringContent("a"),
+            Token::StringContent("\n"),
+            Token::StringContent("b"),
+            Token::StringEnd,
+        ],
+    );
+}

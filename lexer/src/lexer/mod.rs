@@ -363,7 +363,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 b'$' if matches!(self.input.get(idx + 1), Some(b'{')) => {
                     let pos = self.input.pos();
                     let str = self.input.consume(idx);
-                    self.push_string_content(str, pos).await?;
+                    self.push_string_content(str, pos, false).await?;
                     self.push(Token::BeginInterpol).await;
                     self.input.consume(2);
                     self.push_brace(BraceStackEntry::PathInterpolation)?;
@@ -380,7 +380,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 
         let pos = self.input.pos();
         let final_part = self.input.consume(end_idx);
-        self.push_string_content(final_part, pos).await?;
+        self.push_string_content(final_part, pos, false).await?;
         self.push(Token::PathEnd).await;
         Ok(())
     }
@@ -389,13 +389,15 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         &mut self,
         mut content: &'a [u8],
         pos: SourcePosition,
+        is_multiline_part: bool,
     ) -> Result<(), LexError> {
-        fn get_replacement_value(char: &u8) -> Option<&'static str> {
+        fn get_replacement_value(char: &u8, is_multiline_part: bool) -> Option<&'static str> {
             let res = match char {
                 b'n' => "\n",
                 b'r' => "\r",
                 b'\\' => "\\",
                 b'$' => "$",
+                b'\n' if !is_multiline_part => "\n",
                 _ => return None,
             };
             Some(res)
@@ -405,7 +407,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
             for backslash_pos in memchr::memchr_iter(b'\\', content) {
                 if let Some(replacement_value) = content
                     .get(backslash_pos + 1)
-                    .and_then(get_replacement_value)
+                    .and_then(|v| get_replacement_value(v, is_multiline_part))
                 {
                     let unescaped_part = &content[..backslash_pos];
                     if unescaped_part.len() > 0 {
@@ -472,13 +474,13 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 match input_slice[decide_idx] {
                     b'\n' => {
                         let part = self.input.consume(decide_idx + 1);
-                        self.push_string_content(part, pos).await?;
+                        self.push_string_content(part, pos, true).await?;
                         continue 'outer;
                     }
                     b'$' if self.input.get(decide_idx + 1) == Some(b'{') => {
                         let part = self.input.consume(decide_idx);
                         if part.len() > 0 {
-                            self.push_string_content(part, pos).await?;
+                            self.push_string_content(part, pos, true).await?;
                         }
                         // skip the opening dollar brace
                         self.input.consume(2);
@@ -496,7 +498,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                                 // end of string
                                 let part = self.input.consume(decide_idx);
                                 if part.len() > 0 {
-                                    self.push_string_content(part, pos).await?;
+                                    self.push_string_content(part, pos, true).await?;
                                 }
                                 self.push(Token::StringEnd).await;
 
@@ -541,7 +543,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     let pos = self.input.pos();
                     let cont = self.input.consume(part_to_beginning_of_interpolation.len());
                     if cont.len() > 0 {
-                        self.push_string_content(cont, pos).await?;
+                        self.push_string_content(cont, pos, false).await?;
                     }
                     self.push_pos(Token::BeginInterpol, pos).await;
                     // skip interpol marker
@@ -554,7 +556,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
             // no interpolation found.
             let pos = self.input.pos();
             let cont = self.input.consume(candidate.len());
-            self.push_string_content(cont, pos).await?;
+            self.push_string_content(cont, pos, false).await?;
             self.push(Token::StringEnd).await;
             self.input.advance_one();
             return Ok(());
