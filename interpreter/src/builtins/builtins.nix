@@ -46,13 +46,47 @@ let
   decons = len: lst:
     if len == 0
     then []
-    else if len == 1
-    then [lst.head]
     else let
-      left_len = len / 2;
-      right_len = len - left_len;
+      decons_inner = len: lst:
+        if len <= 4
+        then
+          (
+            if len <= 2
+            then
+              (
+                if len == 1
+                then [lst.head]
+                else [lst.head lst.tail.head]
+              )
+            else
+              (
+                if len == 3
+                then let
+                  t = lst.tail;
+                in [lst.head t.head t.tail.head]
+                else let
+                  t1 = lst.tail;
+                  t2 = t1.tail;
+                in [lst.head t1.head t2.head t2.tail.head]
+              )
+          )
+        else let
+          step_size = len / 4;
+          skip_step = cons_skip step_size;
+          decons_step = decons_inner step_size;
+          lst_2 = skip_step lst;
+          lst_3 = skip_step lst_2;
+          lst_4 = skip_step lst_3;
+        in
+          ___builtin_concatLists [
+            (decons_step lst)
+            (decons_step lst_2)
+            (decons_step lst_3)
+            (decons_inner (len - 3 * step_size) lst_4)
+          ];
     in
-      (decons left_len lst) ++ (decons right_len (cons_skip left_len lst));
+      decons_inner len lst;
+
   # convert a cons list into a nix list
   cons_skip = len: list:
     if len == 0

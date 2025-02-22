@@ -277,7 +277,6 @@ impl GcHandle {
         // self.alloc_pages.refresh_allocation_page(Generation(0));
         // return;
 
-        self.alloc_pages.print_heap_sizes();
         let target_generation = self.alloc_pages.suggest_collection_target_generation();
         self.alloc_pages.alloc_counters[target_generation.0 as usize].collection_count += 1;
         println!("collecting gen {}", target_generation.0);
@@ -357,6 +356,7 @@ impl GcHandle {
         }
 
         println!("gc done.");
+        self.alloc_pages.print_heap_sizes();
     }
 
     pub fn force_collect(&mut self) {
