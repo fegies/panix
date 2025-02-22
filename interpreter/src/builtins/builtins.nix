@@ -127,11 +127,13 @@ let
           (iter (length - 3 * step_size) (offset + 3 * step_size))
         ];
   in
-    if length == 0
+    if typeOf length != "int"
+    then throw "genList: length must be an integer"
+    else if length < 0
+    then throw "length must not be negative"
+    else if length == 0
     then []
-    else if typeOf length == "int"
-    then iter length 0
-    else throw "genList: length must be an integer";
+    else iter length 0;
 
   foldl' = op: nul: list: let
     max_len = length list;
