@@ -562,6 +562,12 @@ fn test_inherit_from_nested() {
 }
 
 #[test]
+fn attrset_default_chain() {
+    eval_expr("{}.foo.bar or 42", "42");
+    eval_expr("let set = {}; in set.blub.bla or set.foo.bar or 42", "42");
+}
+
+#[test]
 fn eval_long_tailcall() {
     eval_expr(
         r#"
