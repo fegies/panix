@@ -548,7 +548,7 @@ fn test_foldl() {
 #[test]
 fn test_sort() {
     eval_expr(
-        "builtins.sort builtins.lessThan [ 483 249 526 147 42 77 ]",
+        "let r = builtins.sort builtins.lessThan [ 483 249 526 147 42 77 ]; in builtins.trace (builtins.toString r) r",
         "[ 42 77 147 249 483 526 ]",
     );
 }

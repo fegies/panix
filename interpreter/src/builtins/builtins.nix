@@ -166,6 +166,7 @@ let
       deepSeq
       elem
       hasAttr
+      attrValues
       abort
       typeOf
       match
@@ -278,17 +279,7 @@ let
         pickSet = map (v: !v) pickSetRight;
       };
     };
-    lessThan = let
-      isNum = a: let type = typeOf a; in type == "int" || type == "float";
-    in
-      e1:
-        if isNum e1
-        then
-          e2:
-            if isNum e2
-            then e1 < e2
-            else throw "lessThan: e2 must be a number"
-        else throw "lessThan: e1 must be a number";
+    lessThan = a: b: a < b;
 
     removeAttrs = set: list: ___builtin_removeAttrs [set list];
 
@@ -423,13 +414,13 @@ let
               if comparator left_head right_head
               then # left is smaller
                 {
-                  head = right_head;
-                  tail = merge left (right.tail);
+                  head = left_head;
+                  tail = merge (left.tail) right;
                 }
               else # right is smaller or equal
                 {
-                  head = left_head;
-                  tail = merge (left.tail) right;
+                  head = right_head;
+                  tail = merge left (right.tail);
                 }
           );
       # generates a sorted cons list covering the requested range.
