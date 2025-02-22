@@ -69,7 +69,7 @@ impl Pass<'_> for RemoveAttrsetRecPass {
                 }]
             };
 
-            let body = NixExpr {
+            let mut body = NixExpr {
                 position: expr.position,
                 content: NixExprContent::CompoundValue(parser::ast::CompoundValue::Attrset(
                     Attrset {
@@ -79,6 +79,32 @@ impl Pass<'_> for RemoveAttrsetRecPass {
                     },
                 )),
             };
+
+            if bindings.contains_key("__overrides") {
+                // this is a weird undocumented special case for recursive attrsets.
+                // effectively, it transforms an attrset a containing the __overrides key
+                // to a // a.__overrides
+                //
+                // Since we will already have lifted the overrides binding, we can just
+                // reference it directly.
+                let position = body.position;
+
+                let overrides_ref = NixExpr {
+                    position,
+                    content: NixExprContent::Code(parser::ast::Code::ValueReference {
+                        ident: "__overrides",
+                    }),
+                };
+
+                body = NixExpr {
+                    position,
+                    content: NixExprContent::Code(parser::ast::Code::Op(parser::ast::Op::Binop {
+                        opcode: parser::ast::BinopOpcode::AttrsetMerge,
+                        left: Box::new(body),
+                        right: Box::new(overrides_ref),
+                    })),
+                };
+            }
 
             let let_expr = LetInExpr {
                 bindings,
