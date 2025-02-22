@@ -50,7 +50,7 @@ let
       decons_inner = len: lst:
         if len <= 4
         then
-          (
+          seq lst (
             if len <= 2
             then
               (
