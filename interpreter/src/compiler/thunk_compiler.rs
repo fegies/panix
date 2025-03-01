@@ -13,7 +13,7 @@ use crate::{
             CompareMode, ExecutionContext, LambdaAllocArgs, LambdaCallType, ThunkAllocArgs,
             ValueSource, VmOp,
         },
-        value::{self, NixValue, Thunk},
+        value::{self, Attrset, NixString, NixValue, Thunk},
     },
 };
 
@@ -764,6 +764,41 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                 "true" => VmOp::PushImmediate(self.compiler.cached_values.true_boolean.clone()),
                 "false" => VmOp::PushImmediate(self.compiler.cached_values.false_boolean.clone()),
                 "null" => VmOp::PushImmediate(self.compiler.cached_values.null_value.clone()),
+                "__curPos" => {
+                    let sourcefile =
+                        self.compiler
+                            .gc_handle
+                            .alloc(Thunk::Value(NixValue::String(
+                                self.compiler.source_filename.clone(),
+                            )))?;
+                    let mut entries = vec![
+                        (
+                            self.compiler.gc_handle.alloc_string("column")?.into(),
+                            self.compiler
+                                .gc_handle
+                                .alloc(Thunk::Value(NixValue::Int((pos.column + 1) as i64)))?,
+                        ),
+                        (
+                            self.compiler.gc_handle.alloc_string("line")?.into(),
+                            self.compiler
+                                .gc_handle
+                                .alloc(Thunk::Value(NixValue::Int(pos.line as i64)))?,
+                        ),
+                        (
+                            self.compiler.gc_handle.alloc_string("file")?.into(),
+                            sourcefile,
+                        ),
+                    ];
+
+                    let curpos =
+                        Attrset::build_from_entries(&mut entries, &mut self.compiler.gc_handle)
+                            .map_err(|e| match e {
+                                crate::EvaluateError::GcError(gc_error) => gc_error,
+                                _ => unreachable!(),
+                            })?;
+                    let curpos = self.compiler.gc_handle.alloc(NixValue::Attrset(curpos))?;
+                    VmOp::PushImmediate(curpos)
+                }
                 _ => {
                     if let Some(builtin) = self.compiler.builtins.get_builtin(ident) {
                         VmOp::PushImmediate(
