@@ -13,7 +13,7 @@ use crate::{
             CompareMode, ExecutionContext, LambdaAllocArgs, LambdaCallType, ThunkAllocArgs,
             ValueSource, VmOp,
         },
-        value::{self, Attrset, NixString, NixValue, Thunk},
+        value::{self, Attrset, NixValue, Thunk},
     },
 };
 

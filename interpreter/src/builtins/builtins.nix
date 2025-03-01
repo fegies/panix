@@ -242,6 +242,8 @@ let
     bitAnd = a: b: ___builtin_bitand [a b];
     bitOr = a: b: ___builtin_bitor [a b];
     bitXor = a: b: ___builtin_bitxor [a b];
+    floor = ___builtin_floor;
+    ceil = ___builtin_ceil;
 
     concatStringsSep = separator: list: let
       pick = elemAt list;

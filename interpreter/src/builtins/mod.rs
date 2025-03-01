@@ -109,6 +109,8 @@ enum BuiltinType {
     BitAnd,
     BitXor,
     BitOr,
+    Ceil,
+    Floor,
 }
 
 impl Builtins for NixBuiltins {
@@ -146,6 +148,8 @@ impl Builtins for NixBuiltins {
             "___builtin_bitand" => BuiltinType::BitAnd,
             "___builtin_bitor" => BuiltinType::BitOr,
             "___builtin_bitxor" => BuiltinType::BitXor,
+            "___builtin_floor" => BuiltinType::Floor,
+            "___builtin_ceil" => BuiltinType::Ceil,
             _ => return None,
         };
 
@@ -276,7 +280,31 @@ impl Builtins for NixBuiltins {
             BuiltinType::BitAnd => execute_bitop(evaluator, argument, |l, r| l & r),
             BuiltinType::BitXor => execute_bitop(evaluator, argument, |l, r| l ^ r),
             BuiltinType::BitOr => execute_bitop(evaluator, argument, |l, r| l | r),
+            BuiltinType::Ceil => execute_ceil(evaluator, argument),
+            BuiltinType::Floor => execute_floor(evaluator, argument),
         }
+    }
+}
+
+fn execute_floor(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    match evaluator.force_thunk(argument)? {
+        i @ NixValue::Int(_) => Ok(i),
+        NixValue::Float(f) => Ok(NixValue::Int(f.floor() as i64)),
+        _ => Err(EvaluateError::TypeError),
+    }
+}
+
+fn execute_ceil(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    match evaluator.force_thunk(argument)? {
+        i @ NixValue::Int(_) => Ok(i),
+        NixValue::Float(f) => Ok(NixValue::Int(f.ceil() as i64)),
+        _ => Err(EvaluateError::TypeError),
     }
 }
 
