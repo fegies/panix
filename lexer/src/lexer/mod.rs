@@ -391,25 +391,27 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         pos: SourcePosition,
         is_multiline_part: bool,
     ) -> Result<(), LexError> {
-        fn get_replacement_value(char: &u8, is_multiline_part: bool) -> Option<&'static str> {
+        fn get_replacement_value(char: &u8) -> Option<&'static str> {
             let res = match char {
-                b'n' => "\n",
+                b'n' | b'\n' => "\n",
                 b'r' => "\r",
                 b'\\' => "\\",
                 b'$' => "$",
-                b'\n' if !is_multiline_part => "\n",
                 _ => return None,
             };
             Some(res)
         }
 
+        let escape_sequence = if is_multiline_part { "''\\" } else { "\\" };
+        let finder = memchr::memmem::Finder::new(escape_sequence);
+
         'outer: loop {
-            for backslash_pos in memchr::memchr_iter(b'\\', content) {
+            for sequence_pos in finder.find_iter(content) {
                 if let Some(replacement_value) = content
-                    .get(backslash_pos + 1)
-                    .and_then(|v| get_replacement_value(v, is_multiline_part))
+                    .get(sequence_pos + escape_sequence.len())
+                    .and_then(get_replacement_value)
                 {
-                    let unescaped_part = &content[..backslash_pos];
+                    let unescaped_part = &content[..sequence_pos];
                     if unescaped_part.len() > 0 {
                         self.push_pos(
                             Token::StringContent(Self::convert_str(unescaped_part)?),
@@ -417,12 +419,13 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                         )
                         .await;
                     }
-
-                    // skip the leading part, including the backslash and replacement char
-                    content = &content[backslash_pos + 2..];
                     self.push_pos(Token::StringContent(replacement_value), pos)
                         .await;
 
+                    // skip the leading part, including the escape sequence and escaped char
+                    content = &content[(sequence_pos + escape_sequence.len() + 1)..];
+
+                    // continue the search on whatever we have not processed yet.
                     continue 'outer;
                 }
             }
@@ -490,7 +493,7 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                     }
                     b'\'' if self.input.get(decide_idx + 1) == Some(b'\'') => {
                         match self.input.get(decide_idx + 2) {
-                            Some(b'$' | b'\'') => {
+                            Some(b'$' | b'\\') => {
                                 // we found something that is escaped
                                 search_idx = decide_idx + 3;
                             }
