@@ -576,12 +576,13 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         }
                         VmOp::GetAttribute { push_error } => {
                             let key = self.pop()?.expect_string()?;
-                            let attrset = self.pop()?.expect_attrset()?;
-
-                            let value = attrset.get_entry(&self.evaluator.gc_handle, &key);
 
                             if push_error {
-                                if let Some(val) = value {
+                                if let Some(val) =
+                                    self.pop()?.expect_attrset().ok().and_then(|attrset| {
+                                        attrset.get_entry(&self.evaluator.gc_handle, &key)
+                                    })
+                                {
                                     self.state
                                         .local_stack
                                         .push(self.evaluator.force_thunk(val)?);
@@ -590,8 +591,10 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                     self.state.local_stack.push(NixValue::Bool(false));
                                 }
                             } else {
-                                let val =
-                                    value.ok_or_else(|| EvaluateError::AttrsetKeyNotFound {
+                                let attrset = self.pop()?.expect_attrset()?;
+                                let val = attrset
+                                    .get_entry(&self.evaluator.gc_handle, &key)
+                                    .ok_or_else(|| EvaluateError::AttrsetKeyNotFound {
                                         attr_name: key.load(&self.evaluator.gc_handle).to_owned(),
                                     })?;
                                 self.state
