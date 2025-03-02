@@ -172,11 +172,18 @@ trait Pass<'src> {
         match expr {
             Op::AttrRef {
                 left,
-                name,
+                path,
                 default,
             } => {
                 self.inspect_expr(left);
-                self.inspect_nix_string(name);
+                match path {
+                    AttrsetKey::Single(nix_string) => self.inspect_nix_string(nix_string),
+                    AttrsetKey::Multi(vec) => {
+                        for part in vec {
+                            self.inspect_nix_string(part);
+                        }
+                    }
+                }
                 if let Some(default) = default {
                     self.inspect_expr(default);
                 }

@@ -575,8 +575,8 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             ));
                         }
                         VmOp::GetAttribute { push_error } => {
-                            let attrset = self.pop()?.expect_attrset()?;
                             let key = self.pop()?.expect_string()?;
+                            let attrset = self.pop()?.expect_attrset()?;
 
                             let value = attrset.get_entry(&self.evaluator.gc_handle, &key);
 
@@ -585,9 +585,9 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                     self.state
                                         .local_stack
                                         .push(self.evaluator.force_thunk(val)?);
-                                    self.state.local_stack.push(NixValue::Bool(false));
-                                } else {
                                     self.state.local_stack.push(NixValue::Bool(true));
+                                } else {
+                                    self.state.local_stack.push(NixValue::Bool(false));
                                 }
                             } else {
                                 let val =

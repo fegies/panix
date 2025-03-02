@@ -78,7 +78,7 @@ impl<'a> RemoveWithExprPass<'a> {
 
             let attrref = parser::ast::Op::AttrRef {
                 left,
-                name: NixString::from_literal(ident, pos),
+                path: AttrsetKey::Single(NixString::from_literal(ident, pos)),
                 default,
             };
             NixExprContent::Code(Code::Op(attrref))

@@ -162,7 +162,7 @@ pub enum VmOp {
     /// The resulting attrset is then pushed to the stack
     MergeAttrsets,
 
-    /// first pops an attrset, then a name value from the stack.
+    /// first pops a name value, then an attrset from the stack.
     /// Then the attribute with that name is retrieved from the attrset
     /// and pushed to the stack.
     ///
@@ -170,8 +170,8 @@ pub enum VmOp {
     /// if it is set to _false_ and the requested attribute is not present, a runtime error is
     /// raised.
     /// if it is set to _true_ and the attribute was present, an additional boolean value of
-    /// _false_ is pushed to the stack after the attribute value was pushed.
-    /// if it is set to _true_ and the attribute was not present, a value of _true_ is pushed to
+    /// _true_ is pushed to the stack after the attribute value was pushed.
+    /// if it is set to _true_ and the attribute was not present, a value of _false_ is pushed to
     /// the stack. Since no attribute value could be retrieved in this case, the result boolen will
     /// be the only pushed value.
     GetAttribute { push_error: bool },

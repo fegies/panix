@@ -49,6 +49,48 @@ pub enum AttrsetKey<'a> {
     /// the parsed representation of the nested attrset shorthand.
     Multi(Vec<NixString<'a>>),
 }
+impl<'a> IntoIterator for AttrsetKey<'a> {
+    type Item = NixString<'a>;
+
+    type IntoIter = AttrsetKeyIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            AttrsetKey::Single(nix_string) => AttrsetKeyIter::Single(Some(nix_string)),
+            AttrsetKey::Multi(vec) => AttrsetKeyIter::Multi(vec.into_iter()),
+        }
+    }
+}
+
+pub enum AttrsetKeyIter<'a> {
+    Single(Option<NixString<'a>>),
+    Multi(std::vec::IntoIter<NixString<'a>>),
+}
+
+impl<'a> ExactSizeIterator for AttrsetKeyIter<'a> {
+    fn len(&self) -> usize {
+        match self {
+            AttrsetKeyIter::Single(nix_string) => {
+                if nix_string.is_some() {
+                    1
+                } else {
+                    0
+                }
+            }
+            AttrsetKeyIter::Multi(i) => i.len(),
+        }
+    }
+}
+impl<'a> Iterator for AttrsetKeyIter<'a> {
+    type Item = NixString<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            AttrsetKeyIter::Single(nix_string) => nix_string.take(),
+            AttrsetKeyIter::Multi(iter) => iter.next(),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct InheritEntry<'a> {
@@ -146,7 +188,7 @@ pub enum MonopOpcode {
 pub enum Op<'a> {
     AttrRef {
         left: Box<NixExpr<'a>>,
-        name: NixString<'a>,
+        path: AttrsetKey<'a>,
         default: Option<Box<NixExpr<'a>>>,
     },
     Call {

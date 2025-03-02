@@ -69,7 +69,9 @@ impl Pass<'_> for MiscPass {
                     position,
                     content: NixExprContent::Code(Code::Op(parser::ast::Op::AttrRef {
                         left: Box::new(nameref.clone()),
-                        name: NixString::from_literal("body", position),
+                        path: parser::ast::AttrsetKey::Single(NixString::from_literal(
+                            "body", position,
+                        )),
                         default: None,
                     })),
                 };
@@ -135,12 +137,12 @@ fn build_search_path_replacement(
         position,
         content: NixExprContent::Code(parser::ast::Code::Op(parser::ast::Op::AttrRef {
             left: Box::new(builtins_expr.clone()),
-            name: NixString {
+            path: parser::ast::AttrsetKey::Single(NixString {
                 position,
                 content: parser::ast::NixStringContent::Known(KnownNixStringContent::Literal(
                     "findFile",
                 )),
-            },
+            }),
             default: None,
         })),
     };
@@ -148,12 +150,12 @@ fn build_search_path_replacement(
         position,
         content: NixExprContent::Code(parser::ast::Code::Op(parser::ast::Op::AttrRef {
             left: Box::new(builtins_expr),
-            name: NixString {
+            path: parser::ast::AttrsetKey::Single(NixString {
                 position,
                 content: parser::ast::NixStringContent::Known(KnownNixStringContent::Literal(
                     "nixPath",
                 )),
-            },
+            }),
             default: None,
         })),
     };

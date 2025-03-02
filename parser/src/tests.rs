@@ -2,7 +2,7 @@ use lexer::SourcePosition;
 
 use crate::{
     ast::{
-        Attrset, BasicValue, BinopOpcode, Code, CompoundValue, InheritEntry, Lambda,
+        Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, InheritEntry, Lambda,
         LambdaAttrsetArgs, List, NixExpr, NixString, Op,
     },
     parse_nix,
@@ -44,7 +44,10 @@ fn test_parse_attrset_or() {
                     Attrset::empty(),
                 )),
             }),
-            name: NixString::from_literal("foo", SourcePosition { line: 1, column: 4 }),
+            path: crate::ast::AttrsetKey::Single(NixString::from_literal(
+                "foo",
+                SourcePosition { line: 1, column: 4 },
+            )),
             default: Some(Box::new(NixExpr {
                 position: SourcePosition {
                     line: 1,
@@ -171,7 +174,10 @@ fn list_getattr_or() {
                                 ident: "x",
                             }),
                         }),
-                        name: NixString::from_literal("y", SourcePosition { line: 1, column: 4 }),
+                        path: AttrsetKey::Single(NixString::from_literal(
+                            "y",
+                            SourcePosition { line: 1, column: 4 },
+                        )),
                         default: Some(Box::new(NixExpr {
                             position: SourcePosition {
                                 line: 1,
