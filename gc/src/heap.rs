@@ -1,8 +1,8 @@
 use std::{cell::Cell, sync::Arc};
 
 use crate::{
-    get_heap_base, heap_page::Page, init::get_global_gc, pointer::RawHeapGcPointer, Generation,
-    GC_PAGE_SIZE,
+    GC_PAGE_SIZE, Generation, get_heap_base, heap_page::Page, init::get_global_gc,
+    pointer::RawHeapGcPointer,
 };
 
 #[derive(Clone)]

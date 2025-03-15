@@ -1,14 +1,14 @@
 use std::{cmp::Ordering, fmt::Display, rc::Rc};
 
-use gc::{specialized_types::array::Array, GcError, GcHandle, GcPointer};
+use gc::{GcError, GcHandle, GcPointer, specialized_types::array::Array};
 
 use crate::{
-    builtins::{get_builtins, Builtins, NixBuiltins},
+    EvaluateError,
+    builtins::{Builtins, NixBuiltins, get_builtins},
     vm::{
         opcodes::{ExecutionContext, LambdaAllocArgs, SourcePosition, ValueSource, VmOp},
         value::{self, Attrset, Function, List, NixString, NixValue, PathValue, Thunk},
     },
-    EvaluateError,
 };
 
 pub struct Evaluator<'gc> {
@@ -133,14 +133,18 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             }
 
             let source_filename = self.source_filename.load(&self.evaluator.gc_handle);
-            if let Some(source_pos) =
-                self.state.code_source_positions.as_ref().map(|ptr| {
-                    self.evaluator.gc_handle.load(ptr).as_ref()[self.insn_counter].clone()
-                })
+            match self
+                .state
+                .code_source_positions
+                .as_ref()
+                .map(|ptr| self.evaluator.gc_handle.load(ptr).as_ref()[self.insn_counter].clone())
             {
-                println!("at {source_filename} {source_pos}");
-            } else {
-                println!("at {source_filename}",);
+                Some(source_pos) => {
+                    println!("at {source_filename} {source_pos}");
+                }
+                _ => {
+                    println!("at {source_filename}",);
+                }
             }
 
             // print the tailcall entries if present
@@ -312,31 +316,35 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                         VmOp::Skip(to_skip) => {
                             (&mut code).take(to_skip as usize).for_each(|_| {});
                         }
-                        VmOp::SkipUnless(to_skip) => {
-                            if let NixValue::Bool(execute_next_insn) = self.pop()? {
+                        VmOp::SkipUnless(to_skip) => match self.pop()? {
+                            NixValue::Bool(execute_next_insn) => {
                                 if !execute_next_insn {
                                     (&mut code).take(to_skip as usize).for_each(|_| {});
                                 }
-                            } else {
+                            }
+                            _ => {
                                 return Err(EvaluateError::TypeError);
                             }
-                        }
+                        },
                         VmOp::ConcatLists(count) => self.execute_concat_lists(count)?,
                         VmOp::Add => {
                             let right = self.pop()?;
                             let left = self.pop()?;
 
-                            if let NixValue::String(left) = left {
-                                let right = right.expect_string()?;
-                                let result = left.concat(right, self.evaluator.gc_handle)?;
-                                self.state.local_stack.push(NixValue::String(result));
-                            } else {
-                                self.state.local_stack.push(execute_arithmetic_op(
-                                    left,
-                                    right,
-                                    |l, r| l + r,
-                                    |l, r| l + r,
-                                )?);
+                            match left {
+                                NixValue::String(left) => {
+                                    let right = right.expect_string()?;
+                                    let result = left.concat(right, self.evaluator.gc_handle)?;
+                                    self.state.local_stack.push(NixValue::String(result));
+                                }
+                                _ => {
+                                    self.state.local_stack.push(execute_arithmetic_op(
+                                        left,
+                                        right,
+                                        |l, r| l + r,
+                                        |l, r| l + r,
+                                    )?);
+                                }
                             }
                         }
                         VmOp::Mul => {
@@ -578,17 +586,18 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             let key = self.pop()?.expect_string()?;
 
                             if push_error {
-                                if let Some(val) =
-                                    self.pop()?.expect_attrset().ok().and_then(|attrset| {
-                                        attrset.get_entry(&self.evaluator.gc_handle, &key)
-                                    })
-                                {
-                                    self.state
-                                        .local_stack
-                                        .push(self.evaluator.force_thunk(val)?);
-                                    self.state.local_stack.push(NixValue::Bool(true));
-                                } else {
-                                    self.state.local_stack.push(NixValue::Bool(false));
+                                match self.pop()?.expect_attrset().ok().and_then(|attrset| {
+                                    attrset.get_entry(&self.evaluator.gc_handle, &key)
+                                }) {
+                                    Some(val) => {
+                                        self.state
+                                            .local_stack
+                                            .push(self.evaluator.force_thunk(val)?);
+                                        self.state.local_stack.push(NixValue::Bool(true));
+                                    }
+                                    _ => {
+                                        self.state.local_stack.push(NixValue::Bool(false));
+                                    }
                                 }
                             } else {
                                 let attrset = self.pop()?.expect_attrset()?;
@@ -964,11 +973,7 @@ impl ThunkEvalState {
                 for expected_arg in
                     keys.iter().filter_map(
                         |(arg_name, is_required)| {
-                            if *is_required {
-                                Some(arg_name)
-                            } else {
-                                None
-                            }
+                            if *is_required { Some(arg_name) } else { None }
                         },
                     )
                 {

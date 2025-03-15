@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use gc::{specialized_types::array::Array, GcError, GcHandle, GcPointer};
+use gc::{GcError, GcHandle, GcPointer, specialized_types::array::Array};
 use parser::ast::{
     self, BasicValue, IfExpr, KnownNixStringContent, Lambda, NixExpr, SourcePosition,
 };
@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use super::{lookup_scope::LookupScope, CompileError, Compiler};
+use super::{CompileError, Compiler, lookup_scope::LookupScope};
 pub use opcode_buf::OpcodeBuf;
 
 mod opcode_buf {
@@ -282,7 +282,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
         let mut code_buf = OpcodeBuf::default();
 
         let mut current_thunk_stack_height = 1; // the lambda always starts with the arg on
-                                                // the thunk stack.
+        // the thunk stack.
 
         let call_requirements = match lambda.args {
             ast::LambdaArgs::AttrsetBinding { total_name, args } => {

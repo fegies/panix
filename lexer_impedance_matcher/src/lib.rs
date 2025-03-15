@@ -4,7 +4,7 @@ mod buffer;
 
 use core::{
     future::Future,
-    pin::{pin, Pin},
+    pin::{Pin, pin},
     task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
 };
 

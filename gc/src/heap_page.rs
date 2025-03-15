@@ -1,16 +1,16 @@
 use crate::{
+    CollectionHandle, GC_PAGE_SIZE, GcError, Generation, GenerationCounter, PageSource,
+    PromotionHandle, RawGcPointer,
     heap::{AllocatedPage, ZeroedPage},
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    CollectionHandle, GcError, Generation, GenerationCounter, PageSource, PromotionHandle,
-    RawGcPointer, GC_PAGE_SIZE,
 };
 use std::cell::Cell;
 
 pub(crate) use header::HeapEntry;
 
 mod header {
-    use crate::object::{widen::WideningAccessor, HeapObject};
+    use crate::object::{HeapObject, widen::WideningAccessor};
 
     use super::*;
     pub(crate) struct HeapEntry {
@@ -62,7 +62,7 @@ mod header {
         }
 
         unsafe fn get_widener(&self) -> WideningAccessor {
-            WideningAccessor::from_bitpattern(self.widening_function)
+            unsafe { WideningAccessor::from_bitpattern(self.widening_function) }
         }
 
         pub fn decode_mut(&mut self) -> Result<&mut dyn HeapObject, ForwardingPointer> {
@@ -113,7 +113,7 @@ mod header {
         }
 
         unsafe fn get_dataref_unchecked(&self) -> &'static () {
-            &*((self as *const HeapEntry).add(1) as *const ())
+            unsafe { &*((self as *const HeapEntry).add(1) as *const ()) }
         }
 
         #[inline]
@@ -233,22 +233,21 @@ impl Page {
     ) -> Result<HeapGcPointer<T>, T> {
         let alloc_size = object.allocation_size();
 
-        if let Some((header_ptr, data_ptr)) =
-            self.try_reserve(alloc_size, core::mem::align_of_val(&object), counter)
-        {
-            let cast_data_ptr = data_ptr as *mut T;
-            unsafe {
-                core::ptr::write(cast_data_ptr, object);
-                core::ptr::write(header_ptr, HeapEntry::for_object(&*cast_data_ptr));
+        match self.try_reserve(alloc_size, core::mem::align_of_val(&object), counter) {
+            Some((header_ptr, data_ptr)) => {
+                let cast_data_ptr = data_ptr as *mut T;
+                unsafe {
+                    core::ptr::write(cast_data_ptr, object);
+                    core::ptr::write(header_ptr, HeapEntry::for_object(&*cast_data_ptr));
 
-                // unroot all data pointers in there to ensure we don't get leaks
-                (*cast_data_ptr).trace(&mut |ptr| ptr.unroot());
+                    // unroot all data pointers in there to ensure we don't get leaks
+                    (*cast_data_ptr).trace(&mut |ptr| ptr.unroot());
 
-                let gc_ptr = RawHeapGcPointer::from_addr(header_ptr);
-                Ok(HeapGcPointer::from_raw_unchecked(gc_ptr))
+                    let gc_ptr = RawHeapGcPointer::from_addr(header_ptr);
+                    Ok(HeapGcPointer::from_raw_unchecked(gc_ptr))
+                }
             }
-        } else {
-            Err(object)
+            _ => Err(object),
         }
     }
 
@@ -372,14 +371,14 @@ pub(crate) fn promote_object(
     heap_ptr: &mut RawHeapGcPointer,
     target_generation: Generation,
 ) -> RawHeapGcPointer {
-    let gen = target_generation.0 as usize;
+    let r#gen = target_generation.0 as usize;
 
     let header = heap_ptr.resolve_mut();
     let new_heap_ptr =
         copy_object_to_new_allocation(header.load_mut(), gc_handle, target_generation);
     header.forward_to(new_heap_ptr.clone());
 
-    let mut current_scavenge_page = gc_handle.pages.active_pages[gen].clone();
+    let mut current_scavenge_page = gc_handle.pages.active_pages[r#gen].clone();
     loop {
         current_scavenge_page
             .resume_scavenge(&mut |ptr| {
@@ -422,10 +421,13 @@ pub(crate) fn promote_object(
             })
             .expect("promotion failed");
 
-        if let Some(next) = gc_handle.scavenge_pending_set.pop_front() {
-            current_scavenge_page = next;
-        } else {
-            break;
+        match gc_handle.scavenge_pending_set.pop_front() {
+            Some(next) => {
+                current_scavenge_page = next;
+            }
+            _ => {
+                break;
+            }
         }
     }
 

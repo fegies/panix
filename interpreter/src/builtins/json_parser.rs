@@ -1,8 +1,8 @@
 use gc::{GcError, GcHandle, GcPointer};
 
 use crate::{
-    vm::value::{self, Attrset, NixString, NixValue, Thunk},
     EvaluateError,
+    vm::value::{self, Attrset, NixString, NixValue, Thunk},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -101,13 +101,11 @@ impl<'input, 'gc> JsonParser<'gc, 'input> {
             entries.push(self.parse_object_entry()?)
         }
 
-        let attrset = Attrset::build_from_entries(&mut entries, &mut self.gc).map_err(|e| {
-            if let EvaluateError::GcError(g) = e {
-                JsonParseError::GcError(g)
-            } else {
-                JsonParseError::DuplicateObjectKeys
-            }
-        })?;
+        let attrset =
+            Attrset::build_from_entries(&mut entries, &mut self.gc).map_err(|e| match e {
+                EvaluateError::GcError(g) => JsonParseError::GcError(g),
+                _ => JsonParseError::DuplicateObjectKeys,
+            })?;
 
         Ok(NixValue::Attrset(attrset))
     }

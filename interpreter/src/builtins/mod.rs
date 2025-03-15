@@ -19,12 +19,11 @@ use regex::Regex;
 mod json_parser;
 
 use crate::{
-    compile_source_with_nix_filename,
+    EvaluateError, Evaluator, InterpreterError, compile_source_with_nix_filename,
     vm::{
         opcodes::{ExecutionContext, ValueSource, VmOp},
         value::{self, Attrset, List, NixString, NixValue, Thunk},
     },
-    EvaluateError, Evaluator, InterpreterError,
 };
 
 pub trait Builtins {
@@ -372,17 +371,20 @@ fn execute_seq(
     argument: GcPointer<Thunk>,
 ) -> Result<NixValue, EvaluateError> {
     let list = evaluator.force_thunk(argument)?.expect_list()?;
-    if let Some([e1, e2]) = list.expect_entries(&evaluator.gc_handle).ok() {
-        evaluator.force_thunk(e1)?;
-        evaluator.force_thunk(e2)
-    } else {
-        let mut entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
-        let last = entries.pop().ok_or(EvaluateError::AccessOutOfRange)?;
-        for entry in entries {
-            evaluator.force_thunk(entry)?;
+    match list.expect_entries(&evaluator.gc_handle).ok() {
+        Some([e1, e2]) => {
+            evaluator.force_thunk(e1)?;
+            evaluator.force_thunk(e2)
         }
+        _ => {
+            let mut entries = evaluator.gc_handle.load(&list.entries).as_ref().to_owned();
+            let last = entries.pop().ok_or(EvaluateError::AccessOutOfRange)?;
+            for entry in entries {
+                evaluator.force_thunk(entry)?;
+            }
 
-        evaluator.force_thunk(last)
+            evaluator.force_thunk(last)
+        }
     }
 }
 
@@ -664,29 +666,32 @@ fn execute_match(
         }
     } else {
         // capture groups present.
-        if let Some(re_match) = regex.captures(string.load(&evaluator.gc_handle)) {
-            let ranges = re_match
-                .iter()
-                .skip(1) // skip the initial full match
-                .map(|capture| capture.map(|m| m.range()))
-                .collect::<Vec<_>>();
-            core::mem::drop(re_match);
-            let mut substrings = ranges
-                .into_iter()
-                .map(|range| {
-                    let value = if let Some(range) = range {
-                        NixValue::String(string.get_substring(&mut evaluator.gc_handle, range)?)
-                    } else {
-                        NixValue::Null
-                    };
-                    evaluator.gc_handle.alloc(Thunk::Value(value))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let entries = evaluator.gc_handle.alloc_vec(&mut substrings)?;
-            Ok(NixValue::List(List { entries }))
-        } else {
-            // not a match
-            Ok(NixValue::Null)
+        match regex.captures(string.load(&evaluator.gc_handle)) {
+            Some(re_match) => {
+                let ranges = re_match
+                    .iter()
+                    .skip(1) // skip the initial full match
+                    .map(|capture| capture.map(|m| m.range()))
+                    .collect::<Vec<_>>();
+                core::mem::drop(re_match);
+                let mut substrings = ranges
+                    .into_iter()
+                    .map(|range| {
+                        let value = if let Some(range) = range {
+                            NixValue::String(string.get_substring(&mut evaluator.gc_handle, range)?)
+                        } else {
+                            NixValue::Null
+                        };
+                        evaluator.gc_handle.alloc(Thunk::Value(value))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let entries = evaluator.gc_handle.alloc_vec(&mut substrings)?;
+                Ok(NixValue::List(List { entries }))
+            }
+            _ => {
+                // not a match
+                Ok(NixValue::Null)
+            }
         }
     }
 }
@@ -1180,12 +1185,12 @@ fn execute_to_string(
         NixValue::Function(_) => {
             return Err(EvaluateError::TypeErrorWithMessage {
                 msg: format!("connot coerce function to string"),
-            })
+            });
         }
         NixValue::Builtin(_) => {
             return Err(EvaluateError::TypeErrorWithMessage {
                 msg: format!("cannot coerce function to string"),
-            })
+            });
         }
     };
 

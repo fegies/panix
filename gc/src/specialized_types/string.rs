@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use crate::{
+    GcHandle, GcPointer, GcResult, GenerationCounter,
     heap_page::{HeapEntry, Page},
     object::{HeapObject, TraceCallback},
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    GcHandle, GcPointer, GcResult, GenerationCounter,
 };
 
 pub struct SimpleGcString {

@@ -80,13 +80,13 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 
     async fn lex_normal(&mut self) -> Result<(), LexError> {
         macro_rules! single {
-            ($token: expr) => {{
+            ($token: expr_2021) => {{
                 self.push($token).await;
                 self.input.advance_one();
             }};
         }
         macro_rules! lookahead {
-            ($byte: expr, $match_token: expr, $fallback_token: expr) => {{
+            ($byte: expr_2021, $match_token: expr_2021, $fallback_token: expr_2021) => {{
                 if Some($byte) == self.input.get(1) {
                     self.push($match_token).await;
                     self.input.consume(2);

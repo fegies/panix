@@ -1,4 +1,4 @@
-use crate::{object::HeapObject, RawGcPointer};
+use crate::{RawGcPointer, object::HeapObject};
 
 /// This is an array that contains a set of pointers to other gc objects.
 pub struct HeterogeneousArray {

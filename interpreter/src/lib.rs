@@ -4,7 +4,7 @@ mod vm;
 
 mod builtins;
 pub mod evaluator;
-use builtins::{get_builtins, NixBuiltins};
+use builtins::{NixBuiltins, get_builtins};
 use bumpalo::Bump;
 pub use evaluator::Evaluator;
 

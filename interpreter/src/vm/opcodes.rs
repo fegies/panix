@@ -1,5 +1,5 @@
 use super::value::{self, NixString, NixValue, Thunk};
-use gc::{specialized_types::array::Array, GcPointer};
+use gc::{GcPointer, specialized_types::array::Array};
 use gc_derive::Trace;
 
 #[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Trace, Debug)]

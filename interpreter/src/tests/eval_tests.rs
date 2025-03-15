@@ -1,6 +1,6 @@
 use gc::with_gc;
 
-use crate::{compile_source, vm::value::NixValue, Evaluator};
+use crate::{Evaluator, compile_source, vm::value::NixValue};
 
 fn eval_expr(source: &str, expected_source: &str) {
     with_gc(|gc_handle| {
@@ -12,10 +12,13 @@ fn eval_expr(source: &str, expected_source: &str) {
             .unwrap()
             .eval_expression(thunk)
             .unwrap();
-        if let NixValue::Bool(true) = eval_value {
-            println!("successfully evaluated to true");
-        } else {
-            panic!("equality assertion failed, got {eval_value:?}");
+        match eval_value {
+            NixValue::Bool(true) => {
+                println!("successfully evaluated to true");
+            }
+            _ => {
+                panic!("equality assertion failed, got {eval_value:?}");
+            }
         }
     })
     .expect("GC error");

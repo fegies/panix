@@ -2,10 +2,10 @@ use core::marker::PhantomData;
 use std::mem::MaybeUninit;
 
 use crate::{
+    GenerationCounter,
     heap_page::{HeapEntry, Page},
     object::HeapObject,
     pointer::{HeapGcPointer, RawHeapGcPointer},
-    GenerationCounter,
 };
 
 pub struct Array<T>

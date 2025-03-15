@@ -13,10 +13,10 @@ use std::{
 };
 
 use heap::{GenerationAnalyzer, Pagetracker};
-use heap_page::{scavenge_heap_pointer, Page};
+use heap_page::{Page, scavenge_heap_pointer};
 use init::get_global_gc;
 use object::HeapObject;
-use pointer::{inspect_roots, RawHeapGcPointer};
+use pointer::{RawHeapGcPointer, inspect_roots};
 
 pub use object::{Trace, TraceCallback};
 pub use pointer::{GcPointer, RawGcPointer};
@@ -176,10 +176,10 @@ struct AllocationPages {
 impl AllocationPages {
     pub fn suggest_collection_target_generation(&self) -> Generation {
         let mut budget = 1;
-        for gen in 1..=GC_GEN_HIGHEST {
+        for r#gen in 1..=GC_GEN_HIGHEST {
             budget *= 4;
-            if self.used_pages_current[gen as usize].len() < budget {
-                return Generation(gen - 1);
+            if self.used_pages_current[r#gen as usize].len() < budget {
+                return Generation(r#gen - 1);
             }
         }
 
@@ -189,7 +189,7 @@ impl AllocationPages {
 
     // refresh the allocation page for the current generation and return a reference to it.
     pub fn refresh_allocation_page(&mut self, generation: Generation) -> Rc<Page> {
-        let gen = generation.0 as usize;
+        let r#gen = generation.0 as usize;
         let new_page = self
             .global
             .lock()
@@ -198,8 +198,8 @@ impl AllocationPages {
             .expect("heap exhausted");
         let new_page = Rc::new(new_page);
 
-        self.active_pages[gen] = new_page.clone();
-        self.used_pages_current[gen].push(new_page.clone());
+        self.active_pages[r#gen] = new_page.clone();
+        self.used_pages_current[r#gen].push(new_page.clone());
 
         new_page
     }
@@ -207,7 +207,7 @@ impl AllocationPages {
     pub fn new(heap: Arc<Mutex<Pagetracker>>) -> Self {
         let mut guard = heap.lock().unwrap();
         let pages =
-            std::array::from_fn(|gen| Rc::new(guard.get_page(Generation(gen as u8)).unwrap()));
+            std::array::from_fn(|r#gen| Rc::new(guard.get_page(Generation(r#gen as u8)).unwrap()));
         let generations = guard.get_analyzer().clone();
         drop(guard);
         let mut used_pages_current = core::array::from_fn(|_| Vec::new());
@@ -228,16 +228,16 @@ impl AllocationPages {
     }
 
     pub fn get_allocation_page(&mut self, generation: Generation) -> (&Page, &GenerationCounter) {
-        let gen = generation.0 as usize;
-        (&self.active_pages[gen], &self.alloc_counters[gen])
+        let r#gen = generation.0 as usize;
+        (&self.active_pages[r#gen], &self.alloc_counters[r#gen])
     }
 
     fn print_heap_sizes(&self) {
         println!("---------\nHeap statistics: ");
-        for (gen, counter) in self.alloc_counters.iter().enumerate() {
+        for (r#gen, counter) in self.alloc_counters.iter().enumerate() {
             println!("\ngeneration {gen}: \n");
             println!("collection count: {}", counter.collection_count);
-            println!("active pages: {}", self.used_pages_current[gen].len());
+            println!("active pages: {}", self.used_pages_current[r#gen].len());
             println!("current live count: {}", counter.current_live_objects.get());
             println!("current live bytes: {}", counter.current_size_bytes.get());
             println!(
@@ -285,10 +285,10 @@ impl GcHandle {
 
         // clear out the previous alloc pages and used tracker.
 
-        for gen in 0..=target_generation.0 {
+        for r#gen in 0..=target_generation.0 {
             // move the entries of the previous tracker to a local vec.
-            previous_pages.append(&mut self.alloc_pages.used_pages_current[gen as usize]);
-            self.alloc_pages.refresh_allocation_page(Generation(gen));
+            previous_pages.append(&mut self.alloc_pages.used_pages_current[r#gen as usize]);
+            self.alloc_pages.refresh_allocation_page(Generation(r#gen));
         }
 
         // at this point, the previous page tracker is cleared and the alloc pages filled with
@@ -304,9 +304,9 @@ impl GcHandle {
         // we will never allocate anything in gen0 during GC. so we do not need to put the gen0
         // page into the scavenge set. We will however need to put the next higher gen into the set
         // because we might allocate there during collection.
-        for gen in 1..=target_generation.next_higher().0 as usize {
-            handle.scavenge_pending_set.entries[gen]
-                .push_back(handle.pages.active_pages[gen].clone());
+        for r#gen in 1..=target_generation.next_higher().0 as usize {
+            handle.scavenge_pending_set.entries[r#gen]
+                .push_back(handle.pages.active_pages[r#gen].clone());
         }
 
         // trace all root pointers, copying their content to the new space.
@@ -322,9 +322,9 @@ impl GcHandle {
         // way up. note that the current allocating page may very well be a part of the set to be
         // scavenged.
 
-        for gen in 1..=target_generation.next_higher().0 {
+        for r#gen in 1..=target_generation.next_higher().0 {
             while let Some(next_page) =
-                handle.scavenge_pending_set.entries[gen as usize].pop_front()
+                handle.scavenge_pending_set.entries[r#gen as usize].pop_front()
             {
                 next_page
                     .scavenge_content(&mut handle, target_generation)

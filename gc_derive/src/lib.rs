@@ -1,6 +1,6 @@
 use proc_macro2::Span;
-use quote::{quote, quote_spanned, ToTokens};
-use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput, Field, Variant};
+use quote::{ToTokens, quote, quote_spanned};
+use syn::{Data, DeriveInput, Field, Variant, parse_macro_input, spanned::Spanned};
 
 /// derive the content of the trace trait
 #[proc_macro_derive(Trace)]

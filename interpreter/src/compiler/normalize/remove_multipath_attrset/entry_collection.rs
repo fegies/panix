@@ -53,39 +53,42 @@ impl<'a> MultipathEntryCollection<'a> {
                 let sourcepos = first_key.position;
                 // first check if we need to try to pass the value deeper
                 // in (there are more tailing segments left)
-                if let Some(next_key) = tailing_segments.next() {
-                    match self
-                        .entries
-                        .entry(first_key_content.clone())
-                        .or_insert_with(|| {
-                            (
-                                sourcepos,
-                                MultipathEntry::Nested(MultipathEntryCollection::new()),
-                            )
-                        }) {
-                        (_, MultipathEntry::Value(_)) => {
-                            // we found a conflict!
-                            // To defer it to eval time, we only add the kv to the extra attrs
-                            self.extra_attrs
-                                .push((AttrsetKey::Single(first_key), value));
-                        }
-                        (_, MultipathEntry::Nested(next_level)) => {
-                            next_level.add_entry_inner(next_key, tailing_segments, value);
+                match tailing_segments.next() {
+                    Some(next_key) => {
+                        match self
+                            .entries
+                            .entry(first_key_content.clone())
+                            .or_insert_with(|| {
+                                (
+                                    sourcepos,
+                                    MultipathEntry::Nested(MultipathEntryCollection::new()),
+                                )
+                            }) {
+                            (_, MultipathEntry::Value(_)) => {
+                                // we found a conflict!
+                                // To defer it to eval time, we only add the kv to the extra attrs
+                                self.extra_attrs
+                                    .push((AttrsetKey::Single(first_key), value));
+                            }
+                            (_, MultipathEntry::Nested(next_level)) => {
+                                next_level.add_entry_inner(next_key, tailing_segments, value);
+                            }
                         }
                     }
-                } else {
-                    // no further key segments. We can just try to insert here.
-                    match self.entries.entry(first_key_content.clone()) {
-                        std::collections::btree_map::Entry::Vacant(v) => {
-                            // all ok, we can just put the value in.
-                            v.insert((first_key.position, MultipathEntry::Value(value)));
-                        }
-                        std::collections::btree_map::Entry::Occupied(_) => {
-                            // we have detected a conflict!
-                            // To defer the error to evaluation time,
-                            // we intentionally write the duped value into the extra_attrs
-                            self.extra_attrs
-                                .push((AttrsetKey::Single(first_key), value));
+                    _ => {
+                        // no further key segments. We can just try to insert here.
+                        match self.entries.entry(first_key_content.clone()) {
+                            std::collections::btree_map::Entry::Vacant(v) => {
+                                // all ok, we can just put the value in.
+                                v.insert((first_key.position, MultipathEntry::Value(value)));
+                            }
+                            std::collections::btree_map::Entry::Occupied(_) => {
+                                // we have detected a conflict!
+                                // To defer the error to evaluation time,
+                                // we intentionally write the duped value into the extra_attrs
+                                self.extra_attrs
+                                    .push((AttrsetKey::Single(first_key), value));
+                            }
                         }
                     }
                 }

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::{get_heap_base, heap_page::HeapEntry};
 
-use super::rootset::{read_rootset_entry, Slabkey};
+use super::rootset::{Slabkey, read_rootset_entry};
 
 /// a pointer that may either be rooted or a direct on-heap reference to something.
 pub struct GcPointer<TData> {

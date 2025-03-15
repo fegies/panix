@@ -81,7 +81,7 @@ impl<'gc, 'builtins> Compiler<'gc, 'builtins> {
     ) -> Result<GcPointer<NixValue>, CompileError> {
         let res = match str {
             KnownNixStringContent::Empty | KnownNixStringContent::Literal("") => {
-                return Ok(self.cached_values.empty_string.clone())
+                return Ok(self.cached_values.empty_string.clone());
             }
             KnownNixStringContent::Literal(l) => {
                 value::NixString::from(self.gc_handle.alloc_string(l)?)

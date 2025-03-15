@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use lexer::Token;
 
-use crate::parser::{ast::LetInExpr, ParseResult, TokenSource};
+use crate::parser::{ParseResult, TokenSource, ast::LetInExpr};
 
-use super::{unexpected, LetExpr, Parser};
+use super::{LetExpr, Parser, unexpected};
 
 impl<'t, S: TokenSource<'t>> Parser<S> {
     pub fn parse_let(&mut self) -> ParseResult<LetExpr<'t>> {

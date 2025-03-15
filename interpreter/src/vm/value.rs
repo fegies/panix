@@ -1,12 +1,12 @@
 use std::{ops::Range, path::Path};
 
 use gc::{
-    specialized_types::{array::Array, string::SimpleGcString},
     GcError, GcHandle, GcPointer,
+    specialized_types::{array::Array, string::SimpleGcString},
 };
 use gc_derive::Trace;
 
-use crate::{builtins::BuiltinTypeToken, util::Stackvec, EvaluateError, Evaluator};
+use crate::{EvaluateError, Evaluator, builtins::BuiltinTypeToken, util::Stackvec};
 
 use super::opcodes::{ExecutionContext, LambdaCallType, VmOp};
 
@@ -230,18 +230,20 @@ impl Attrset {
             .iter()
             .map(|(k, v)| (k.load(&gc), (k.clone(), v.clone())));
 
-        let (mut left_key, mut left_entry) = if let Some(f) = left_iter.next() {
-            f
-        } else {
-            // the left value is completely empty. we can just return the second attrset.
-            return Ok(other);
+        let (mut left_key, mut left_entry) = match left_iter.next() {
+            Some(f) => f,
+            _ => {
+                // the left value is completely empty. we can just return the second attrset.
+                return Ok(other);
+            }
         };
-        let (mut right_key, mut right_entry) = if let Some(f) = right_iter.next() {
-            f
-        } else {
-            // the right value is an empty set. this will not change anything about the result.
-            // as such we can just return the input set.
-            return Ok(self);
+        let (mut right_key, mut right_entry) = match right_iter.next() {
+            Some(f) => f,
+            _ => {
+                // the right value is an empty set. this will not change anything about the result.
+                // as such we can just return the input set.
+                return Ok(self);
+            }
         };
 
         let mut result_buf = Vec::new();
@@ -250,25 +252,31 @@ impl Attrset {
                 std::cmp::Ordering::Less => {
                     // emit the left entry and advance that iterator.
                     result_buf.push(left_entry);
-                    if let Some(next) = left_iter.next() {
-                        (left_key, left_entry) = next;
-                    } else {
-                        // left iterator exhausted. emit the right one.
-                        result_buf.push(right_entry);
-                        result_buf.extend(right_iter.map(|(_, e)| e));
-                        break;
+                    match left_iter.next() {
+                        Some(next) => {
+                            (left_key, left_entry) = next;
+                        }
+                        _ => {
+                            // left iterator exhausted. emit the right one.
+                            result_buf.push(right_entry);
+                            result_buf.extend(right_iter.map(|(_, e)| e));
+                            break;
+                        }
                     }
                 }
                 std::cmp::Ordering::Greater => {
                     // emit the right entry and advance that iterator.
                     result_buf.push(right_entry);
-                    if let Some(next) = right_iter.next() {
-                        (right_key, right_entry) = next;
-                    } else {
-                        // right iterator exhausted, emit the rest of the left one.
-                        result_buf.push(left_entry);
-                        result_buf.extend(left_iter.map(|t| t.1));
-                        break;
+                    match right_iter.next() {
+                        Some(next) => {
+                            (right_key, right_entry) = next;
+                        }
+                        _ => {
+                            // right iterator exhausted, emit the rest of the left one.
+                            result_buf.push(left_entry);
+                            result_buf.extend(left_iter.map(|t| t.1));
+                            break;
+                        }
                     }
                 }
                 std::cmp::Ordering::Equal => {
@@ -277,18 +285,24 @@ impl Attrset {
                     // both iterators.
                     result_buf.push(right_entry);
 
-                    if let Some(next) = right_iter.next() {
-                        (right_key, right_entry) = next;
-                    } else {
-                        result_buf.extend(left_iter.map(|t| t.1));
-                        break;
+                    match right_iter.next() {
+                        Some(next) => {
+                            (right_key, right_entry) = next;
+                        }
+                        _ => {
+                            result_buf.extend(left_iter.map(|t| t.1));
+                            break;
+                        }
                     }
 
-                    if let Some(next) = left_iter.next() {
-                        (left_key, left_entry) = next;
-                    } else {
-                        result_buf.extend(right_iter.map(|t| t.1));
-                        break;
+                    match left_iter.next() {
+                        Some(next) => {
+                            (left_key, left_entry) = next;
+                        }
+                        _ => {
+                            result_buf.extend(right_iter.map(|t| t.1));
+                            break;
+                        }
                     }
                 }
             }

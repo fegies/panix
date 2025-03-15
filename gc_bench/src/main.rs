@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use gc::{specialized_types::string::SimpleGcString, GcHandle, GcPointer, GcResult, RawGcPointer};
+use gc::{GcHandle, GcPointer, GcResult, RawGcPointer, specialized_types::string::SimpleGcString};
 use gc_derive::Trace;
 
 #[derive(Debug, Trace)]

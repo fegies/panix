@@ -62,7 +62,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 return Ok(NixString {
                     position: t.position,
                     content: NixStringContent::Known(KnownNixStringContent::Empty),
-                })
+                });
             }
             _ => return unexpected(t),
         };
@@ -76,7 +76,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 );
             }
             tok if tok == end_token => {
-                return Ok(NixString::from_literal(initial_content, t.position))
+                return Ok(NixString::from_literal(initial_content, t.position));
             }
             _ => return unexpected(t),
         };
@@ -103,7 +103,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     return Ok(NixString {
                         position: t.position,
                         content: NixStringContent::Known(KnownNixStringContent::Composite(parts)),
-                    })
+                    });
                 }
                 _ => return unexpected(t),
             }

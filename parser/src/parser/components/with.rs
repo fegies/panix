@@ -1,6 +1,6 @@
 use lexer::Token;
 
-use crate::parser::{ast::WithExpr, ParseResult, TokenSource};
+use crate::parser::{ParseResult, TokenSource, ast::WithExpr};
 
 use super::Parser;
 
