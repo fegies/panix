@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
+
 use parser::ast::{
-    AssertExpr, Attrset, Code, IfExpr, KnownNixStringContent, LetExpr, LetInExpr, NixExpr,
-    NixExprContent, NixString, SourcePosition, WithExpr,
+    AssertExpr, Attrset, AttrsetKey, Code, IfExpr, KnownNixStringContent, LetExpr, LetInExpr,
+    NixExpr, NixExprContent, NixString, NixStringContent, SourcePosition,
 };
 
 use crate::compiler::get_null_expr;
@@ -26,7 +28,11 @@ impl Pass<'_> for MiscPass {
 
         if let Code::AssertExpr(AssertExpr { assertion, value }) = code {
             let if_expr = IfExpr {
-                falsy_case: Box::new(build_throw_expression(assertion.position)),
+                falsy_case: Box::new(build_throw_expression(
+                    assertion.position,
+                    "assertion failed",
+                )),
+
                 condition: core::mem::replace(assertion, Box::new(get_null_expr())),
                 truthy_case: core::mem::replace(value, Box::new(get_null_expr())),
             };
@@ -43,7 +49,7 @@ impl Pass<'_> for MiscPass {
                 // we do want to remove this obsolete form...
                 // to achieve that we replace it with a with and getattr.
 
-                let attrset = core::mem::replace(
+                let mut attrset = core::mem::replace(
                     attrset,
                     Attrset {
                         is_recursive: false,
@@ -51,45 +57,42 @@ impl Pass<'_> for MiscPass {
                         attrs: Vec::new(),
                     },
                 );
-                let attrset = NixExpr {
-                    position,
-                    content: NixExprContent::CompoundValue(parser::ast::CompoundValue::Attrset(
-                        attrset,
-                    )),
-                };
 
-                let name = "!attrset_let";
-                let nameref = NixExpr {
-                    position,
-                    content: NixExprContent::Code(Code::ValueReference { ident: name }),
-                };
+                let body_expr =
+                    attrset
+                        .attrs
+                        .iter_mut()
+                        .enumerate()
+                        .find_map(|(idx, (key, _))| match key {
+                            AttrsetKey::Single(NixString {
+                                position: _,
+                                content:
+                                    NixStringContent::Known(KnownNixStringContent::Literal("body")),
+                            }) => Some(idx),
+                            _ => None,
+                        })
+                        .map(|idx| attrset.attrs.swap_remove(idx).1)
+                        .unwrap_or_else(|| {
+                            build_throw_expression(position, "Let expr did not contain a body key")
+                        });
 
-                // attrset_let.body
-                let body = NixExpr {
-                    position,
-                    content: NixExprContent::Code(Code::Op(parser::ast::Op::AttrRef {
-                        left: Box::new(nameref.clone()),
-                        path: parser::ast::AttrsetKey::Single(NixString::from_literal(
-                            "body", position,
-                        )),
-                        default: None,
-                    })),
-                };
+                let mut bindings = BTreeMap::new();
+                for (key, attr) in attrset.attrs {
+                    match key {
+                        AttrsetKey::Single(NixString {
+                            position: _,
+                            content: NixStringContent::Known(KnownNixStringContent::Literal(lit)),
+                        }) => {
+                            bindings.insert(lit, attr);
+                        }
+                        _ => {}
+                    }
+                }
 
-                // with !attrset_let; <<source>>
-                let with_expr = NixExpr {
-                    position,
-                    content: NixExprContent::Code(Code::WithExpr(WithExpr {
-                        binding: Box::new(nameref),
-                        body: Box::new(attrset),
-                    })),
-                };
-
-                // let attrset_let = with attrset_let; <<source>>; in attrset_let.body
                 let mut outer_let = LetInExpr {
-                    bindings: [(name, with_expr)].into_iter().collect(),
-                    inherit_entries: Vec::new(),
-                    body: Box::new(body),
+                    bindings,
+                    inherit_entries: attrset.inherit_keys,
+                    body: Box::new(body_expr),
                 };
 
                 // continue our pass downward
@@ -100,7 +103,7 @@ impl Pass<'_> for MiscPass {
     }
 }
 
-fn build_throw_expression(position: SourcePosition) -> NixExpr<'static> {
+fn build_throw_expression(position: SourcePosition, message: &'static str) -> NixExpr<'static> {
     let lookup_expr = NixExpr {
         position,
         content: NixExprContent::Code(Code::ValueReference { ident: "throw" }),
@@ -109,9 +112,7 @@ fn build_throw_expression(position: SourcePosition) -> NixExpr<'static> {
         position,
         content: NixExprContent::BasicValue(parser::ast::BasicValue::String(NixString {
             position,
-            content: parser::ast::NixStringContent::Known(KnownNixStringContent::Literal(
-                "assert failed",
-            )),
+            content: parser::ast::NixStringContent::Known(KnownNixStringContent::Literal(message)),
         })),
     };
     NixExpr {
