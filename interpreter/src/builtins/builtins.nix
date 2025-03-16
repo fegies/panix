@@ -17,6 +17,7 @@ let
   pickNonEmpty = filter isNotEmpty;
   splitVersion = vers: pickNonEmpty (splitOnVersionSep vers);
   isFloat = arg: typeOf arg == "float";
+  attrNames = ___builtin_attrNames;
   elemAt = list: idx: ___builtin_elemat {inherit list idx;};
   concatLists = ___builtin_concatLists;
   fromJSON = ___builtin_fromJSON;
@@ -201,6 +202,7 @@ let
       mapAttrs
       deepSeq
       elem
+      attrNames
       hasAttr
       attrValues
       abort
@@ -302,8 +304,6 @@ let
         replacements
         string
       ];
-
-    attrNames = ___builtin_attrNames;
 
     partition = predicate: list: let
       pickSetRight = map predicate list;
@@ -543,6 +543,11 @@ let
       };
     in
       decons result.result_len result.result;
+
+    intersectAttrs = left: right: let
+      names_unique_to_right = filter (name: !(hasAttr name left)) (attrNames right);
+    in
+      removeAttrs right names_unique_to_right;
   };
 in
   builtins
