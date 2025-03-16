@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     io::{self, Read},
     ops::Range,
+    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     sync::LazyLock,
 };
@@ -994,6 +995,14 @@ fn execute_split(
     Ok(NixValue::List(result_list))
 }
 
+fn get_builtin_content(path: &Path) -> Option<&'static [u8]> {
+    match path.as_os_str().as_bytes() {
+        b"<<<___builtins>>>" => Some(include_bytes!("./builtins.nix")),
+        b"<<<___versions>>>" => Some(include_bytes!("./versions.nix")),
+        _ => None,
+    }
+}
+
 impl NixBuiltins {
     fn execute_import(
         &self,
@@ -1007,7 +1016,7 @@ impl NixBuiltins {
         };
 
         fn resolve_path(input: &Path) -> Result<PathBuf, io::Error> {
-            if input == Path::new("<<<___builtins>>>") {
+            if get_builtin_content(input).is_some() {
                 return Ok(Path::new(input).to_owned());
             }
             let mut path = Path::new(input).canonicalize()?;
@@ -1063,13 +1072,8 @@ impl NixBuiltins {
         source_filename: NixString,
         source_path: &Path,
     ) -> Result<Thunk, InterpreterError> {
-        if source_path == Path::new("<<<___builtins>>>") {
-            compile_source_with_nix_filename(
-                gc_handle,
-                include_bytes!("./builtins.nix"),
-                source_filename,
-                self,
-            )
+        if let Some(content) = get_builtin_content(source_path) {
+            compile_source_with_nix_filename(gc_handle, content, source_filename, self)
         } else {
             let mut file_content = Vec::new();
             std::fs::File::open(source_path)?.read_to_end(&mut file_content)?;

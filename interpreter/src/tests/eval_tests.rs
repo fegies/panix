@@ -477,6 +477,10 @@ fn test_match() {
         r#"builtins.match "[[:space:]]+([[:upper:]]+)[[:space:]]+" "  FOO   ""#,
         "[\"FOO\"]",
     );
+    eval_expr(
+        r#"builtins.match "^([^-]+)-(.+)$" "foob-ar""#,
+        r#"["foob" "ar"]"#,
+    );
 }
 
 #[test]
