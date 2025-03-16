@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use gc::{GcError, GcHandle, GcPointer};
 
 use crate::{
@@ -19,6 +20,8 @@ pub enum JsonParseError {
     DuplicateObjectKeys,
     #[error("could not convert to str")]
     Utf8Error(#[from] core::str::Utf8Error),
+    #[error("found an invalid escape sequence")]
+    InvalidEscapeSequence,
 }
 
 pub struct JsonParser<'gc, 'input> {
@@ -46,7 +49,7 @@ impl<'input, 'gc> JsonParser<'gc, 'input> {
     fn parse_json_value(&mut self) -> ParseResult<NixValue> {
         self.skip_whitespace();
         match self.get_next()? {
-            b'0'..b'9' | b'-' => self.parse_number(),
+            b'0'..=b'9' | b'-' => self.parse_number(),
             b'n' => self.parse_null(),
             b't' => self.parse_true(),
             b'f' => self.parse_false(),
@@ -112,7 +115,10 @@ impl<'input, 'gc> JsonParser<'gc, 'input> {
 
     fn parse_number(&mut self) -> ParseResult<NixValue> {
         fn find_main_number<'i>(input: &mut &'i [u8]) -> &'i [u8] {
-            let digit_count = input.iter().take_while(|c| matches!(c, b'0'..b'9')).count();
+            let digit_count = input
+                .iter()
+                .take_while(|c| matches!(c, b'0'..=b'9'))
+                .count();
             let result = &input[..digit_count];
             *input = &input[digit_count..];
             result
@@ -188,6 +194,47 @@ impl<'input, 'gc> JsonParser<'gc, 'input> {
     }
 
     fn parse_string(&mut self) -> ParseResult<NixString> {
+        self.expect_char(b'"')?;
+        let string_len =
+            determine_string_length(&self.input).ok_or(JsonParseError::UnexpectedEof)?;
+        let string_data = &self.input[..string_len];
+        // we want to skip all the string data as well as the final trailing " char.
+        self.input = &self.input[(string_len + 1)..];
+
+        if memchr::memchr(b'\\', string_data).is_none() {
+            // no escapes.
+            let string = core::str::from_utf8(string_data)?;
+            let string = self.gc.alloc_string(string)?;
+            return Ok(string.into());
+        } else {
+            // sadly, there are escape sequences in the string.
+            // we need to handle those.
+
+            let arena = Bump::new();
+
+            let mut pieces = Vec::new();
+            let mut string_data = core::str::from_utf8(string_data)?;
+            while let Some(backslash_idx) = memchr::memchr(b'\\', string_data.as_bytes()) {
+                let piece_before = &string_data[..backslash_idx];
+                if !piece_before.is_empty() {
+                    pieces.push(piece_before);
+                }
+
+                let (decoded_sequence, rest) =
+                    decode_escape_sequence(&string_data[(backslash_idx + 1)..], &arena)
+                        .ok_or(JsonParseError::InvalidEscapeSequence)?;
+                pieces.push(decoded_sequence);
+                string_data = rest;
+            }
+            // whatever remains now does not have any more escapes and can be included.
+            if !string_data.is_empty() {
+                pieces.push(string_data);
+            }
+
+            let result = self.gc.alloc_string_from_parts(&pieces)?.into();
+            return Ok(result);
+        }
+
         // finds the first not escaped " char.
         fn determine_string_length(input: &[u8]) -> Option<usize> {
             for qoute_idx in memchr::memchr_iter(b'"', input) {
@@ -203,37 +250,41 @@ impl<'input, 'gc> JsonParser<'gc, 'input> {
             }
             None
         }
-        self.expect_char(b'"')?;
-        let string_len =
-            determine_string_length(&self.input).ok_or(JsonParseError::UnexpectedEof)?;
-        let string_data = &self.input[..string_len];
-        // we want to skip all the string data as well as the final trailing " char.
-        self.input = &self.input[(string_len + 1)..];
 
-        if memchr::memchr(b'\\', string_data).is_none() {
-            // no escapes.
-            let string = core::str::from_utf8(string_data)?;
-            let string = self.gc.alloc_string(string)?;
-            Ok(string.into())
-        } else {
-            // sadly, there are escape sequences in the string.
-            // we need to handle those.
-            let mut pieces = Vec::new();
-            let mut string_data = core::str::from_utf8(string_data)?;
-            while let Some(backslash_idx) = memchr::memchr(b'\\', string_data.as_bytes()) {
-                pieces.push(&string_data[..backslash_idx]);
-                // the first char after the backslash is always included (it is escaped).
-                // for this we push a single-char string.
-                pieces.push(&string_data[(backslash_idx + 1)..(backslash_idx + 2)]);
-                // and we resume the search after the escaped char.
-                string_data = &string_data[(backslash_idx + 2)..];
-            }
-            // whatever remains now does not have any more escapes and can be included.
-            pieces.push(string_data);
-            println!("found: {pieces:?}");
+        // decode an escape sequence. The initial backslash should not be passed.
+        // returns a tuple containing:
+        // - the decoded sequence
+        // - the remaining input
+        //
+        // in that order.
+        fn decode_escape_sequence<'i, 'a>(
+            input: &'i str,
+            arena: &'a Bump,
+        ) -> Option<(&'a str, &'i str)> {
+            let seq = match input.as_bytes().get(0)? {
+                b'"' => "\"",
+                b'\\' => "\\",
+                b'/' => "/",
+                b'b' => "\x08",
+                b'f' => "\x0c",
+                b'n' => "\n",
+                b'r' => "\r",
+                b't' => "\t",
+                b'u' => {
+                    let codepoint = input.get(1..5)?;
+                    let codepoint = char::from_u32(u32::from_str_radix(codepoint, 16).ok()?)?;
 
-            let result = self.gc.alloc_string_from_parts(&pieces)?.into();
-            Ok(result)
+                    let mut buffer = [0; 4];
+                    let seq = arena.alloc_str(codepoint.encode_utf8(&mut buffer));
+
+                    return Some((seq, &input[5..]));
+                }
+                _ => {
+                    return None;
+                }
+            };
+
+            Some((seq, &input[1..]))
         }
     }
 

@@ -20,6 +20,7 @@ pub enum ParseError {
     #[error("Found conflicting attributes: {0}")]
     AttributePathConflict(String),
 }
+
 pub fn parse_nix(input: &[u8]) -> ParseResult<ast::NixExpr> {
     parser_entrypoint(input)
 }
