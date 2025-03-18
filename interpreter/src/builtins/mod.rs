@@ -11,6 +11,7 @@ use std::{
 use gc::{GcError, GcHandle, GcPointer};
 use gc_derive::Trace;
 use json_parser::JsonParser;
+use json_serializer::JsonWriter;
 use parser::{
     ast::{Code, LetExpr, LetInExpr, NixExprContent},
     parse_nix,
@@ -18,6 +19,7 @@ use parser::{
 use regex::Regex;
 
 mod json_parser;
+mod json_serializer;
 
 use crate::{
     EvaluateError, Evaluator, InterpreterError, compile_source_with_nix_filename,
@@ -93,6 +95,7 @@ enum BuiltinType {
     ElemAt,
     ConcatLists,
     FromJson,
+    ToJson,
     RemoveAttrs,
     DeepSeq,
     Seq,
@@ -132,6 +135,7 @@ impl Builtins for NixBuiltins {
             "___builtin_elemat" => BuiltinType::ElemAt,
             "___builtin_concatLists" => BuiltinType::ConcatLists,
             "___builtin_fromJSON" => BuiltinType::FromJson,
+            "___builtin_toJSON" => BuiltinType::ToJson,
             "___builtin_removeAttrs" => BuiltinType::RemoveAttrs,
             "___builtin_deepSeq" => BuiltinType::DeepSeq,
             "___builtin_seq" => BuiltinType::Seq,
@@ -282,8 +286,19 @@ impl Builtins for NixBuiltins {
             BuiltinType::BitOr => execute_bitop(evaluator, argument, |l, r| l | r),
             BuiltinType::Ceil => execute_ceil(evaluator, argument),
             BuiltinType::Floor => execute_floor(evaluator, argument),
+            BuiltinType::ToJson => execute_tojson(evaluator, argument),
         }
     }
+}
+
+fn execute_tojson(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let written = JsonWriter::new(evaluator)
+        .serialize(argument)
+        .map_err(|e| EvaluateError::Misc(Box::new(e)))?;
+    Ok(NixValue::String(written.into()))
 }
 
 fn execute_floor(

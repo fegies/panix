@@ -509,6 +509,8 @@ fn test_dirof() {
 
 #[test]
 fn test_stringlen() {
+    eval_expr(r#"builtins.stringLength "foo\n\"bar\"" "#, "9");
+
     eval_expr("builtins.stringLength \"foo\"", "3");
 }
 

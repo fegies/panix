@@ -230,6 +230,7 @@ let
     false = false;
     null = null;
     nixVersion = "2.24.10";
+    toJSON = ___builtin_toJSON;
     isAttrs = arg: typeOf arg == "set";
     isBool = arg: typeOf arg == "bool";
     isFunction = arg: typeOf arg == "lambda";
