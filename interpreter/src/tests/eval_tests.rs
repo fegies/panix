@@ -512,6 +512,7 @@ fn test_stringlen() {
     eval_expr(r#"builtins.stringLength "foo\n\"bar\"" "#, "9");
 
     eval_expr("builtins.stringLength \"foo\"", "3");
+    eval_expr(r#"builtins.stringLength "\\" "#, "1");
 }
 
 #[test]

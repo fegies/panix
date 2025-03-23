@@ -166,11 +166,11 @@ fn test_escaped_string() {
         content: crate::ast::NixExprContent::BasicValue(BasicValue::String(NixString {
             position: SourcePosition { line: 1, column: 2 },
             content: crate::ast::NixStringContent::Known(KnownNixStringContent::Literal(
-                "foo\n\"bar\"",
+                "\\foo\n\"bar\"",
             )),
         })),
     };
-    let value = parse_nix(br#" "foo\n\"bar\"" "#).unwrap();
+    let value = parse_nix(br#" "\\foo\n\"bar\"" "#).unwrap();
     assert_eq!(expected, value);
 }
 

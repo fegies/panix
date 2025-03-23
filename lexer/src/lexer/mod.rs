@@ -396,6 +396,8 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
                 b'n' => "\n",
                 b'r' => "\r",
                 b't' => "\t",
+                b'\\' => "\\",
+                b'$' => "$",
                 _ => return None,
             };
             Some(res)

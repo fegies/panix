@@ -279,8 +279,7 @@ b""#;
         &[
             Token::StringBegin,
             Token::StringContent("a"),
-            Token::StringContent("\n"),
-            Token::StringContent("b"),
+            Token::StringContent("\nb"),
             Token::StringEnd,
         ],
     );
