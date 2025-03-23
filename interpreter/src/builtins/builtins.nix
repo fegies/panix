@@ -334,7 +334,16 @@ let
       in
         if start >= strlen
         then ""
-        else ___builtin_substring [start (least len (strlen - start)) string];
+        else
+          ___builtin_substring [
+            start
+            (least (
+              if len < 0
+              then strlen
+              else len
+            ) (strlen - start))
+            string
+          ];
 
     trace = msg: value: ___builtin_trace [msg value];
     dbg = value: ___builtin_trace [value value];
