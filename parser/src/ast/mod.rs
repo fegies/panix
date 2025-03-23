@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Write};
+use std::collections::BTreeMap;
 
 pub use lexer::SourcePosition;
 

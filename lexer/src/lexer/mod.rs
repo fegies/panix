@@ -80,13 +80,13 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
 
     async fn lex_normal(&mut self) -> Result<(), LexError> {
         macro_rules! single {
-            ($token: expr_2021) => {{
+            ($token: expr) => {{
                 self.push($token).await;
                 self.input.advance_one();
             }};
         }
         macro_rules! lookahead {
-            ($byte: expr_2021, $match_token: expr_2021, $fallback_token: expr_2021) => {{
+            ($byte: expr, $match_token: expr, $fallback_token: expr) => {{
                 if Some($byte) == self.input.get(1) {
                     self.push($match_token).await;
                     self.input.consume(2);
@@ -393,10 +393,9 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
     ) -> Result<(), LexError> {
         fn get_replacement_value(char: &u8) -> Option<&'static str> {
             let res = match char {
-                b'n' | b'\n' => "\n",
+                b'n' => "\n",
                 b'r' => "\r",
-                b'\\' => "\\",
-                b'$' => "$",
+                b't' => "\t",
                 _ => return None,
             };
             Some(res)
@@ -405,31 +404,23 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
         let escape_sequence = if is_multiline_part { "''\\" } else { "\\" };
         let finder = memchr::memmem::Finder::new(escape_sequence);
 
-        'outer: loop {
-            for sequence_pos in finder.find_iter(content) {
-                if let Some(replacement_value) = content
-                    .get(sequence_pos + escape_sequence.len())
-                    .and_then(get_replacement_value)
-                {
-                    let unescaped_part = &content[..sequence_pos];
-                    if unescaped_part.len() > 0 {
-                        self.push_pos(
-                            Token::StringContent(Self::convert_str(unescaped_part)?),
-                            pos,
-                        )
-                        .await;
-                    }
-                    self.push_pos(Token::StringContent(replacement_value), pos)
-                        .await;
-
-                    // skip the leading part, including the escape sequence and escaped char
-                    content = &content[(sequence_pos + escape_sequence.len() + 1)..];
-
-                    // continue the search on whatever we have not processed yet.
-                    continue 'outer;
-                }
+        while let Some(escape_pos) = finder.find(content) {
+            if escape_pos > 0 {
+                let unescaped_part = &content[..escape_pos];
+                self.push_pos(
+                    Token::StringContent(Self::convert_str(unescaped_part)?),
+                    pos,
+                )
+                .await;
             }
-            break;
+            content = &content[(escape_pos + 1)..];
+
+            if let Some(replacement_value) = content.get(0).and_then(get_replacement_value) {
+                self.push_pos(Token::StringContent(replacement_value), pos)
+                    .await;
+
+                content = &content[1..];
+            }
         }
 
         let content = Self::convert_str(content)?;

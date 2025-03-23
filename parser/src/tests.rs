@@ -2,8 +2,8 @@ use lexer::SourcePosition;
 
 use crate::{
     ast::{
-        Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, InheritEntry, Lambda,
-        LambdaAttrsetArgs, List, NixExpr, NixString, Op,
+        Attrset, AttrsetKey, BasicValue, BinopOpcode, Code, CompoundValue, InheritEntry,
+        KnownNixStringContent, Lambda, LambdaAttrsetArgs, List, NixExpr, NixString, Op,
     },
     parse_nix,
 };
@@ -156,6 +156,21 @@ fn test_attrset_lambda_trailing_comma() {
         })),
     };
     let value = parse_nix("{a, foo, }@args: 42".as_bytes()).unwrap();
+    assert_eq!(expected, value);
+}
+
+#[test]
+fn test_escaped_string() {
+    let expected = NixExpr {
+        position: SourcePosition { line: 1, column: 2 },
+        content: crate::ast::NixExprContent::BasicValue(BasicValue::String(NixString {
+            position: SourcePosition { line: 1, column: 2 },
+            content: crate::ast::NixStringContent::Known(KnownNixStringContent::Literal(
+                "foo\n\"bar\"",
+            )),
+        })),
+    };
+    let value = parse_nix(br#" "foo\n\"bar\"" "#).unwrap();
     assert_eq!(expected, value);
 }
 

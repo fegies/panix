@@ -28,7 +28,10 @@ impl<'a> AsRef<NixStringContent<'a>> for NixString<'a> {
 }
 impl core::fmt::Debug for NixString<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.content.fmt(f)
+        f.write_fmt(format_args!(
+            "{}:{}:{:?}",
+            self.position.line, self.position.column, self.content
+        ))
     }
 }
 
@@ -37,12 +40,8 @@ impl core::fmt::Debug for KnownNixStringContent<'_> {
         match self {
             Self::Literal(arg0) => arg0.fmt(f),
             Self::Composite(arg0) => {
-                f.write_char('"')?;
-                for s in arg0 {
-                    f.write_str(s)?;
-                }
-                f.write_char('"')?;
-                Ok(())
+                let composed = arg0.iter().cloned().collect::<String>();
+                composed.fmt(f)
             }
             Self::Empty => "".fmt(f),
         }
