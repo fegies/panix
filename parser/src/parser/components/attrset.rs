@@ -49,7 +49,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             // parse part.
             let t = self.expect_next()?;
             let ident = match t.token {
-                Token::StringBegin => self.parse_simple_string()?,
+                Token::StringBegin => self.parse_simple_string(t.position)?,
                 Token::Ident(i) => NixString::from_literal(i, t.position),
                 _ => unexpected(t)?,
             };

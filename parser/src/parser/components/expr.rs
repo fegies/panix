@@ -50,12 +50,12 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                 NixExprContent::Code(Code::AssertExpr(AssertExpr { assertion, value }))
             }
             Token::StringBegin => {
-                NixExprContent::BasicValue(BasicValue::String(self.parse_simple_string()?))
+                NixExprContent::BasicValue(BasicValue::String(self.parse_simple_string(pos)?))
             }
             Token::IndentedStringBegin => {
-                NixExprContent::BasicValue(BasicValue::String(self.parse_multiline_string()?))
+                NixExprContent::BasicValue(BasicValue::String(self.parse_multiline_string(pos)?))
             }
-            Token::PathBegin => NixExprContent::BasicValue(BasicValue::Path(self.parse_path()?)),
+            Token::PathBegin => NixExprContent::BasicValue(BasicValue::Path(self.parse_path(pos)?)),
             Token::SearchPath(searchpath) => {
                 NixExprContent::BasicValue(BasicValue::SearchPath(searchpath))
             }
@@ -210,7 +210,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
         let t = self.expect_next()?;
         match t.token {
             Token::Ident(ident) => Ok(NixString::from_literal(ident, t.position)),
-            Token::StringBegin => self.parse_simple_string(),
+            Token::StringBegin => self.parse_simple_string(t.position),
             _ => unexpected(t),
         }
     }
@@ -316,7 +316,7 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
             Token::StringBegin => {
                 // only attribute sets may have string keys.
                 // so we know now it must be one.
-                let initial_ident = self.parse_simple_string()?;
+                let initial_ident = self.parse_simple_string(t.position)?;
                 let t = self.expect_next()?;
                 let attrset = match t.token {
                     Token::Eq => self.parse_attrset(initial_ident)?,
