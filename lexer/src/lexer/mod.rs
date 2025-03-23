@@ -575,8 +575,15 @@ impl<'a, 'matcher> Lexer<'a, 'matcher> {
     }
 
     fn skip_comment(&mut self) {
-        if let Some(endline_pos) = memchr::memchr(b'\n', self.input.slice()) {
-            self.input.consume(endline_pos + 1);
+        if let Some(endline_pos) = memchr::memchr2(b'\r', b'\n', self.input.slice()) {
+            let seq_len = if self.input.get(endline_pos) == Some(b'\r')
+                && Some(b'\n') == self.input.get(endline_pos + 1)
+            {
+                2
+            } else {
+                1
+            };
+            self.input.consume(endline_pos + seq_len);
         } else {
             self.input.consume(self.input.slice().len());
         }
