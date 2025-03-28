@@ -1,97 +1,113 @@
 let
-  inherit (builtins) length typeOf elemAt concatMap filter split tryEval fromJSON isString match;
+  inherit (builtins) length typeOf elemAt filter split tryEval fromJSON isString match substring stringLength;
   isNotEmpty = a: isString a && a != "";
   pickNonEmpty = filter isNotEmpty;
-  splitOnVersionSep = split "\\.|-";
+  splitOnVersionSep = split "[\\.-]";
 
   splitVersion = vers: pickNonEmpty (splitOnVersionSep vers);
 
-  compareVersions = let
-    unpackList = v:
-      if typeOf v == "list"
-      then elemAt v 0
-      else v;
-    # splitLeadingDigits: string -> [string|[string]]
-    splitLeadingDigits = split "^([0-9]+)";
-    # isNotEmptyString: any -> bool
-    isNotEmptyString = v: v != "";
-    # splitOffAlpha: string -> [string]
-    # example: "0123" -> ["0123"]
-    # example: "abc123" -> ["abc123"]
-    # example: "123abc" -> ["123" "abc"]
-    splitOffAlpha = value:
-      if value == ""
-      then [value]
-      else map unpackList (filter isNotEmptyString (splitLeadingDigits value));
-    # already partially applied concatMap
-    concatMap_splitOffAlpha = concatMap splitOffAlpha;
-    # a function string -> [string], extension of splitVersion.
-    # first splits on the version separators, then splits each item again
-    # on leading digits if any available. We do this to match what upstream nix does.
-    deepSplitVersion = input: concatMap_splitOffAlpha (splitVersion input);
-    # simpleCompare: any -> any -> -1|0|1
-    simpleCompare = left: right:
-      if left < right
-      then -1
-      else if right < left
-      then 1
-      else 0;
-    # tryParseInt : string -> int|null
-    tryParseInt = value: let
-      parsed = (tryEval (fromJSON value)).value;
+  compareVersions = l: r: compareVersionsSplit (splitVersion l) (splitVersion r);
+
+  compareVersionsSplit = l: r: let
+    iter = idx: let
+      el = tryPick l idx;
+      er = tryPick r idx;
     in
-      if typeOf parsed == "int"
-      then parsed
-      else null;
-    # compareComponents: string -> string -> -1|0|1
-    compareComponents = left: right:
-      if left == right
+      if el == null && er == null
       then 0
+      else if el == null
+      then -1
+      else if er == null
+      then 1
       else let
-        left_int = tryParseInt left;
-        right_int = tryParseInt right;
+        cmp_result = compareComponents el er;
       in
-        if left_int != null && right_int != null
-        then simpleCompare left_int right_int
-        else if left == "pre"
-        then -1
-        else if right == "pre"
-        then 1
-        else if right_int != null
-        then -1
-        else if left_int != null
-        then 1
-        else simpleCompare left right;
+        if cmp_result == 0
+        then iter (idx + 1)
+        else cmp_result;
   in
-    v1: let
-      v1_split = deepSplitVersion v1;
-      v1_len = length v1_split;
+    iter 0;
+
+  tryPick = xs: idx:
+    if idx < (length xs)
+    then elemAt xs idx
+    else null;
+
+  compareComponents = l: r: let
+    left_int = tryParseInt l;
+    right_int = tryParseInt r;
+  in
+    if left_int != null && right_int != null
+    then simpleCompare left_int right_int
+    else if left_int != null
+    then 1
+    else if right_int != null
+    then -1
+    else compareComponentsStrings l r;
+
+  # compare two version components, both of which are known to be strings
+  compareComponentsStrings = l: r: let
+    split_l = splitOffAlpha l;
+    split_r = splitOffAlpha r;
+  in
+    if length split_l > 1 || length split_r > 1
+    then compareVersionsSplit split_l split_r
+    else let
+      strip_pre = stripPrefix "pre";
+      l_stripped = strip_pre l;
+      r_stripped = strip_pre r;
     in
-      v2: let
-        v2_split = deepSplitVersion v2;
-        v2_len = length v2_split;
-        max_len =
-          if v1_len <= v2_len
-          then v1_len
-          else v2_len;
-        compare_iter = idx:
-          if idx == max_len
-          then
-            (
-              if v1_len < v2_len
-              then 1
-              else if v2_len < v1_len
-              then -1
-              else 0
-            )
-          else let
-            res = compareComponents (elemAt v1_split idx) (elemAt v2_split idx);
-          in
-            if res != 0
-            then res
-            else compare_iter (idx + 1);
-      in
-        compare_iter 0;
+      if l_stripped != l
+      then
+        (
+          if r_stripped != r
+          then compareComponents l_stripped r_stripped
+          else -1
+        )
+      else if r_stripped != r
+      then 1
+      else simpleCompare l r;
+
+  stripPrefix = prefix: let
+    prefixLen = stringLength prefix;
+    pickPrefix = substring 0 prefixLen;
+    removePrefix = substring prefixLen (-1);
+  in
+    str:
+      if pickPrefix str == prefix
+      then removePrefix str
+      else str;
+
+  tryParseInt = value: let
+    parsed = (tryEval (fromJSON value)).value;
+  in
+    if typeOf parsed == "int"
+    then parsed
+    else null;
+
+  simpleCompare = left: right:
+    if left < right
+    then -1
+    else if right < left
+    then 1
+    else 0;
+
+  # splitLeadingDigits: string -> [string|[string]]
+  splitLeadingDigits = split "^([0-9]+)";
+  # isNotEmptyString: any -> bool
+  isNotEmptyString = v: v != "";
+  # splitOffAlpha: string -> [string]
+  # example: "0123" -> ["0123"]
+  # example: "abc123" -> ["abc123"]
+  # example: "123abc" -> ["123" "abc"]
+  splitOffAlpha = value:
+    if value == ""
+    then [value]
+    else map unpackList (filter isNotEmptyString (splitLeadingDigits value));
+  unpackList = v:
+    if typeOf v == "list"
+    then elemAt v 0
+    else v;
 
   parseDrvName = input: let
     matchResult = match "^(.+[^-])-(-*[^-]+)$" input;

@@ -181,33 +181,7 @@ impl Builtins for NixBuiltins {
                     .load(&evaluator.gc_handle)
                     .to_owned(),
             }),
-            BuiltinType::TryEval => {
-                let value = match evaluator.force_thunk(argument) {
-                    Ok(val) => Some(val),
-                    e @ Err(EvaluateError::Abort { value: _ }) => {
-                        // we cannot catch aborts.
-                        return e;
-                    }
-                    Err(_) => None,
-                };
-                let success_string = evaluator.gc_handle.alloc_string("success")?.into();
-                let value_string = evaluator.gc_handle.alloc_string("value")?.into();
-
-                let bool_value = NixValue::Bool(value.is_some());
-
-                let value = evaluator
-                    .gc_handle
-                    .alloc(Thunk::Value(value.unwrap_or_else(|| bool_value.clone())))?;
-                let bool_value = evaluator.gc_handle.alloc(Thunk::Value(bool_value))?;
-
-                let entries = evaluator
-                    .gc_handle
-                    .alloc_slice(&[(success_string, bool_value), (value_string, value)])?;
-
-                let attrset = Attrset { entries };
-
-                Ok(NixValue::Attrset(attrset))
-            }
+            BuiltinType::TryEval => execute_try_eval(evaluator, argument),
             BuiltinType::TypeOf => {
                 let typename = match evaluator.force_thunk(argument)? {
                     NixValue::String(_) => "string",
@@ -1094,6 +1068,48 @@ impl NixBuiltins {
             std::fs::File::open(source_path)?.read_to_end(&mut file_content)?;
             compile_source_with_nix_filename(gc_handle, &file_content, source_filename, self)
         }
+    }
+}
+
+fn execute_try_eval(
+    evaluator: &mut Evaluator,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let previous_throw_status = evaluator.is_inside_catch;
+    evaluator.is_inside_catch = true;
+    let value = inner(evaluator, argument);
+    evaluator.is_inside_catch = previous_throw_status;
+    return value;
+
+    fn inner(
+        evaluator: &mut Evaluator,
+        argument: GcPointer<Thunk>,
+    ) -> Result<NixValue, EvaluateError> {
+        let value = match evaluator.force_thunk(argument) {
+            Ok(val) => Some(val),
+            e @ Err(EvaluateError::Abort { value: _ }) => {
+                // we cannot catch aborts.
+                return e;
+            }
+            Err(_) => None,
+        };
+        let success_string = evaluator.gc_handle.alloc_string("success")?.into();
+        let value_string = evaluator.gc_handle.alloc_string("value")?.into();
+
+        let bool_value = NixValue::Bool(value.is_some());
+
+        let value = evaluator
+            .gc_handle
+            .alloc(Thunk::Value(value.unwrap_or_else(|| bool_value.clone())))?;
+        let bool_value = evaluator.gc_handle.alloc(Thunk::Value(bool_value))?;
+
+        let entries = evaluator
+            .gc_handle
+            .alloc_slice(&[(success_string, bool_value), (value_string, value)])?;
+
+        let attrset = Attrset { entries };
+
+        Ok(NixValue::Attrset(attrset))
     }
 }
 

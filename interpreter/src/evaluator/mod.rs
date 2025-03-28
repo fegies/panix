@@ -18,6 +18,7 @@ pub struct Evaluator<'gc> {
     builtins: Rc<NixBuiltins>,
 
     error_message_printed: bool,
+    pub is_inside_catch: bool,
 }
 #[derive(Default, Debug)]
 struct ThunkEvalState {
@@ -48,6 +49,7 @@ impl<'gc> Evaluator<'gc> {
             thunk_alloc_buffer: Vec::new(),
             builtins: Rc::new(builtins),
             error_message_printed: false,
+            is_inside_catch: false,
         })
     }
     pub fn eval_expression(&mut self, thunk: Thunk) -> Result<NixValue, EvaluateError> {
@@ -127,57 +129,66 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
         // print the stack trace....
         if let Err(e) = &res {
-            if !self.evaluator.error_message_printed {
-                println!("\n\nError: {e:?}\n\n");
-                self.evaluator.error_message_printed = true;
-            }
-
-            let source_filename = self.source_filename.load(&self.evaluator.gc_handle);
-            match self
-                .state
-                .code_source_positions
-                .as_ref()
-                .map(|ptr| self.evaluator.gc_handle.load(ptr).as_ref()[self.insn_counter].clone())
-            {
-                Some(source_pos) => {
-                    println!("at {source_filename} {source_pos}");
-                }
-                _ => {
-                    println!("at {source_filename}",);
-                }
-            }
-
-            // print the tailcall entries if present
-            for (filename, pos, count) in self.tailcall_trace_buf.iter().rev() {
-                struct PrintCount(usize);
-                impl Display for PrintCount {
-                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        if self.0 > 1 {
-                            f.write_fmt(format_args!(" {} times", self.0))
-                        } else {
-                            Ok(())
-                        }
-                    }
-                }
-                if let Some(pos) = pos {
-                    println!(
-                        "at {} {} (tailcall{})",
-                        filename.load(&self.evaluator.gc_handle),
-                        pos,
-                        PrintCount(*count)
-                    );
-                } else {
-                    println!(
-                        "at {} (tailcall{})",
-                        filename.load(&self.evaluator.gc_handle),
-                        PrintCount(*count)
-                    );
-                }
-            }
+            self.print_stack_trace_for_frame(e);
         }
 
         res
     }
+
+    fn print_stack_trace_for_frame(&mut self, e: &EvaluateError) {
+        if self.evaluator.is_inside_catch {
+            return;
+        }
+
+        if !self.evaluator.error_message_printed {
+            println!("\n\nError: {e:?}\n\n");
+            self.evaluator.error_message_printed = true;
+        }
+
+        let source_filename = self.source_filename.load(&self.evaluator.gc_handle);
+        match self
+            .state
+            .code_source_positions
+            .as_ref()
+            .map(|ptr| self.evaluator.gc_handle.load(ptr).as_ref()[self.insn_counter].clone())
+        {
+            Some(source_pos) => {
+                println!("at {source_filename} {source_pos}");
+            }
+            _ => {
+                println!("at {source_filename}",);
+            }
+        }
+
+        // print the tailcall entries if present
+        for (filename, pos, count) in self.tailcall_trace_buf.iter().rev() {
+            struct PrintCount(usize);
+            impl Display for PrintCount {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    if self.0 > 1 {
+                        f.write_fmt(format_args!(" {} times", self.0))
+                    } else {
+                        Ok(())
+                    }
+                }
+            }
+            if let Some(pos) = pos {
+                println!(
+                    "at {} {} (tailcall{})",
+                    filename.load(&self.evaluator.gc_handle),
+                    pos,
+                    PrintCount(*count)
+                );
+            } else {
+                println!(
+                    "at {} (tailcall{})",
+                    filename.load(&self.evaluator.gc_handle),
+                    PrintCount(*count)
+                );
+            }
+        }
+    }
+
     fn compute_result_inner(&mut self) -> Result<NixValue, EvaluateError> {
         'outer: loop {
             #[cfg(test)]
