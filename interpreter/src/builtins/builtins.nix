@@ -472,6 +472,14 @@ let
       names_unique_to_right = filter (name: !(hasAttr name left)) (attrNames right);
     in
       removeAttrs right names_unique_to_right;
+
+    listToAttrs = let
+      transfromas = as: {
+        "${as.name}" = as.value;
+      };
+      do_fold = foldl' (acc: elem: elem // acc) {};
+    in
+      lst: do_fold (map transfromas lst);
   };
 in
   builtins
