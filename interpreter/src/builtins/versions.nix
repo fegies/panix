@@ -94,7 +94,7 @@ let
         compare_iter 0;
 
   parseDrvName = input: let
-    matchResult = match "^([^-]+)-(.+)$" input;
+    matchResult = match "^(.+[^-])-(-*[^-]+)$" input;
   in
     if matchResult == null
     then {
