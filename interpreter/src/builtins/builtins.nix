@@ -248,6 +248,7 @@ let
     bitXor = a: b: ___builtin_bitxor [a b];
     floor = ___builtin_floor;
     ceil = ___builtin_ceil;
+    functionArgs = ___builtin_functionArgs;
 
     concatStringsSep = separator: list: let
       pick = elemAt list;

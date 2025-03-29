@@ -114,6 +114,7 @@ enum BuiltinType {
     BitOr,
     Ceil,
     Floor,
+    FunctionArgs,
 }
 
 impl Builtins for NixBuiltins {
@@ -143,6 +144,7 @@ impl Builtins for NixBuiltins {
             "___builtin_mapAttrs" => BuiltinType::MapAttrs,
             "___builtin_concatStrings" => BuiltinType::ConcatStrings,
             "___builtin_stringLength" => BuiltinType::StringLength,
+            "___builtin_functionArgs" => BuiltinType::FunctionArgs,
             "___builtin_substring" => BuiltinType::Substring,
             "___builtin_replaceStrings" => BuiltinType::ReplaceStrings,
             "___builtin_attrValues" => BuiltinType::AttrValues,
@@ -261,8 +263,41 @@ impl Builtins for NixBuiltins {
             BuiltinType::Ceil => execute_ceil(evaluator, argument),
             BuiltinType::Floor => execute_floor(evaluator, argument),
             BuiltinType::ToJson => execute_tojson(evaluator, argument),
+            BuiltinType::FunctionArgs => execute_function_args(evaluator, argument),
         }
     }
+}
+
+fn execute_function_args(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let func = evaluator.force_thunk(argument)?.expect_function()?;
+
+    let args = match func.call_type {
+        crate::vm::opcodes::LambdaCallType::Simple => {
+            Attrset::build_from_entries(&mut Vec::new(), &mut evaluator.gc_handle)?
+        }
+        crate::vm::opcodes::LambdaCallType::Attrset {
+            keys,
+            includes_rest_pattern: _,
+        } => {
+            let keys = evaluator.gc_handle.load(&keys).as_ref().to_owned();
+            let mut keys = keys
+                .into_iter()
+                .map(|(name, is_required)| {
+                    evaluator
+                        .gc_handle
+                        .alloc(Thunk::Value(NixValue::Bool(!is_required)))
+                        .map(|v| (name, v))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Attrset::build_from_entries(&mut keys, &mut evaluator.gc_handle)?
+        }
+    };
+
+    Ok(NixValue::Attrset(args))
 }
 
 fn execute_tojson(
