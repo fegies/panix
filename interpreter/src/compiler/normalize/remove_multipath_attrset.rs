@@ -18,23 +18,20 @@ impl RemoveMultipathPass {
 
 impl Pass<'_> for RemoveMultipathPass {
     fn inspect_attrset(&mut self, attrset: &mut Attrset, _pos: SourcePosition) {
-        // first recurse down.
-        self.descend_attrset(attrset);
-
         // and now remove the multipath attrs on this level
         let mut collection = entry_collection::MultipathEntryCollection::new();
 
-        attrset.attrs.retain_mut(|(key, value)| match key {
-            parser::ast::AttrsetKey::Single(_) => true,
-            parser::ast::AttrsetKey::Multi(multi) => {
-                let key = core::mem::take(multi);
-                let value = core::mem::replace(value, get_null_expr());
-                collection.add_entry(key, value);
-                false
-            }
-        });
+        for (key, value) in attrset.attrs.drain(..) {
+            collection.add_entry(key, value);
+        }
+
+        // now, inspect the values that could not be flattened.
+        collection.inspect_entries(self);
 
         collection.to_attrs(&mut attrset.attrs);
+
+        // now, recurse down.
+        self.descend_attrset(attrset);
     }
 
     fn inspect_expr(&mut self, expr: &mut NixExpr<'_>) {

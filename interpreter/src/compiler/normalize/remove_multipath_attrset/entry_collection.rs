@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use parser::ast::{KnownNixStringContent, NixString};
+use parser::ast::{CompoundValue, KnownNixStringContent, NixExprContent, NixString};
 
 use super::*;
 pub struct MultipathEntryCollection<'a> {
@@ -8,6 +8,7 @@ pub struct MultipathEntryCollection<'a> {
     // attributes that we either found to be duplicate or that need to be evaluated
     // at runtime
     extra_attrs: Vec<(AttrsetKey<'a>, NixExpr<'a>)>,
+    is_recursive: bool,
 }
 
 enum MultipathEntry<'a> {
@@ -39,6 +40,7 @@ impl<'a> MultipathEntryCollection<'a> {
         Self {
             entries: BTreeMap::new(),
             extra_attrs: Vec::new(),
+            is_recursive: false,
         }
     }
 
@@ -76,18 +78,55 @@ impl<'a> MultipathEntryCollection<'a> {
                         }
                     }
                     _ => {
-                        // no further key segments. We can just try to insert here.
-                        match self.entries.entry(first_key_content.clone()) {
-                            std::collections::btree_map::Entry::Vacant(v) => {
-                                // all ok, we can just put the value in.
-                                v.insert((first_key.position, MultipathEntry::Value(value)));
+                        // no further key segments.
+                        // If the current value is an attrset, we need to break it down further to
+                        // enable it to be merged with other items.
+                        // Other values are just inserted here.
+                        if let NixExprContent::CompoundValue(CompoundValue::Attrset(attrset)) =
+                            value.content
+                        {
+                            let entry = self
+                                .entries
+                                .entry(first_key_content.clone())
+                                .or_insert_with(|| {
+                                    (
+                                        sourcepos,
+                                        MultipathEntry::Nested(MultipathEntryCollection::new()),
+                                    )
+                                });
+
+                            if let MultipathEntry::Value(v) = &mut entry.1 {
+                                let v = core::mem::replace(v, get_null_expr());
+                                self.extra_attrs.push((AttrsetKey::Single(first_key), v));
+                                entry.1 = MultipathEntry::Nested(MultipathEntryCollection::new());
                             }
-                            std::collections::btree_map::Entry::Occupied(_) => {
-                                // we have detected a conflict!
-                                // To defer the error to evaluation time,
-                                // we intentionally write the duped value into the extra_attrs
-                                self.extra_attrs
-                                    .push((AttrsetKey::Single(first_key), value));
+
+                            let next_level = match &mut entry.1 {
+                                MultipathEntry::Nested(nested) => nested,
+                                _ => unreachable!(), // it must be nested becaue we have just
+                                                     // removed the other option above.
+                            };
+
+                            if attrset.is_recursive {
+                                next_level.is_recursive = true;
+                            }
+
+                            for (key, value) in attrset.attrs {
+                                next_level.add_entry(key, value);
+                            }
+                        } else {
+                            match self.entries.entry(first_key_content.clone()) {
+                                std::collections::btree_map::Entry::Vacant(v) => {
+                                    // all ok, we can just put the value in.
+                                    v.insert((first_key.position, MultipathEntry::Value(value)));
+                                }
+                                std::collections::btree_map::Entry::Occupied(_) => {
+                                    // we have detected a conflict!
+                                    // To defer the error to evaluation time,
+                                    // we intentionally write the duped value into the extra_attrs
+                                    self.extra_attrs
+                                        .push((AttrsetKey::Single(first_key), value));
+                                }
                             }
                         }
                     }
@@ -107,10 +146,17 @@ impl<'a> MultipathEntryCollection<'a> {
         }
     }
 
-    pub fn add_entry(&mut self, key_segments: Vec<NixString<'a>>, value: NixExpr<'a>) {
-        let mut iter = key_segments.into_iter();
-        if let Some(first) = iter.next() {
-            self.add_entry_inner(first, iter, value);
+    pub fn add_entry(&mut self, key: AttrsetKey<'a>, value: NixExpr<'a>) {
+        match key {
+            AttrsetKey::Single(nix_string) => {
+                self.add_entry_inner(nix_string, core::iter::empty(), value)
+            }
+            AttrsetKey::Multi(vec) => {
+                let mut iter = vec.into_iter();
+                if let Some(first) = iter.next() {
+                    self.add_entry_inner(first, iter, value);
+                }
+            }
         }
     }
 
@@ -120,12 +166,13 @@ impl<'a> MultipathEntryCollection<'a> {
                 MultipathEntry::Value(value) => value,
                 MultipathEntry::Nested(nested) => {
                     let mut inner_attrs = Vec::new();
+                    let is_recursive = nested.is_recursive;
                     nested.to_attrs(&mut inner_attrs);
                     NixExpr {
                         position: sourcepos,
                         content: parser::ast::NixExprContent::CompoundValue(
                             parser::ast::CompoundValue::Attrset(Attrset {
-                                is_recursive: false,
+                                is_recursive,
                                 inherit_keys: Vec::new(),
                                 attrs: inner_attrs,
                             }),
@@ -140,5 +187,26 @@ impl<'a> MultipathEntryCollection<'a> {
             dest_buffer.push((key, value));
         }
         dest_buffer.append(&mut self.extra_attrs);
+    }
+
+    pub fn inspect_entries<P: Pass<'a>>(&mut self, pass: &mut P) {
+        for (_key, (_, val)) in &mut self.entries {
+            match val {
+                MultipathEntry::Value(nix_expr) => pass.inspect_expr(nix_expr),
+                MultipathEntry::Nested(nested) => nested.inspect_entries(pass),
+            }
+        }
+
+        for (key, val) in &mut self.extra_attrs {
+            match key {
+                AttrsetKey::Single(nix_string) => pass.inspect_nix_string(nix_string),
+                AttrsetKey::Multi(vec) => {
+                    for part in vec {
+                        pass.inspect_nix_string(part);
+                    }
+                }
+            }
+            pass.inspect_expr(val);
+        }
     }
 }
