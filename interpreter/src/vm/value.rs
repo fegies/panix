@@ -217,6 +217,78 @@ impl Attrset {
         Ok(Attrset { entries })
     }
 
+    pub fn build_from_entries_merging(
+        entries: &mut Vec<(NixString, GcPointer<Thunk>)>,
+        evaluator: &mut Evaluator,
+    ) -> Result<Attrset, EvaluateError> {
+        let gc_handle = &mut evaluator.gc_handle;
+        entries.sort_by(|(a, _), (b, _)| a.load(gc_handle).cmp(b.load(gc_handle)));
+
+        let mut dedup_error = None;
+        entries.dedup_by(|(left_key, left_val), (right_key, right_val)| {
+            if dedup_error.is_some() {
+                return false;
+            }
+
+            if left_key.load(&evaluator.gc_handle) == right_key.load(&evaluator.gc_handle) {
+                match try_merge_attrsets(evaluator, left_val, right_val) {
+                    Ok(deduped_value) => {
+                        *right_val = deduped_value;
+                        true
+                    }
+                    Err(e) => {
+                        dedup_error = Some(e);
+                        false
+                    }
+                }
+            } else {
+                false
+            }
+        });
+
+        if let Some(err) = dedup_error {
+            return Err(err);
+        }
+
+        let entries = evaluator.gc_handle.alloc_vec(entries)?;
+        return Ok(Attrset { entries });
+
+        fn try_merge_attrsets(
+            evaluator: &mut Evaluator,
+            left: &GcPointer<Thunk>,
+            right: &GcPointer<Thunk>,
+        ) -> Result<GcPointer<Thunk>, EvaluateError> {
+            // We have a duplicate attribute if one of the two passed values is not actually
+            // an attrset and as such may not be merged.
+            let left = evaluator
+                .force_thunk(left.clone())?
+                .expect_attrset()
+                .map_err(|_| EvaluateError::DuplicateAttrsetKey)?;
+            let right = evaluator
+                .force_thunk(right.clone())?
+                .expect_attrset()
+                .map_err(|_| EvaluateError::DuplicateAttrsetKey)?;
+
+            let mut result_entries = evaluator
+                .gc_handle
+                .load(&left.entries)
+                .as_ref()
+                .iter()
+                .chain(evaluator.gc_handle.load(&right.entries).as_ref().iter())
+                .cloned()
+                .collect();
+
+            let result_attrset =
+                Attrset::build_from_entries_merging(&mut result_entries, evaluator)?;
+
+            let result_thunk = evaluator
+                .gc_handle
+                .alloc(Thunk::Value(NixValue::Attrset(result_attrset)))?;
+
+            Ok(result_thunk)
+        }
+    }
+
     /// creates a new attribute set by merging other into self
     pub fn merge(self, other: Attrset, gc: &mut GcHandle) -> Result<Attrset, GcError> {
         let mut left_iter = gc

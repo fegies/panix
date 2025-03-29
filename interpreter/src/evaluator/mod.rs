@@ -273,9 +273,9 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                                         .expect("thunk stack exhausted unexpectedly");
                                     entries.push((key, value));
                                 }
-                                Attrset::build_from_entries(
+                                Attrset::build_from_entries_merging(
                                     &mut entries,
-                                    &mut self.evaluator.gc_handle,
+                                    &mut self.evaluator,
                                 )?
                             } else {
                                 let entries = self.evaluator.gc_handle.alloc_slice(&[])?;
