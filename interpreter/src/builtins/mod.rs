@@ -8,16 +8,20 @@ use std::{
     sync::LazyLock,
 };
 
-use gc::{GcError, GcHandle, GcPointer};
+use gc::{GcError, GcHandle, GcPointer, specialized_types::string::SimpleGcString};
 use gc_derive::Trace;
 use json_parser::JsonParser;
 use json_serializer::JsonWriter;
+use md5::{Digest, Md5};
 use parser::{
     ast::{Code, LetExpr, LetInExpr, NixExprContent},
     parse_nix,
 };
 use regex::Regex;
+use sha1::Sha1;
+use sha2::{Sha256, Sha512};
 
+mod hash;
 mod json_parser;
 mod json_serializer;
 
@@ -115,6 +119,7 @@ enum BuiltinType {
     Ceil,
     Floor,
     FunctionArgs,
+    HashString,
 }
 
 impl Builtins for NixBuiltins {
@@ -126,6 +131,7 @@ impl Builtins for NixBuiltins {
             "___builtin_throw" => BuiltinType::Throw,
             "___builtin_tryeval" => BuiltinType::TryEval,
             "___builtin_typeof" => BuiltinType::TypeOf,
+            "___builtin_hashString" => BuiltinType::HashString,
             "___builtin_tostring" => BuiltinType::ToString,
             "___builtin_map" => BuiltinType::Map,
             "___builtin_import" => BuiltinType::Import,
@@ -264,7 +270,48 @@ impl Builtins for NixBuiltins {
             BuiltinType::Floor => execute_floor(evaluator, argument),
             BuiltinType::ToJson => execute_tojson(evaluator, argument),
             BuiltinType::FunctionArgs => execute_function_args(evaluator, argument),
+            BuiltinType::HashString => execute_hash_string(evaluator, argument),
         }
+    }
+}
+
+fn execute_hash_string(
+    evaluator: &mut Evaluator<'_>,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let [typ, string] = evaluator
+        .force_thunk(argument)?
+        .expect_list()?
+        .expect_entries(&evaluator.gc_handle)?;
+
+    let typ = evaluator.force_thunk(typ)?.expect_string()?;
+    let string = evaluator.force_thunk(string)?.expect_string()?;
+
+    let gc = &mut evaluator.gc_handle;
+    let result = match typ.load(gc) {
+        "md5" => run_hash::<Md5>(gc, string),
+        "sha1" => run_hash::<Sha1>(gc, string),
+        "sha256" => run_hash::<Sha256>(gc, string),
+        "sha512" => run_hash::<Sha512>(gc, string),
+        _ => return Err(EvaluateError::Misc(Box::new(HashError {}))),
+    }?;
+
+    return Ok(NixValue::String(result.into()));
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("Invalid hash type selected")]
+    struct HashError {}
+
+    fn run_hash<D: Digest>(
+        gc: &mut GcHandle,
+        input: NixString,
+    ) -> Result<GcPointer<SimpleGcString>, GcError> {
+        let mut hasher = D::new();
+        hasher.update(input.load(gc));
+        let mut out_buffer = [0; 128];
+        let encoded = base16ct::lower::encode_str(&hasher.finalize(), &mut out_buffer)
+            .expect("the encoded hash to fit");
+        gc.alloc_string(encoded)
     }
 }
 
@@ -1023,6 +1070,7 @@ fn get_builtin_content(path: &Path) -> Option<&'static [u8]> {
     match path.as_os_str().as_bytes() {
         b"<<<___builtins>>>" => Some(include_bytes!("./builtins.nix")),
         b"<<<___versions>>>" => Some(include_bytes!("./versions.nix")),
+        b"<<<___cons>>>" => Some(include_bytes!("./cons.nix")),
         _ => None,
     }
 }
