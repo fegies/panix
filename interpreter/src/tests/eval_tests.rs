@@ -129,6 +129,11 @@ fn test_inherit_from_attrset() {
 }
 
 #[test]
+fn test_null_dynamic_attrset_key() {
+    eval_expr("{ ${null} = true; }", "{}");
+}
+
+#[test]
 fn test_list_without_spaces() {
     eval_expr("[(1)(2)]", "[1 2]");
 }

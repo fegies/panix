@@ -262,15 +262,17 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
                             let attrset = if num_keys > 0 {
                                 let mut entries = Vec::new();
                                 for _ in 0..num_keys {
-                                    let key = match self.pop()? {
-                                        NixValue::String(key) => key,
-                                        _ => return Err(EvaluateError::TypeError),
-                                    };
                                     let value = self
                                         .state
                                         .thunk_stack
                                         .pop()
                                         .expect("thunk stack exhausted unexpectedly");
+                                    let key = match self.pop()? {
+                                        NixValue::String(key) => key,
+                                        NixValue::Null => continue, // null dynamic args just mean
+                                        // skipped keys
+                                        _ => return Err(EvaluateError::TypeError),
+                                    };
                                     entries.push((key, value));
                                 }
                                 Attrset::build_from_entries_merging(
@@ -640,8 +642,11 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
 
                             self.state.local_stack.push(NixValue::Bool(result));
                         }
-                        VmOp::ConcatStrings(num) => {
-                            self.execute_concat_strings(num)?;
+                        VmOp::ConcatStrings {
+                            num_entries,
+                            allow_null_string,
+                        } => {
+                            self.execute_concat_strings(num_entries, allow_null_string)?;
                         }
                         VmOp::OverwriteThunk { stackref } => {
                             let mut new_thunk =
@@ -705,7 +710,26 @@ impl<'eval, 'gc> ThunkEvaluator<'eval, 'gc> {
             .ok_or(EvaluateError::ExecutionStackExhaustedUnexpectedly)
     }
 
-    fn execute_concat_strings(&mut self, count: u32) -> Result<(), EvaluateError> {
+    fn execute_concat_strings(
+        &mut self,
+        count: u16,
+        allow_null_string: bool,
+    ) -> Result<(), EvaluateError> {
+        if count == 1 {
+            let value = self
+                .state
+                .local_stack
+                .pop()
+                .ok_or(EvaluateError::ExecutionStackExhaustedUnexpectedly)?;
+            match &value {
+                NixValue::String(_) => {}
+                NixValue::Null if allow_null_string => {}
+                _ => return Err(EvaluateError::TypeError),
+            }
+            self.state.local_stack.push(value);
+            return Ok(());
+        }
+
         let source = core::iter::repeat_with(|| {
             self.state
                 .local_stack

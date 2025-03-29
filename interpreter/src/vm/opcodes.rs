@@ -120,7 +120,10 @@ pub enum VmOp {
     ConcatLists(u32),
 
     /// pops n strings from the stack, concatenates them and pushes the result
-    ConcatStrings(u32),
+    ConcatStrings {
+        num_entries: u16,
+        allow_null_string: bool,
+    },
 
     /// pops 2 values from the stack, concatenates them and pushes the result
     Add,

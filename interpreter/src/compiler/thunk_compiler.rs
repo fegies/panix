@@ -157,7 +157,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
             BasicValue::Int(i) => NixValue::Int(i),
             BasicValue::Float(f) => NixValue::Float(f),
             BasicValue::Path(p) => {
-                self.translate_string_value(lookup_scope, p)?;
+                self.translate_string_value(lookup_scope, p, false)?;
                 self.opcode_buf.push(
                     VmOp::CastToPath {
                         source_location: self.compiler.source_filename.clone(),
@@ -167,7 +167,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                 return Ok(());
             }
             BasicValue::String(s) => {
-                return self.translate_string_value(lookup_scope, s);
+                return self.translate_string_value(lookup_scope, s, false);
             }
             BasicValue::SearchPath(_) => {
                 unreachable!("search paths should have been removed by an ast pass")
@@ -184,6 +184,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
         s: ast::NixString<'src>,
+        allow_null_string: bool,
     ) -> Result<(), CompileError> {
         match s.content {
             parser::ast::NixStringContent::Known(known) => {
@@ -193,7 +194,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
             }
             parser::ast::NixStringContent::Interpolated(mut entries) => {
                 entries.reverse();
-                let num_entries = entries.len() as u32;
+                let num_entries = entries.len() as u16;
                 for entry in entries {
                     match entry {
                         parser::ast::InterpolationEntry::LiteralPiece(known) => {
@@ -207,8 +208,13 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                         }
                     }
                 }
-                self.opcode_buf
-                    .push(VmOp::ConcatStrings(num_entries), s.position);
+                self.opcode_buf.push(
+                    VmOp::ConcatStrings {
+                        num_entries,
+                        allow_null_string,
+                    },
+                    s.position,
+                );
             }
         }
         Ok(())
@@ -438,7 +444,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
 
                     let num_names = path.len();
                     for (name_idx, name) in path.into_iter().enumerate() {
-                        self.translate_string_value(lookup_scope, name)?;
+                        self.translate_string_value(lookup_scope, name, false)?;
                         self.opcode_buf
                             .push(VmOp::GetAttribute { push_error: true }, pos);
                         skip_to_default_indices.push(self.opcode_buf.len());
@@ -467,7 +473,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                 } else {
                     // straightforward, throwing case
                     for name in path {
-                        self.translate_string_value(lookup_scope, name)?;
+                        self.translate_string_value(lookup_scope, name, false)?;
                         self.opcode_buf
                             .push(VmOp::GetAttribute { push_error: false }, pos);
                     }
@@ -582,7 +588,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
             }
             parser::ast::Op::HasAttr { left, path } => match path {
                 ast::AttrsetKey::Single(name) => {
-                    self.translate_string_value(lookup_scope, name)?;
+                    self.translate_string_value(lookup_scope, name, false)?;
                     self.translate_to_ops(lookup_scope, *left)?;
                     self.opcode_buf.push(VmOp::HasAttribute, pos);
                 }
@@ -724,7 +730,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                 }
             };
 
-            self.translate_string_value(lookup_scope, key)?;
+            self.translate_string_value(lookup_scope, key, true)?;
             let push_thunk_op =
                 self.compile_subchunk(lookup_scope, &mut subcode_buf, &mut context_cache, value)?;
             self.opcode_buf.push(push_thunk_op, pos);
