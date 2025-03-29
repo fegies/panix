@@ -373,16 +373,16 @@ let
               left_head = left.head;
               right_head = right.head;
             in
-              if comparator left_head right_head
-              then # left is smaller
-                {
-                  head = left_head;
-                  tail = merge (left.tail) right;
-                }
-              else # right is smaller or equal
+              if comparator right_head left_head
+              then # right is smaller
                 {
                   head = right_head;
                   tail = merge left (right.tail);
+                }
+              else # left is smaller or equal
+                {
+                  head = left_head;
+                  tail = merge (left.tail) right;
                 }
           );
       # generates a sorted cons list covering the requested range.
