@@ -171,6 +171,7 @@ let
     functionArgs = ___builtin_functionArgs;
 
     hashString = type: string: ___builtin_hashString [type string];
+    hashFile = type: path: ___builtin_hashFile [type path];
 
     concatStringsSep = separator: list: let
       pick = elemAt list;

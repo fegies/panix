@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    fs::File,
     io::{self, Read},
     ops::Range,
     os::unix::ffi::OsStrExt,
@@ -27,6 +28,7 @@ mod json_serializer;
 
 use crate::{
     EvaluateError, Evaluator, InterpreterError, compile_source_with_nix_filename,
+    sandbox::Sandbox,
     vm::{
         opcodes::{ExecutionContext, ValueSource, VmOp},
         value::{self, Attrset, List, NixString, NixValue, Thunk},
@@ -57,6 +59,7 @@ pub fn get_builtins(handle: &mut GcHandle) -> Result<NixBuiltins, GcError> {
     Ok(NixBuiltins {
         import_cache: RefCell::new(HashMap::new()),
         native_name,
+        sandbox: Sandbox::new(Path::new("/").to_owned()),
     })
 }
 
@@ -78,6 +81,7 @@ fn build_builtins_expr() -> LetInExpr<'static> {
 pub struct NixBuiltins {
     import_cache: RefCell<HashMap<PathBuf, NixValue>>,
     native_name: NixString,
+    sandbox: Sandbox,
 }
 
 #[derive(Debug, Clone, Trace, Copy)]
@@ -120,6 +124,7 @@ enum BuiltinType {
     Floor,
     FunctionArgs,
     HashString,
+    HashFile,
 }
 
 impl Builtins for NixBuiltins {
@@ -132,6 +137,7 @@ impl Builtins for NixBuiltins {
             "___builtin_tryeval" => BuiltinType::TryEval,
             "___builtin_typeof" => BuiltinType::TypeOf,
             "___builtin_hashString" => BuiltinType::HashString,
+            "___builtin_hashFile" => BuiltinType::HashFile,
             "___builtin_tostring" => BuiltinType::ToString,
             "___builtin_map" => BuiltinType::Map,
             "___builtin_import" => BuiltinType::Import,
@@ -271,9 +277,60 @@ impl Builtins for NixBuiltins {
             BuiltinType::ToJson => execute_tojson(evaluator, argument),
             BuiltinType::FunctionArgs => execute_function_args(evaluator, argument),
             BuiltinType::HashString => execute_hash_string(evaluator, argument),
+            BuiltinType::HashFile => execute_hash_file(evaluator, &self.sandbox, argument),
         }
     }
 }
+
+fn execute_hash_file(
+    evaluator: &mut Evaluator<'_>,
+    sandbox: &Sandbox,
+    argument: GcPointer<Thunk>,
+) -> Result<NixValue, EvaluateError> {
+    let [typ, path] = evaluator
+        .force_thunk(argument)?
+        .expect_list()?
+        .expect_entries(&evaluator.gc_handle)?;
+
+    let typ = evaluator.force_thunk(typ)?.expect_string()?;
+    let path = evaluator.force_thunk(path)?.expect_path()?;
+
+    let file = sandbox.open_file(Path::new(path.resolved.load(&evaluator.gc_handle)))?;
+
+    let gc = &mut evaluator.gc_handle;
+    let result = match typ.load(gc) {
+        "md5" => run_hash::<Md5>(gc, file),
+        "sha1" => run_hash::<Sha1>(gc, file),
+        "sha256" => run_hash::<Sha256>(gc, file),
+        "sha512" => run_hash::<Sha512>(gc, file),
+        _ => return Err(EvaluateError::Misc(Box::new(HashError {}))),
+    }?;
+
+    return Ok(NixValue::String(result.into()));
+
+    fn run_hash<D: Digest>(
+        gc: &mut GcHandle,
+        mut input: File,
+    ) -> Result<GcPointer<SimpleGcString>, EvaluateError> {
+        let mut hasher = D::new();
+        let mut buffer = [0; 4096];
+        loop {
+            let bytes_read = input.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+        }
+        let encoded = base16ct::lower::encode_str(&hasher.finalize(), &mut buffer)
+            .expect("the encoded hash to fit");
+
+        Ok(gc.alloc_string(encoded)?)
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Invalid hash type selected")]
+struct HashError {}
 
 fn execute_hash_string(
     evaluator: &mut Evaluator<'_>,
@@ -297,10 +354,6 @@ fn execute_hash_string(
     }?;
 
     return Ok(NixValue::String(result.into()));
-
-    #[derive(thiserror::Error, Debug)]
-    #[error("Invalid hash type selected")]
-    struct HashError {}
 
     fn run_hash<D: Digest>(
         gc: &mut GcHandle,
@@ -1148,7 +1201,9 @@ impl NixBuiltins {
             compile_source_with_nix_filename(gc_handle, content, source_filename, self)
         } else {
             let mut file_content = Vec::new();
-            std::fs::File::open(source_path)?.read_to_end(&mut file_content)?;
+            self.sandbox
+                .open_file(source_path)?
+                .read_to_end(&mut file_content)?;
             compile_source_with_nix_filename(gc_handle, &file_content, source_filename, self)
         }
     }

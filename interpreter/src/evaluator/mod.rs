@@ -940,6 +940,13 @@ impl NixValue {
         }
     }
 
+    pub fn expect_path(self) -> Result<value::PathValue, EvaluateError> {
+        match self {
+            NixValue::Path(path) => Ok(path),
+            _ => Err(EvaluateError::TypeError),
+        }
+    }
+
     pub fn expect_list(self) -> Result<value::List, EvaluateError> {
         match self {
             NixValue::List(l) => Ok(l),
