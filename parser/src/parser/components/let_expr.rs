@@ -34,6 +34,21 @@ impl<'t, S: TokenSource<'t>> Parser<S> {
                     bindings.insert(ident, body);
                     self.expect(Token::Semicolon)?;
                 }
+                Token::StringBegin => {
+                    let cont = self.parse_simple_string(t.position)?;
+                    let ident = if let Some(ident) = cont.content.get_literal() {
+                        ident
+                    } else {
+                        return Err(crate::ParseError::UnexpectedToken(
+                            "Only simple strings allowed in let in".to_owned(),
+                        ));
+                    };
+
+                    self.expect(Token::Eq)?;
+                    let body = self.parse_expr()?;
+                    bindings.insert(ident, body);
+                    self.expect(Token::Semicolon)?;
+                }
                 Token::KwIn => {
                     break;
                 }
