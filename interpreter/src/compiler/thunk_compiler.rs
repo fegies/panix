@@ -1,13 +1,19 @@
 use std::collections::BTreeMap;
 
-use gc::{GcError, GcHandle, GcPointer, specialized_types::array::Array};
-use parser::ast::{
-    self, BasicValue, IfExpr, KnownNixStringContent, Lambda, NixExpr, SourcePosition,
+use super::normalize::normalized_ast::{
+    BasicValue, IfExpr, KnownNixStringContent, Lambda, NixExpr, SourcePosition,
 };
+use gc::{GcError, GcHandle, GcPointer, specialized_types::array::Array};
 
 use crate::{
     builtins::Builtins,
-    compiler::{get_null_expr, lookup_scope::LocalThunkRef},
+    compiler::{
+        get_normalized_null_expr,
+        lookup_scope::LocalThunkRef,
+        normalize::normalized_ast::{
+            self, LambdaArgs, LetInExpr, NixExprContent, NixStringContent,
+        },
+    },
     vm::{
         opcodes::{
             CompareMode, ExecutionContext, LambdaAllocArgs, LambdaCallType, ThunkAllocArgs,
@@ -133,15 +139,13 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
         expr: NixExpr<'src>,
     ) -> Result<(), CompileError> {
         match expr.content {
-            parser::ast::NixExprContent::BasicValue(b) => {
+            NixExprContent::BasicValue(b) => {
                 self.translate_basic_value(lookup_scope, b, expr.position)
             }
-            parser::ast::NixExprContent::CompoundValue(c) => {
+            NixExprContent::CompoundValue(c) => {
                 self.translate_compound_value(lookup_scope, c, expr.position)
             }
-            parser::ast::NixExprContent::Code(c) => {
-                self.translate_code(lookup_scope, c, expr.position)
-            }
+            NixExprContent::Code(c) => self.translate_code(lookup_scope, c, expr.position),
         }
     }
 
@@ -169,9 +173,6 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
             BasicValue::String(s) => {
                 return self.translate_string_value(lookup_scope, s, false);
             }
-            BasicValue::SearchPath(_) => {
-                unreachable!("search paths should have been removed by an ast pass")
-            }
         };
         self.opcode_buf.push(
             VmOp::PushImmediate(self.compiler.gc_handle.alloc(value)?),
@@ -183,27 +184,27 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
     fn translate_string_value(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        s: ast::NixString<'src>,
+        s: normalized_ast::NixString<'src>,
         allow_null_string: bool,
     ) -> Result<(), CompileError> {
         match s.content {
-            parser::ast::NixStringContent::Known(known) => {
+            NixStringContent::Known(known) => {
                 let literal = self.compiler.alloc_string(known)?;
                 let op = VmOp::PushImmediate(literal);
                 self.opcode_buf.push(op, s.position);
             }
-            parser::ast::NixStringContent::Interpolated(mut entries) => {
+            NixStringContent::Interpolated(mut entries) => {
                 entries.reverse();
                 let num_entries = entries.len() as u16;
                 for entry in entries {
                     match entry {
-                        parser::ast::InterpolationEntry::LiteralPiece(known) => {
+                        normalized_ast::InterpolationEntry::LiteralPiece(known) => {
                             let value = self
                                 .compiler
                                 .alloc_string(KnownNixStringContent::Literal(known))?;
                             self.opcode_buf.push(VmOp::PushImmediate(value), s.position);
                         }
-                        parser::ast::InterpolationEntry::Expression(expr) => {
+                        normalized_ast::InterpolationEntry::Expression(expr) => {
                             self.translate_to_ops(lookup_scope, expr)?;
                         }
                     }
@@ -223,27 +224,21 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
     fn translate_code(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        code: parser::ast::Code<'src>,
+        code: normalized_ast::Code<'src>,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match code {
-            parser::ast::Code::LetExpr(let_expr) => match let_expr {
-                ast::LetExpr::LetIn(let_in_expr) => {
-                    self.translate_let_expr(lookup_scope, let_in_expr, pos)
-                }
-                ast::LetExpr::AttrsetLet(_attrset) => {
-                    unreachable!("let attrset expressions should have been removed by an ast pass")
-                }
-            },
-            parser::ast::Code::ValueReference { ident } => {
+            normalized_ast::Code::LetExpr(let_in_expr) => {
+                self.translate_let_expr(lookup_scope, let_in_expr, pos)
+            }
+            normalized_ast::Code::ValueReference { ident } => {
                 self.translate_value_ref(lookup_scope, ident, pos)
             }
-            parser::ast::Code::WithExpr(_) => {
-                unreachable!("With expressions should have been removed by an ast pass")
+            normalized_ast::Code::Lambda(lambda) => {
+                self.translate_lambda(lookup_scope, lambda, pos)
             }
-            parser::ast::Code::Lambda(lambda) => self.translate_lambda(lookup_scope, lambda, pos),
-            parser::ast::Code::Op(op) => self.translate_op(lookup_scope, op, pos),
-            parser::ast::Code::IfExpr(IfExpr {
+            normalized_ast::Code::Op(op) => self.translate_op(lookup_scope, op, pos),
+            normalized_ast::Code::IfExpr(IfExpr {
                 condition,
                 truthy_case,
                 falsy_case,
@@ -272,9 +267,6 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
 
                 Ok(())
             }
-            parser::ast::Code::AssertExpr(_) => {
-                unreachable!("assert should have ben removed by an ast pass")
-            }
         }
     }
 
@@ -291,7 +283,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
         // the thunk stack.
 
         let call_requirements = match lambda.args {
-            ast::LambdaArgs::AttrsetBinding { total_name, args } => {
+            LambdaArgs::AttrsetBinding { total_name, args } => {
                 // if the total name was not provided, we define it as a string that is
                 // not actually a valid identifier in the nix language to avoid conflicts.
                 let total_name = total_name.unwrap_or("<arg>");
@@ -388,7 +380,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                     includes_rest_pattern: args.includes_rest_pattern,
                 }
             }
-            ast::LambdaArgs::SimpleBinding(arg_name) => {
+            LambdaArgs::SimpleBinding(arg_name) => {
                 subscope.push_local_thunkref(arg_name, LocalThunkRef(0));
 
                 LambdaCallType::Simple
@@ -421,11 +413,11 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
     fn translate_op(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        op: parser::ast::Op<'src>,
+        op: normalized_ast::Op<'src>,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match op {
-            parser::ast::Op::AttrRef {
+            normalized_ast::Op::AttrRef {
                 left,
                 path,
                 default,
@@ -479,7 +471,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                     }
                 }
             }
-            parser::ast::Op::Call { function, arg } => {
+            normalized_ast::Op::Call { function, arg } => {
                 self.translate_to_ops(lookup_scope, *function)?;
                 // the arg thunk
                 let alloc_insn = self.compile_subchunk(
@@ -492,24 +484,24 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
                 self.opcode_buf.push(alloc_insn, pos);
                 self.opcode_buf.push(VmOp::Call, pos);
             }
-            parser::ast::Op::Binop {
+            normalized_ast::Op::Binop {
                 left,
                 right,
                 opcode,
             } => {
                 self.translate_to_ops(lookup_scope, *left)?;
                 let vmop = match opcode {
-                    parser::ast::BinopOpcode::Add => VmOp::Add,
-                    parser::ast::BinopOpcode::ListConcat => VmOp::ConcatLists(2),
-                    parser::ast::BinopOpcode::AttrsetMerge => VmOp::MergeAttrsets,
-                    parser::ast::BinopOpcode::Equals => VmOp::Compare(CompareMode::Equal),
-                    parser::ast::BinopOpcode::NotEqual => VmOp::Compare(CompareMode::NotEqual),
-                    parser::ast::BinopOpcode::Subtract => VmOp::Sub,
-                    parser::ast::BinopOpcode::Multiply => VmOp::Mul,
-                    parser::ast::BinopOpcode::Divide => VmOp::Div,
+                    normalized_ast::BinopOpcode::Add => VmOp::Add,
+                    normalized_ast::BinopOpcode::ListConcat => VmOp::ConcatLists(2),
+                    normalized_ast::BinopOpcode::AttrsetMerge => VmOp::MergeAttrsets,
+                    normalized_ast::BinopOpcode::Equals => VmOp::Compare(CompareMode::Equal),
+                    normalized_ast::BinopOpcode::NotEqual => VmOp::Compare(CompareMode::NotEqual),
+                    normalized_ast::BinopOpcode::Subtract => VmOp::Sub,
+                    normalized_ast::BinopOpcode::Multiply => VmOp::Mul,
+                    normalized_ast::BinopOpcode::Divide => VmOp::Div,
                     // these 3 are lazy in the second argument. We emulate that
                     // with a conditional jump
-                    parser::ast::BinopOpcode::LogicalOr => {
+                    normalized_ast::BinopOpcode::LogicalOr => {
                         self.opcode_buf.push(VmOp::SkipUnless(2), pos);
                         // true branch
                         self.opcode_buf.push(
@@ -528,7 +520,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
 
                         return Ok(());
                     }
-                    parser::ast::BinopOpcode::LogicalAnd => {
+                    normalized_ast::BinopOpcode::LogicalAnd => {
                         let condition_idx = self.opcode_buf.len();
                         self.opcode_buf.push(VmOp::SkipUnless(0), pos);
 
@@ -548,7 +540,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
 
                         return Ok(());
                     }
-                    parser::ast::BinopOpcode::LogicalImplication => {
+                    normalized_ast::BinopOpcode::LogicalImplication => {
                         // an implication can be written as !a || b
 
                         let condition_idx = self.opcode_buf.len();
@@ -570,36 +562,31 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
 
                         return Ok(());
                     }
-                    parser::ast::BinopOpcode::LessThanOrEqual => {
+                    normalized_ast::BinopOpcode::LessThanOrEqual => {
                         VmOp::Compare(CompareMode::LessThanOrEqual)
                     }
-                    parser::ast::BinopOpcode::LessThanStrict => {
+                    normalized_ast::BinopOpcode::LessThanStrict => {
                         VmOp::Compare(CompareMode::LessThanStrict)
                     }
-                    parser::ast::BinopOpcode::GreaterOrEqual => {
+                    normalized_ast::BinopOpcode::GreaterOrEqual => {
                         VmOp::Compare(CompareMode::GreaterOrEqual)
                     }
-                    parser::ast::BinopOpcode::GreaterThanStrict => {
+                    normalized_ast::BinopOpcode::GreaterThanStrict => {
                         VmOp::Compare(CompareMode::GreaterThanStrict)
                     }
                 };
                 self.translate_to_ops(lookup_scope, *right)?;
                 self.opcode_buf.push(vmop, pos);
             }
-            parser::ast::Op::HasAttr { left, path } => match path {
-                ast::AttrsetKey::Single(name) => {
-                    self.translate_string_value(lookup_scope, name, false)?;
-                    self.translate_to_ops(lookup_scope, *left)?;
-                    self.opcode_buf.push(VmOp::HasAttribute, pos);
-                }
-                ast::AttrsetKey::Multi(_) => {
-                    unreachable!("multipart hasattr should have been removed by an ast pass")
-                }
-            },
-            parser::ast::Op::Monop { opcode, body } => {
+            normalized_ast::Op::HasAttr { left, path } => {
+                self.translate_string_value(lookup_scope, path, false)?;
+                self.translate_to_ops(lookup_scope, *left)?;
+                self.opcode_buf.push(VmOp::HasAttribute, pos);
+            }
+            normalized_ast::Op::Monop { opcode, body } => {
                 let opcode = match opcode {
-                    parser::ast::MonopOpcode::NumericMinus => VmOp::NumericNegate,
-                    parser::ast::MonopOpcode::BinaryNot => VmOp::BinaryNot,
+                    normalized_ast::MonopOpcode::NumericMinus => VmOp::NumericNegate,
+                    normalized_ast::MonopOpcode::BinaryNot => VmOp::BinaryNot,
                 };
                 self.translate_to_ops(lookup_scope, *body)?;
                 self.opcode_buf.push(opcode, pos);
@@ -611,14 +598,14 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
     fn translate_compound_value(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        value: parser::ast::CompoundValue<'src>,
+        value: normalized_ast::CompoundValue<'src>,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
         match value {
-            parser::ast::CompoundValue::Attrset(attrset) => {
+            normalized_ast::CompoundValue::Attrset(attrset) => {
                 self.translate_attrset(lookup_scope, attrset, pos)
             }
-            parser::ast::CompoundValue::List(parser::ast::List { entries }) => {
+            normalized_ast::CompoundValue::List(normalized_ast::List { entries }) => {
                 self.translate_list(lookup_scope, entries, pos)
             }
         }
@@ -627,13 +614,9 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
     fn translate_attrset(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        mut attrset: ast::Attrset<'src>,
+        mut attrset: normalized_ast::Attrset<'src>,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
-        if attrset.is_recursive {
-            unreachable!("recursive attrsets should have been removed by an ast pass");
-        }
-
         let mut context_cache = BTreeMap::new();
         let mut subcode_buf = OpcodeBuf::default();
 
@@ -646,7 +629,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
             // source expr.
             for entry in &mut attrset.inherit_keys {
                 if let Some(src) = entry.source.as_mut() {
-                    let src = core::mem::replace(src.as_mut(), get_null_expr());
+                    let src = core::mem::replace(src.as_mut(), get_normalized_null_expr());
                     let push_thunk_op = self.compile_subchunk(
                         lookup_scope,
                         &mut subcode_buf,
@@ -723,13 +706,6 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
 
         // inherit entries are done, emit the normal key-value pairs
         for (key, value) in attrset.attrs {
-            let key = match key {
-                ast::AttrsetKey::Single(key) => key,
-                ast::AttrsetKey::Multi(_) => {
-                    unreachable!("mutlipart attrsets shold have been removed by an ast pass.")
-                }
-            };
-
             self.translate_string_value(lookup_scope, key, true)?;
             let push_thunk_op =
                 self.compile_subchunk(lookup_scope, &mut subcode_buf, &mut context_cache, value)?;
@@ -853,7 +829,7 @@ impl<'compiler, 'src, 'gc, 'builtins, 'buffer> ThunkCompiler<'compiler, 'gc, 'bu
     fn translate_let_expr(
         &mut self,
         lookup_scope: &mut LookupScope<'src, '_>,
-        let_expr: ast::LetInExpr<'src>,
+        let_expr: LetInExpr<'src>,
         pos: SourcePosition,
     ) -> Result<(), CompileError> {
         let height_before = self.current_thunk_stack_height;

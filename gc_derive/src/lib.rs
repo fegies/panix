@@ -2,7 +2,7 @@ use proc_macro2::Span;
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{Data, DeriveInput, Field, Variant, parse_macro_input, spanned::Spanned};
 
-/// derive the content of the trace trait
+/// derive the content of the trace trait, allowing this type to be placed on a GC heap
 #[proc_macro_derive(Trace)]
 pub fn derive_tracable(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

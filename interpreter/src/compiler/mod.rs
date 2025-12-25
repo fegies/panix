@@ -1,11 +1,14 @@
 use bumpalo::Bump;
 use gc::{GcError, GcHandle, GcPointer};
 use lookup_scope::ScopeBacking;
-use parser::ast::{KnownNixStringContent, NixExpr, SourcePosition};
+use parser::ast::SourcePosition;
 use thunk_compiler::translate_to_thunk;
 
 use crate::{
     builtins::NixBuiltins,
+    compiler::normalize::normalized_ast::{
+        BasicValue, KnownNixStringContent, NixExpr, NixExprContent,
+    },
     vm::value::{self, NixValue, Thunk},
 };
 
@@ -13,10 +16,16 @@ mod lookup_scope;
 mod normalize;
 mod thunk_compiler;
 
-fn get_null_expr() -> NixExpr<'static> {
-    NixExpr {
+fn get_null_expr() -> parser::ast::NixExpr<'static> {
+    parser::ast::NixExpr {
         position: SourcePosition { line: 0, column: 0 },
         content: parser::ast::NixExprContent::BasicValue(parser::ast::BasicValue::Null),
+    }
+}
+fn get_normalized_null_expr() -> NixExpr<'static> {
+    NixExpr {
+        position: SourcePosition { line: 0, column: 0 },
+        content: NixExprContent::BasicValue(BasicValue::Null),
     }
 }
 
@@ -30,12 +39,12 @@ pub enum CompileError {
 
 pub fn translate_expression<'src>(
     gc_handle: &mut GcHandle,
-    mut expr: NixExpr<'src>,
+    expr: parser::ast::NixExpr<'src>,
     bump: &'src Bump,
     source_filename: value::NixString,
     builtins: &NixBuiltins,
 ) -> Result<Thunk, CompileError> {
-    normalize::normalize_ast(&mut expr, bump);
+    let expr = normalize::normalize_ast(expr, bump);
 
     let mut compiler = Compiler {
         cached_values: CachedValues::new(gc_handle)?,
