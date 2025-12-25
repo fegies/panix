@@ -10,7 +10,7 @@ pub(crate) mod widen {
     ///
     /// Done this way to get around the ptr_metadata feature not being stable
     #[inline]
-    pub(crate) fn widen<T: HeapObject + 'static>(raw: *mut ()) -> *const (dyn HeapObject) {
+    pub(crate) fn widen<T: HeapObject + 'static>(raw: *mut ()) -> *const dyn HeapObject {
         raw as *mut u8 as *mut T
     }
 

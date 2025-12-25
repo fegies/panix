@@ -30,7 +30,7 @@ where
     }
 }
 
-fn parse_nix_inner(input: &[u8]) -> ParseResult<NixExpr> {
+fn parse_nix_inner(input: &[u8]) -> ParseResult<NixExpr<'_>> {
     let res = lexer::run(input, |tokens| {
         let source = Multipeek::new(tokens);
         parse_complete(source)
@@ -48,6 +48,6 @@ fn parse_nix_inner(input: &[u8]) -> ParseResult<NixExpr> {
 }
 
 // this is just a convenient point to cut off the stack trace.
-pub fn parser_entrypoint(input: &[u8]) -> ParseResult<NixExpr> {
+pub fn parser_entrypoint(input: &[u8]) -> ParseResult<NixExpr<'_>> {
     parse_nix_inner(input)
 }

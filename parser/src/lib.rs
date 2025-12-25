@@ -21,6 +21,6 @@ pub enum ParseError {
     AttributePathConflict(String),
 }
 
-pub fn parse_nix(input: &[u8]) -> ParseResult<ast::NixExpr> {
+pub fn parse_nix(input: &[u8]) -> ParseResult<ast::NixExpr<'_>> {
     parser_entrypoint(input)
 }
