@@ -8,5 +8,4 @@ edition = "2024"
 [dependencies]
 memchr.workspace = true
 lexer_impedance_matcher.workspace = true
-gc_derive.workspace = true
 thiserror.workspace = true
