@@ -76,13 +76,13 @@ pub enum GcError {
 pub type GcResult<T> = Result<T, GcError>;
 
 struct ScavengePendingSet {
-    entries: [VecDeque<Rc<Page>>; GC_GEN_HIGHEST as usize],
+    entries: [VecDeque<Rc<Page>>; GC_NUM_GENERATIONS],
 }
 impl ScavengePendingSet {
     pub const fn new() -> Self {
         const EMPTY_QUEUE: VecDeque<Rc<Page>> = VecDeque::new();
         Self {
-            entries: [EMPTY_QUEUE; GC_GEN_HIGHEST as usize],
+            entries: [EMPTY_QUEUE; _],
         }
     }
 }
@@ -266,18 +266,17 @@ impl GcHandle {
         match func(self) {
             Some(res) => Ok(res),
             None => {
-                self.run_gc();
+                self.run_gc(None);
                 func(self).ok_or(GcError::ObjectBiggerThanPage)
             }
         }
     }
-    fn run_gc(&mut self) {
+    fn run_gc(&mut self, target_generation: Option<Generation>) {
         println!("gc triggered!");
 
-        // self.alloc_pages.refresh_allocation_page(Generation(0));
-        // return;
+        let target_generation = target_generation
+            .unwrap_or_else(|| self.alloc_pages.suggest_collection_target_generation());
 
-        let target_generation = self.alloc_pages.suggest_collection_target_generation();
         self.alloc_pages.alloc_counters[target_generation.0 as usize].collection_count += 1;
         println!("collecting gen {}", target_generation.0);
 
@@ -365,7 +364,7 @@ impl GcHandle {
     }
 
     pub fn force_collect(&mut self) {
-        self.run_gc();
+        self.run_gc(Some(Generation(GC_GEN_HIGHEST)));
     }
 
     pub fn alloc<TData: HeapObject + 'static>(
@@ -377,7 +376,7 @@ impl GcHandle {
         {
             Ok(ptr) => ptr,
             Err(value) => {
-                self.run_gc();
+                self.run_gc(None);
                 self.alloc_pages.active_pages[0]
                     .try_alloc(value, &mut self.alloc_pages.alloc_counters[0])
                     .map_err(|_| GcError::ObjectBiggerThanPage)?
