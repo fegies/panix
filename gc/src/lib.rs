@@ -266,7 +266,7 @@ impl GcHandle {
         match func(self) {
             Some(res) => Ok(res),
             None => {
-                self.clear_nursery()?;
+                self.run_gc();
                 func(self).ok_or(GcError::ObjectBiggerThanPage)
             }
         }
@@ -281,7 +281,12 @@ impl GcHandle {
         self.alloc_pages.alloc_counters[target_generation.0 as usize].collection_count += 1;
         println!("collecting gen {}", target_generation.0);
 
-        let mut previous_pages = Vec::new();
+        let mut previous_pages = Vec::with_capacity(
+            (&self.alloc_pages.used_pages_current[..target_generation.0 as usize])
+                .iter()
+                .map(|p| p.len())
+                .sum(),
+        );
 
         // clear out the previous alloc pages and used tracker.
 
@@ -363,11 +368,6 @@ impl GcHandle {
         self.run_gc();
     }
 
-    fn clear_nursery(&mut self) -> GcResult<()> {
-        self.run_gc();
-        Ok(())
-    }
-
     pub fn alloc<TData: HeapObject + 'static>(
         &mut self,
         data: TData,
@@ -377,7 +377,7 @@ impl GcHandle {
         {
             Ok(ptr) => ptr,
             Err(value) => {
-                self.clear_nursery()?;
+                self.run_gc();
                 self.alloc_pages.active_pages[0]
                     .try_alloc(value, &mut self.alloc_pages.alloc_counters[0])
                     .map_err(|_| GcError::ObjectBiggerThanPage)?
